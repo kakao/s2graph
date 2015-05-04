@@ -47,7 +47,8 @@
 <p><strong>Table of Contents</strong>  <em>generated with <a href="http://doctoc.herokuapp.com/">DocToc</a></em></p>
 
 <ul>
-<li><a href="#trying-it-out">Trying It Out</a></li>
+<li><a href="#requirements">Requirements</a></li>
+<li><a href="#getting-started">Getting Started</a></li>
 <li><a href="#the-data-model">The Data Model</a></li>
 <li><a href="#rest-api-glossary">REST API Glossary</a></li>
 <li>
@@ -55,7 +56,6 @@
 
 <ul>
 <li><a href="#01-service-definition">0.1 service definition</a></li>
-<li><a href="#02-optional-service-definition">0.2 optional service definition</a></li>
 </ul>
 </li>
 <li>
@@ -140,12 +140,14 @@
 <ul>
 <li><a href="#edge-format">Edge Format</a></li>
 <li><a href="#vertex-format">Vertex Format</a></li>
+<li><a href="#build">Build</a></li>
 <li>
 <a href="#source-data-storage-options">Source Data Storage Options</a>
 
 <ul>
 <li><a href="#1-when-the-source-data-is-in-hdfs">1. When the source data is in HDFS.</a></li>
-<li><a href="#2-when-the-source-data-is-in-the-local-file-system">2. When the source data is in the local file system.</a></li>
+<li><a href="#2-when-the-source-data-is-in-kafka">2. When the source data is in Kafka.</a></li>
+<li><a href="#3-online-migration">3. online migration</a></li>
 </ul>
 </li>
 </ul>
@@ -164,9 +166,31 @@
 </li>
 </ul>
 </li>
+<li>
+<a href="#new-benchmark-asynchbase">new benchmark (asynchbase)</a>
+
+<ul>
+<li><a href="#1-one-step-query">1. one step query</a></li>
+<li><a href="#2-two-step-query">2. two step query</a></li>
+<li><a href="#3-three-step-query">3. three step query</a></li>
+</ul>
+</li>
 </ul>
 
 
+
+<h2>
+<a id="requirements" class="anchor" href="#requirements" aria-hidden="true"><span class="octicon octicon-link"></span></a>Requirements</h2>
+
+<ul>
+<li>
+<a href="https://www.mysql.com/">mysql</a>: store metas and schemas.</li>
+<li>
+<a href="http://kafka.apache.org/">Apache Kafka</a>: store incomming events. also use kafka as primary real time event source.</li>
+<li>
+<a href="http://hbase.apache.org/">Apache HBase</a>: primary datastorage.</li>
+<li>(optional)<a href="https://spark.apache.org/">Apache Spark</a>: use this as streaming processing engine consume events from Kafka to s2graph. also use this for bulk load process.</li>
+</ul>
 
 <h2>
 <a id="getting-started" class="anchor" href="#getting-started" aria-hidden="true"><span class="octicon octicon-link"></span></a>Getting Started</h2>
@@ -202,6 +226,11 @@
 <p>install dependencies on local.</p>
 
 <pre><code>cd asynchbase; mvn install 
+</code></pre>
+
+<p>create database schema</p>
+
+<pre><code>checkout mysql/mysql/schema.sql and run schema.sql on mysql
 </code></pre>
 
 <p>compile(optional)</p>
