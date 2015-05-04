@@ -1,0 +1,1970 @@
+<!DOCTYPE html>
+<html>
+
+  <head>
+    <meta charset='utf-8'>
+    <meta http-equiv="X-UA-Compatible" content="chrome=1">
+    <meta name="description" content="S2graph : ">
+
+    <link rel="stylesheet" type="text/css" media="screen" href="stylesheets/stylesheet.css">
+
+    <title>S2graph</title>
+  </head>
+
+  <body>
+
+    <!-- HEADER -->
+    <div id="header_wrap" class="outer">
+        <header class="inner">
+          <a id="forkme_banner" href="https://github.com/daumkakao/s2graph">View on GitHub</a>
+
+          <h1 id="project_title">S2graph</h1>
+          <h2 id="project_tagline"></h2>
+
+            <section id="downloads">
+              <a class="zip_download_link" href="https://github.com/daumkakao/s2graph/zipball/master">Download this project as a .zip file</a>
+              <a class="tar_download_link" href="https://github.com/daumkakao/s2graph/tarball/master">Download this project as a tar.gz file</a>
+            </section>
+        </header>
+    </div>
+
+    <!-- MAIN CONTENT -->
+    <div id="main_content_wrap" class="outer">
+      <section id="main_content" class="inner">
+        <h1>
+<a id="s2graph" class="anchor" href="#s2graph" aria-hidden="true"><span class="octicon octicon-link"></span></a><strong>s2graph</strong>
+</h1>
+
+<p><strong>s2graph</strong> is a <strong>GraphDB</strong> that stores big data using <strong>edges</strong> and <strong>vertices</strong>, and also serves REST APIs for querying information on its edges and vertices. It provide fully  <strong>asynchronous, non-blocking API</strong>. This document defines terms and concepts used in s2graph and describes its REST API. </p>
+
+<h2>
+<a id="table-of-content" class="anchor" href="#table-of-content" aria-hidden="true"><span class="octicon octicon-link"></span></a>Table of content</h2>
+
+
+
+
+
+<p><strong>Table of Contents</strong>  <em>generated with <a href="http://doctoc.herokuapp.com/">DocToc</a></em></p>
+
+<ul>
+<li><a href="#trying-it-out">Trying It Out</a></li>
+<li><a href="#the-data-model">The Data Model</a></li>
+<li><a href="#rest-api-glossary">REST API Glossary</a></li>
+<li>
+<a href="#0-create-a-service---post-graphscreateservice">0. Create a Service - <code>POST /graphs/createService</code></a>
+
+<ul>
+<li><a href="#01-service-definition">0.1 service definition</a></li>
+<li><a href="#02-optional-service-definition">0.2 optional service definition</a></li>
+</ul>
+</li>
+<li>
+<a href="#1-create-a-label---post-graphscreatelabel">1. Create a Label - <code>POST /graphs/createLabel</code></a>
+
+<ul>
+<li><a href="#11-label-definition">1.1 label definition</a></li>
+<li><a href="#12-label-example">1.2 label example</a></li>
+<li><a href="#13-consistency-level">1.3 Consistency level.</a></li>
+</ul>
+</li>
+<li><a href="#2-optionally-add-extra-indexes---post-graphsaddindex">2. (Optionally) Add Extra Indexes - <code>POST /graphs/addIndex</code></a></li>
+<li>
+<a href="#3-insert-and-manipulate-edges">3. Insert and Manipulate Edges</a>
+
+<ul>
+<li>
+<a href="#edge-operations">Edge Operations</a>
+
+<ul>
+<li><a href="#1-insert---post-graphsedgesinsert">1. Insert - <code>POST /graphs/edges/insert</code></a></li>
+<li><a href="#2-delete---post-graphsedgesdelete">2. delete - <code>POST /graphs/edges/delete</code></a></li>
+<li><a href="#3-update---post-graphsedgesupdate">3. update - <code>POST /graphs/edges/update</code></a></li>
+<li><a href="#4-increment---post-graphsedgesincrement">4. increment - <code>POST /graphs/edges/increment</code></a></li>
+<li><a href="#5-insertbulk---post-graphsedgesinsertbulk">5. insertBulk - <code>POST /graphs/edges/insertBulk</code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<a href="#4-optionally-insert-and-manipulate-vertices">4. (Optionally) Insert and Manipulate Vertices</a>
+
+<ul>
+<li><a href="#1-insert---post-graphsverticesinsertservicenamecolumnname">1. Insert - <code>POST /graphs/vertices/insert/:serviceName/:columnName</code></a></li>
+<li><a href="#2-delete---post-graphsverticesdeleteservicenamecolumnname">2. delete - <code>POST /graphs/vertices/delete/:serviceName/:columnName</code></a></li>
+<li><a href="#3-deleteall---post-graphsverticesdeleteservicenamecolumnname">3. deleteAll - <code>POST /graphs/vertices/delete/:serviceName/:columnName</code></a></li>
+<li><a href="#3-update---post-graphsverticesupdateservicenamecolumnname">3. update - <code>POST /graphs/vertices/update/:serviceName/:columnName</code></a></li>
+<li><a href="#4-increment">4. increment</a></li>
+</ul>
+</li>
+<li>
+<a href="#5-query">5. Query</a>
+
+<ul>
+<li><a href="#1-definition">1. Definition</a></li>
+<li>
+<a href="#2-query-api">2. Query API</a>
+
+<ul>
+<li>
+<a href="#21-edge-queries">2.1. Edge Queries</a>
+
+<ul>
+<li><a href="#1-post-graphsgetedges">1. POST /graphs/getEdges</a></li>
+<li><a href="#2-post-graphsgetedgesgrouped">2. POST /graphs/getEdges/grouped</a></li>
+<li><a href="#3-post-graphsgetedgesexcluded">3. POST /graphs/getEdgesExcluded</a></li>
+<li><a href="#4-post-graphsgetedgesexcludedgrouped">4. POST /graphs/getEdgesExcluded/grouped</a></li>
+</ul>
+</li>
+<li>
+<a href="#22-vertex-queries">2.2. Vertex Queries</a>
+
+<ul>
+<li><a href="#1-post-graphsgetvertices">1. POST /graphs/getVertices</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<a href="#3-query-examples">3. Query Examples</a>
+
+<ul>
+<li><a href="#31-edge-queries">3.1. Edge Queries</a></li>
+<li><a href="#32-vertex-queries">3.2. Vertex Queries</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<a href="#6-bulk-loading">6. Bulk Loading</a>
+
+<ul>
+<li><a href="#edge-format">Edge Format</a></li>
+<li><a href="#vertex-format">Vertex Format</a></li>
+<li>
+<a href="#source-data-storage-options">Source Data Storage Options</a>
+
+<ul>
+<li><a href="#1-when-the-source-data-is-in-hdfs">1. When the source data is in HDFS.</a></li>
+<li><a href="#2-when-the-source-data-is-in-the-local-file-system">2. When the source data is in the local file system.</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<a href="#7-benchmark">7. Benchmark</a>
+
+<ul>
+<li>
+<a href="#test-data">Test data</a>
+
+<ul>
+<li><a href="#1-friend-of-friend">1. friend of friend</a></li>
+<li><a href="#2-friends">2. friends</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+
+
+<h2>
+<a id="getting-started" class="anchor" href="#getting-started" aria-hidden="true"><span class="octicon octicon-link"></span></a>Getting Started</h2>
+
+<p>S2Graph consists of multiple projects.</p>
+
+<ol>
+<li>
+<strong>S2Core</strong>: core library for common classes to store and retrieve data as edge/vertex. </li>
+<li>
+<strong>root project</strong>: Play rest server that provide rest APIs.</li>
+<li>
+<strong>spark</strong>: spark related common classes. </li>
+<li>
+<strong>loader</strong>: spark jobs that consume events from Kafka to HBase using S2Core library. also contains migration kit from hdfs to s2graph.</li>
+<li>
+<strong>asynchbase</strong>: This is fork from <a href="https://github.com/OpenTSDB/asynchbase">https://github.com/OpenTSDB/asynchbase</a>. we add few functionalities on GetRequest. all theses are heavily relies on pull requests which not have been merged on original project yet. 
+
+<ol>
+<li>rpcTimeout</li>
+<li>setFilter</li>
+<li>column pagination</li>
+<li>retryAttempCount</li>
+<li>timestamp filtering</li>
+</ol>
+</li>
+</ol>
+
+<hr>
+
+<p>to build projects </p>
+
+<p>install dependencies on local.</p>
+
+<pre><code>cd asynchbase; mvn install 
+</code></pre>
+
+<p>compile(optional)</p>
+
+<pre><code>sbt compile
+</code></pre>
+
+<p>run rest server</p>
+
+<pre><code>sbt -Dphase={dev/alpha/real/sandbox} run
+</code></pre>
+
+<blockquote>
+<p>note that you need to create directory named "res" and create phase/conf/application.conf for configuration specific per phase. </p>
+
+<p>ex) mkdir -p res/dev/conf; cp conf/reference.conf dev/conf/application.conf; sbt "run -Dphase=dev" will load application.conf under phase/conf/application.conf</p>
+</blockquote>
+
+<h2>
+<a id="the-data-model" class="anchor" href="#the-data-model" aria-hidden="true"><span class="octicon octicon-link"></span></a>The Data Model</h2>
+
+<p>There are four important abstractions that define the data model used throughout s2graph: services, columns, labels and properties.</p>
+
+<p><strong>Services</strong>, the top level abstraction, are like databases in traditional RDBMS in which all data are contained. A service usually represents one of the company's real services and is named accordingly, e.g. <code>"KakaoTalk"</code>, <code>"KakaoStory"</code>.</p>
+
+<p><strong>Columns</strong> define the type of vertices and a service can have multiple columns. For example, service <code>"KakaoMusic"</code> can have columns <code>"user_id"</code> and <code>"track_id"</code>. While columns can be compared to tables in traditional RDBMS in a sense, labels are the primary abstraction for representing schemas and columns are usually referenced only using their names.</p>
+
+<p><strong>Labels</strong>, represent relations between two columns, therefore representing the type of edges. The two columns can be the same, e.g. for a label representing friendships in an SNS, the two column will both be <code>"user_id"</code> of the service. There can be labels connecting two columns from two different services; for example, one can create a label that stores all events where KakaoStory posts are shared to KakaoTalk.</p>
+
+<p><strong>Properties</strong>, are metadata linked to vertices or edges that can be queried upon later. For vertices representing KakaoTalk users, <code>estimated_birth_year</code> is a possible property, and for edges representing similar KakaoMusic songs their <code>cosine_similarity</code> can be a property.</p>
+
+<p>Using these abstractions, a unique vertex can be identified with its <code>(service, column, vertex id)</code>, and a unique edge can be identified with its <code>(service, label, source vertex id, target vertex id)</code>. Additional information on edges and vertices are stored within their own properties.</p>
+
+<h2>
+<a id="rest-api-glossary" class="anchor" href="#rest-api-glossary" aria-hidden="true"><span class="octicon octicon-link"></span></a>REST API Glossary</h2>
+
+<p>The following is a non-exhaustive list of commonly used s2graph APIs and their examples. The full list of the latest REST API can be found in <a href="res/conf/routes">the routes file</a>.</p>
+
+<h2>
+<a id="0-create-a-service---post-graphscreateservice" class="anchor" href="#0-create-a-service---post-graphscreateservice" aria-hidden="true"><span class="octicon octicon-link"></span></a>0. Create a Service - <code>POST /graphs/createService</code>
+</h2>
+
+<p>see following to see what you can set with this API.</p>
+
+<h3>
+<a id="01-service-definition" class="anchor" href="#01-service-definition" aria-hidden="true"><span class="octicon octicon-link"></span></a>0.1 service definition</h3>
+
+<p>To create a Service, the following fields needs to be specified in the request.</p>
+
+<table>
+<thead>
+<tr>
+<th align="left">field name</th>
+<th>definition</th>
+<th align="center">data type</th>
+<th>example</th>
+<th align="left">note</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left"><strong>serviceName</strong></td>
+<td>name of user defined namespace.</td>
+<td align="center">string</td>
+<td>"talk_friendship"</td>
+<td align="left">required.</td>
+</tr>
+<tr>
+<td align="left">cluster</td>
+<td>zookeeper quorum address for your cluster.</td>
+<td align="center">string</td>
+<td>"abc.com:2181,abd.com:2181"</td>
+<td align="left">optional. <br>default value is "hbase.zookeeper.quorum" on your application.conf. if there is no value for "hbase.zookeeper.quorum" is defined on application.conf, then default value is "localhost"</td>
+</tr>
+<tr>
+<td align="left">hTableName</td>
+<td>physical HBase table name.</td>
+<td align="center">string</td>
+<td>"test"</td>
+<td align="left">optional. <br> default is serviceName-#{phase}. <br> phase is either dev/real/alpha/sandbox</td>
+</tr>
+<tr>
+<td align="left">hTableTTL</td>
+<td>global time to keep the data alive.</td>
+<td align="center">integer</td>
+<td>86000</td>
+<td align="left">optional. default is infinite.</td>
+</tr>
+<tr>
+<td align="left">preSplitSize</td>
+<td>number of pre split for HBase table.</td>
+<td align="center">integer</td>
+<td>20</td>
+<td align="left">optional. <br> default is 0(no pre-split)</td>
+</tr>
+</tbody>
+</table>
+
+<p>Service is the top level abstraction in s2graph which can be considered like a database in RDBMS. You can create a service using this API:</p>
+
+<pre><code>curl -XPOST localhost:9000/graphs/createService -H 'Content-Type: Application/json' -d '
+{"serviceName": "s2graph", "cluster": "address for zookeeper", "hTableName": "hbase table name", "hTableTTL": 86000, "preSplitSize": # of pre split}
+'
+</code></pre>
+
+<blockquote>
+<p>note that optional value for your service is only advanced users only. stick to default if you don`t know what you are doing.</p>
+</blockquote>
+
+<p>You can also look up all labels corresponding to a service.</p>
+
+<pre><code>curl -XGET localhost:9000/graphs/getLabels/:serviceName
+</code></pre>
+
+<h2>
+<a id="1-create-a-label---post-graphscreatelabel" class="anchor" href="#1-create-a-label---post-graphscreatelabel" aria-hidden="true"><span class="octicon octicon-link"></span></a>1. Create a Label - <code>POST /graphs/createLabel</code>
+</h2>
+
+<hr>
+
+<p>A label represents a relation between two columns, and plays a role like a table in RDBMS since labels contain the schema information, i.e. what type of data will be collected and what among them needs to be indexed for efficient retrieval. In most scenario, defining a schema on vertices is pretty straightforward but defining a schema on edges requires a little effort. Think about queries you will need first, and then model user's actions/relations as <strong>edges</strong> to design a label.</p>
+
+<h3>
+<a id="11-label-definition" class="anchor" href="#11-label-definition" aria-hidden="true"><span class="octicon octicon-link"></span></a>1.1 label definition</h3>
+
+<p>To create a Label, the following fields needs to be specified in the request.</p>
+
+<table>
+<thead>
+<tr>
+<th align="left">field name</th>
+<th>definition</th>
+<th align="center">data type</th>
+<th>example</th>
+<th align="left">note</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left"><strong>label</strong></td>
+<td>name of this relation; be specific.</td>
+<td align="center">string</td>
+<td>"talk_friendship"</td>
+<td align="left">required.</td>
+</tr>
+<tr>
+<td align="left">srcServiceName</td>
+<td>source column's service</td>
+<td align="center">string</td>
+<td>"kakaotalk"</td>
+<td align="left">required.</td>
+</tr>
+<tr>
+<td align="left">srcColumnName</td>
+<td>source column's name</td>
+<td align="center">string</td>
+<td>"user_id"</td>
+<td align="left">required.</td>
+</tr>
+<tr>
+<td align="left">srcColumnType</td>
+<td>source column's data type</td>
+<td align="center">long/integer/string</td>
+<td>"string"</td>
+<td align="left">required.</td>
+</tr>
+<tr>
+<td align="left">tgtServiceName</td>
+<td>target column's service</td>
+<td align="center">string</td>
+<td>"kakaotalk"/"kakaoagit"</td>
+<td align="left">same as srcServiceName when not specified</td>
+</tr>
+<tr>
+<td align="left">tgtColumnName</td>
+<td>target column's name</td>
+<td align="center">string</td>
+<td>"item_id"</td>
+<td align="left">required.</td>
+</tr>
+<tr>
+<td align="left">tgtColumnType</td>
+<td>target column's data type</td>
+<td align="center">long/integer/string</td>
+<td>"long"</td>
+<td align="left">required.</td>
+</tr>
+<tr>
+<td align="left"><strong>indexProps</strong></td>
+<td>mapping from indexed properties' names to their default values. <br> indexed properties will be primary index for this label (like <code>PRIMARY INDEX idx_xxx</code> (<code>p1, p2</code>)<code>, in RDBMS.&lt;br&gt; **note that _timestamp, _from, _to** is reserved property | json dictionary | {"timestamp":0, "affinity_score":10, "play_count":0}| A default value must be provided for each property. The default value is usually the minimum value permitted for the property. When this filed is empty, the default property named</code>timestamp` will be automatically added and indexed. The value's type can be one of <strong>long/int/bool/byte</strong> and cannot be <strong>float</strong>. If your property is <strong>float</strong> type, you need to convert them to <strong>long/int</strong> first.</td>
+<td align="center"></td>
+<td></td>
+<td align="left"></td>
+</tr>
+<tr>
+<td align="left">props</td>
+<td>mapping from non-indexed properties' names to their default values. <br> these properties are indexed and therefore cannot be used efficiently for querying, like non-indexed columns in RDBMS</td>
+<td align="center">json dictionary</td>
+<td>{"is_hidden": false, "country_iso": "kr", "country_code": 82}</td>
+<td align="left">non-indexed properties can be added later, like <code>alter table add column</code> in RDBMS</td>
+</tr>
+<tr>
+<td align="left">isDirected</td>
+<td>if this label is directed or undirected</td>
+<td align="center">true/false</td>
+<td>true/false</td>
+<td align="left">default true</td>
+</tr>
+<tr>
+<td align="left"><strong>serviceName</strong></td>
+<td>which service this label is belongs to.</td>
+<td align="center">either srcServiceName or tgtServiceName</td>
+<td>s2graph</td>
+<td align="left">default tgtServiceName</td>
+</tr>
+<tr>
+<td align="left">hTableName</td>
+<td>if this label need special usecase(such as batch upload), own hbase table name can be used.</td>
+<td align="center">string</td>
+<td>s2graph-batch</td>
+<td align="left">default use service`s hTableName. <br> note that this is optional.</td>
+</tr>
+<tr>
+<td align="left">hTableTTL</td>
+<td>time to data keep alive.</td>
+<td align="center">integer</td>
+<td>86000</td>
+<td align="left">default use service`s hTableTTL. <br> note that this is optional.</td>
+</tr>
+<tr>
+<td align="left">consistencyLevel</td>
+<td>if this is strong, only one edge between same from/to can be made. otherwise(week) multiple edges with same from/to can be exist.</td>
+<td align="center">string</td>
+<td>strong/week</td>
+<td align="left">default week</td>
+</tr>
+</tbody>
+</table>
+
+<blockquote>
+<p>Note. following property names are reserved for system. user can not create property same with these reserved property names. user can use this properties for indexProps/props/where clause on query.</p>
+
+<blockquote>
+<ol>
+<li>
+<strong>_timestamp</strong> is reserved for system wise timestamp. this can be interpreted as last_modified_at</li>
+<li>
+<strong>_from</strong> is reserved for label`s start vertex.</li>
+<li>
+<strong>_to</strong> is reserved for </li>
+</ol>
+</blockquote>
+</blockquote>
+
+<h3>
+<a id="12-label-example" class="anchor" href="#12-label-example" aria-hidden="true"><span class="octicon octicon-link"></span></a>1.2 label example</h3>
+
+<p>The following is an example that creates a label named <code>graph_test</code>, which represents the relation between <code>account_id</code> in service named <code>s2graph</code> and <code>account_id</code> in the same service, with indexed properties <code>timestamp</code> and <code>affinity_score</code> which both have the zero default value.</p>
+
+<pre><code>curl -XPOST localhost:9000/graphs/createLabel -H 'Content-Type: Application/json' -d '
+{
+    "label": "graph_test",
+    "srcServiceName": "s2graph",
+    "srcColumnName": "account_id",
+    "srcColumnType": "long",
+    "tgtServiceName": "s2graph",
+    "tgtColumnName": "item_id",
+    "tgtColumnType": "long",
+    "indexProps": {
+        "time": 0,
+        "weight": 0
+    },
+    "props": {
+        "is_hidden": true,
+        "is_blocked": true,
+        "error_code": 500
+    }, 
+    "serviceName": "s2graph",
+    "consistencyLevel": "strong"
+}
+'
+</code></pre>
+
+<p>Here is another example that creates a label named <code>kakao_group_join</code> label between column <code>account_id</code> of service <code>kakao</code> and column <code>group_id</code> of service <code>kakaogroup</code>. Note that the default indexed property <code>timestamp</code> will be created since the <code>indexedProps</code> field is empty.</p>
+
+<pre><code>curl -XPOST localhost:9000/graphs/createLabel -H 'Content-Type: Application/json' -d '
+{
+    "label": "kakao_group_join",
+    "srcServiceName": "kakao",
+    "srcColumnName": "account_id",
+    "srcColumnType": "long",
+    "tgtServiceName": "kakaogroup",
+    "tgtColumnName": "group_id",
+    "tgtColumnType": "string",
+    "indexProps": {},
+    "serviceName": "kakaogroup",
+    "props": {}
+}
+'
+</code></pre>
+
+<p>The following query will return the information regarding a label, <code>graph_test</code> in this case.</p>
+
+<pre><code>curl -XGET localhost:9000/graphs/getLabel/graph_test
+</code></pre>
+
+<p>You can delete a label using the following API:</p>
+
+<pre><code>curl -XPUT localhost:9000/graphs/deleteLabel/graph_test
+</code></pre>
+
+<p>To add a new non-indexed property, use the following API:</p>
+
+<pre><code>curl -XPOST localhost:9000/graphs/addProp/graph_test -H 'Content-Type: Application/json' -d '
+{"name": "is_blocked", "defaultValue": false, "dataType": "boolean", "usedInIndex": false}
+'
+</code></pre>
+
+<h3>
+<a id="13-consistency-level" class="anchor" href="#13-consistency-level" aria-hidden="true"><span class="octicon octicon-link"></span></a>1.3 Consistency level.</h3>
+
+<p>One last important constraint on label is <strong>consistency level</strong>.</p>
+
+<blockquote>
+<p><strong>This define how to store edges on storage level. note that query is completely independent with this.</strong></p>
+</blockquote>
+
+<p>To explain consistency, s2graph defined edge uniquely with their (from, label, to) triple. s2graph call this triple as unique edge key.</p>
+
+<p>following example is used to explain differences between strong/week consistency level.</p>
+
+<blockquote>
+<pre><code>1418950524721 insert  e   1   101 graph_test  {"weight": 10} = (1, graph_test, 101)
+1418950524723 insert  e   1   101 graph_test  {"weight": 20} = (1, graph_test, 101)
+</code></pre>
+</blockquote>
+
+<p>currently there are two consistency level </p>
+
+<p><strong>1. strong</strong></p>
+
+<blockquote>
+<p>make sure there is <strong>only one edge stored in storage</strong> between same edge key(<strong>(1, graph_test, 101)</strong> above).
+with strong consistency level, last command overwrite previous command. </p>
+</blockquote>
+
+<p><strong>2. week</strong></p>
+
+<blockquote>
+<p>no consistency check on unique edge key. above example yield <strong>two different edge stored in storage</strong> with different timestamp and weight value.</p>
+</blockquote>
+
+<p>for example, with each configuration, following edges will be stored.</p>
+
+<p>assumes that only timestamp is used as indexProps and user inserts following.</p>
+
+<pre><code>u1 -&gt; (t1, v1)
+u1 -&gt; (t2, v2)
+u1 -&gt; (t3, v2)
+u1 -&gt; (t4, v1)
+</code></pre>
+
+<p>with strong consistencyLevel following is what to be stored.</p>
+
+<pre><code>u1 -&gt; (t4, v1), (t3, v2)
+</code></pre>
+
+<p>note that u1 -&gt; (t1, v1), (t2, v2) are not exist.</p>
+
+<p>with week consistencyLevel.</p>
+
+<pre><code>u1 -&gt; (t4, v1), (t3, v2), (t2, v2), (t1, v1)
+</code></pre>
+
+<p>Reason week consistency is default.</p>
+
+<blockquote>
+<p>most case edges related to user`s activity should use <strong>week</strong> consistencyLevel since there will be <strong>no concurrent update on same edges</strong>. strong consistencyLevel is only for edges expecting many concurrent updates.</p>
+</blockquote>
+
+<p>Consistency level also determine how edges will be stored in storage when command is delivered reversely by their timestamp.</p>
+
+<p>with strong consistencyLevel following is guaranteed.</p>
+
+<p>natural event on (1, graph_test, 101) unique edge key is following.</p>
+
+<pre><code>1418950524721   insert  e   1   101 graph_test  {"is_blocked": false}
+1418950524722   delete  e   1   101 graph_test
+1418950524723   insert  e   1   101 graph_test  {"is_hidden": false, "weight": 10}
+1418950524724   update  e   1   101 graph_test  {"time": 1, "weight": -10}
+1418950524726   update  e   1   101 graph_test  {"is_blocked": true}
+</code></pre>
+
+<p>even if above commands arrive in not in order, strong consistency make sure same eventual state on (1, graph_test, 101).</p>
+
+<pre><code>1418950524726   update  e   1   101 graph_test  {"is_blocked": true}
+1418950524723   insert  e   1   101 graph_test  {"is_hidden": false, "weight": 10}
+1418950524722   delete  e   1   101 graph_test
+1418950524721   insert  e   1   101 graph_test  {"is_blocked": false}
+1418950524724   update  e   1   101 graph_test  {"time": 1, "weight": -10}
+</code></pre>
+
+<p>There are many cases that commands arrive in not in order.</p>
+
+<blockquote>
+<ol>
+<li>client servers are distributed and each client issue command asynchronously. </li>
+<li>client servers are distributed and grouped commands.</li>
+<li>by using kafka queue, global ordering or message is not guaranteed.</li>
+</ol>
+</blockquote>
+
+<p>Following is what s2graph do to make strong consistency level.</p>
+
+<pre><code>complexity = O(one read) + O(one delete) + O(2 put)
+
+fetchedEdge = fetch edge with (1, graph_test, 101) from lookup table.
+
+if fetchedEdge is not exist:
+    create new edge same as current insert operation
+    update lookup table as current insert operation
+else:
+    valid = compare fetchedEdge vs current insert operation.
+    if valid: 
+        delete fetchedEdge
+        create new edge after comparing fetchedEdge and current insert.
+        update lookup table
+</code></pre>
+
+<blockquote>
+<p><strong>Limitation</strong>
+Since we write our data to HBase asynchronously, there is no consistency guarantee on same edge within our flushInterval(1 seconds).</p>
+</blockquote>
+
+<h2>
+<a id="2-optionally-add-extra-indexes---post-graphsaddindex" class="anchor" href="#2-optionally-add-extra-indexes---post-graphsaddindex" aria-hidden="true"><span class="octicon octicon-link"></span></a>2. (Optionally) Add Extra Indexes - <code>POST /graphs/addIndex</code>
+</h2>
+
+<hr>
+
+<p>A label can have multiple indexed properties, or (for brevity) indexes. When queried, returned edges' order is determined according to indexes, indexes essentially defines what will be included in the <strong>topK</strong> query.</p>
+
+<blockquote>
+<p>Edge retrieval queries in s2graph by default returns <strong>topK</strong> edges. Clients must issue another query to fetch the next K edges, i.e., <strong>topK ~ 2topK</strong>.</p>
+</blockquote>
+
+<p>Internally, s2graph stores edges sorted according to the indexes in order to limit the number of edges to fetch in one query. If no ordering is given, s2graph will use the <strong>timestamp</strong> as an index, thus resulting in the most recent data.</p>
+
+<blockquote>
+<p>It is impossible to fetch millions of edges and sort them on-line to get topK in less than a second. s2graph uses vertex-centric indexes to avoid this.</p>
+
+<p><strong>using vertex-centric index, having millions of edges is fine as long as the topK value is reasonable (~ 1K)</strong>
+<strong>Note that indexes must be created before putting any data on this label</strong> (just like RDBMS).</p>
+</blockquote>
+
+<p>New indexes can be dynamically added, but it will not be applied to existing data(planned in future versions). <strong>the number of indexes on a label is currently limited to 8.</strong></p>
+
+<p>The following is an example of adding indexes <code>play_count</code> and <code>pay_amount</code> to a label named <code>graph_test</code>.</p>
+
+<pre><code>curl -XPOST localhost:9000/graphs/addIndex -H 'Content-Type: Application/json' -d '
+{"label": "graph_test", "indexProps": {"play_count":0, "pay_amount":0}}
+'
+</code></pre>
+
+<h2>
+<a id="3-insert-and-manipulate-edges" class="anchor" href="#3-insert-and-manipulate-edges" aria-hidden="true"><span class="octicon octicon-link"></span></a>3. Insert and Manipulate Edges</h2>
+
+<hr>
+
+<p>An <strong>edge</strong> represents a relation between two vertices, with properties according to the schema defined in its label. The following fields need to be specified when inserting an edge, and are returned when queried on edges.</p>
+
+<table>
+<thead>
+<tr>
+<th align="left">field name</th>
+<th>definition</th>
+<th align="center">data type</th>
+<th>note</th>
+<th align="left">example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left"><strong>timestamp</strong></td>
+<td>when this request is issued.</td>
+<td align="center">long</td>
+<td>required. in <strong>millis</strong> since the epoch. It is important to use millis, since TTL support is in millis.</td>
+<td align="left">1430116731156</td>
+</tr>
+<tr>
+<td align="left">operation</td>
+<td>insert/delete/update/increment</td>
+<td align="center">string</td>
+<td>required only for bulk operation; aliases are insert: i, delete:d, update: u, increment: in, default is insert.</td>
+<td align="left">"i", "insert"</td>
+</tr>
+<tr>
+<td align="left">from</td>
+<td>Id of start vertex.</td>
+<td align="center">long/string</td>
+<td>required. prefer long if possible. <strong>maximum string bytes length &lt; 249</strong>
+</td>
+<td align="left">1</td>
+</tr>
+<tr>
+<td align="left">to</td>
+<td>Id of end vertex.</td>
+<td align="center">long/string</td>
+<td>required. prefer long if possible. <strong>maximum string bytes length &lt; 249</strong>
+</td>
+<td align="left">101</td>
+</tr>
+<tr>
+<td align="left">label</td>
+<td>name the corresponding label</td>
+<td align="center">string</td>
+<td>required.</td>
+<td align="left">"graph_test"</td>
+</tr>
+<tr>
+<td align="left">direction</td>
+<td>direction of this relation, one of <strong>out/in/undirected</strong>
+</td>
+<td align="center">string</td>
+<td>required. alias are out: o, in: i, undirected: u</td>
+<td align="left">"out"</td>
+</tr>
+<tr>
+<td align="left">props</td>
+<td>extra properties of this edge.</td>
+<td align="center">json dictionary</td>
+<td>required. <strong>all indexed properties should be present, otherwise the default values will be added. Non-indexed properties can also be present</strong>
+</td>
+<td align="left">{"timestamp": 1417616431, "affinity_score":10, "is_hidden": false, "is_valid": true}</td>
+</tr>
+</tbody>
+</table>
+
+<h3>
+<a id="edge-operations" class="anchor" href="#edge-operations" aria-hidden="true"><span class="octicon octicon-link"></span></a>Edge Operations</h3>
+
+<h4>
+<a id="1-insert---post-graphsedgesinsert" class="anchor" href="#1-insert---post-graphsedgesinsert" aria-hidden="true"><span class="octicon octicon-link"></span></a>1. Insert - <code>POST /graphs/edges/insert</code>
+</h4>
+
+<p>insert have different behavior according to label`s consistency level.</p>
+
+<ol>
+<li><p>strong consistency level(default): <strong>1 READ + (1 DELETE+ 1 PUT, optional)</strong>
+insert is equal to upsert. s2graph check if unique edge key exist, then if there is edge with same unique edge key, run validation then decide apply current request or drop it. </p></li>
+<li><p>week consistency level: <strong>2 PUT</strong>
+no consistency check on unique edge key, insert same edge key multiple times can possibly yield multiple edges.</p></li>
+</ol>
+
+<p>For consistency reasons, graph databases typically go through the following three steps to insert an edge between a source vertex to a target vertex with some metadata:</p>
+
+<blockquote>
+<ol>
+<li>fetch the source vertex to make sure it exists</li>
+<li>fetch the target vertex to make sure it exists</li>
+<li>insert an edge with the metadata on from -&gt; to</li>
+</ol>
+</blockquote>
+
+<p>Unlike other graph databases like <strong>Titan</strong> where server-generated vertex ids must be used, any user-defined vertex ids can be used in s2graph. Therefore s2graph will not fetch vertex data during the insert operation, making it one simple write to the underlying database.</p>
+
+<blockquote>
+<p><strong>This means that you don't have to create source and target vertices prior to inserting edges, if you don't need any properties on vertices(i.e., you only need vertex id). In this case, s2graph will not fetch vertex information from the underlying db, therefore no read operation is required.</strong></p>
+</blockquote>
+
+<p>The following is an example inserting edges:</p>
+
+<pre><code>curl -XPOST localhost:9000/graphs/edges/insert -H 'Content-Type: Application/json' -d '
+[
+  {"from":1,"to":101,"label":"graph_test","props":{"time":-1, "weight":10},"timestamp":1417616431},
+  {"from":1,"to":102,"label":"graph_test","props":{"time":0, "weight":11},"timestamp":1417616431},
+  {"from":1,"to":103,"label":"graph_test","props":{"time":1, "weight":12},"timestamp":1417616431},
+  {"from":1,"to":104,"label":"graph_test","props":{"time":-2, "weight":1},"timestamp":1417616431}
+]
+'
+</code></pre>
+
+<h4>
+<a id="2-delete---post-graphsedgesdelete" class="anchor" href="#2-delete---post-graphsedgesdelete" aria-hidden="true"><span class="octicon octicon-link"></span></a>2. delete - <code>POST /graphs/edges/delete</code>
+</h4>
+
+<p>You can also delete edges.</p>
+
+<blockquote>
+<p><strong>Note that if the timestamp in a delete request is larger (later) than the actual timestamp of the edge, the delete request will be ignored.</strong></p>
+</blockquote>
+
+<p>The following is an example deleting edges.</p>
+
+<pre><code>curl -XPOST localhost:9000/graphs/edges/delete -H 'Content-Type: Application/json' -d '
+[
+ {"from":1,"to":102,"label":"graph_test","timestamp":1417616432},
+ {"from":1,"to":103,"label":"graph_test","timestamp":1417616432}
+]
+'
+</code></pre>
+
+<h4>
+<a id="3-update---post-graphsedgesupdate" class="anchor" href="#3-update---post-graphsedgesupdate" aria-hidden="true"><span class="octicon octicon-link"></span></a>3. update - <code>POST /graphs/edges/update</code>
+</h4>
+
+<p>An update request on edges will overwrite properties of the corresponding edge.</p>
+
+<blockquote>
+<p>This is <strong>not an upsert operation</strong> and a corresponding edge must exist for update operation. Update operations on nonexistent edges will be ignored. </p>
+
+<p><strong>Also remember that previous data stored in the edge is overwritten.</strong></p>
+</blockquote>
+
+<p>The following is an example updating properties of an edge, first setting <code>is_hidden</code> property to be true and then setting <code>weight</code> property to be 100.</p>
+
+<pre><code>curl -XPOST localhost:9000/graphs/edges/update -H 'Content-Type: Application/json' -d '
+[
+ {"from":1,"to":104,"label":"graph_test","timestamp":1417616433, "props": {"is_hidden":true}},
+ {"from":1,"to":104,"label":"graph_test","timestamp":1417616434, "props": {"weight":100}}
+]
+'
+</code></pre>
+
+<h4>
+<a id="4-increment---post-graphsedgesincrement" class="anchor" href="#4-increment---post-graphsedgesincrement" aria-hidden="true"><span class="octicon octicon-link"></span></a>4. increment - <code>POST /graphs/edges/increment</code>
+</h4>
+
+<p>You can add a certain value to <strong>edges' indexed properties</strong>. Negative numbers can be used to subtract some value from the properties. <strong>Increment operations are only supported for indexed properties.</strong></p>
+
+<blockquote>
+<p><strong>you don't have to insert an edge prior to its increment operation. If the edge corresponding to an increment request is not found, a new edge filled with the default property values (provided when defining the label) will be automatically created.</strong></p>
+</blockquote>
+
+<p>The following is an example incrementing edges' properties.</p>
+
+<pre><code>curl -XPOST localhost:9000/graphs/edges/increment -H 'Content-Type: Application/json' -d '
+[
+  {"from":1,"to":101,"label":"graph_test","props":{"time":-1, "weight":10},"timestamp":1417616435},
+  {"from":1,"to":102,"label":"graph_test","props":{"time":0, "weight":11},"timestamp":1417616435},
+  {"from":1,"to":103,"label":"graph_test","props":{"time":1, "weight":12},"timestamp":1417616435},
+  {"from":1,"to":104,"label":"graph_test","props":{"time":-2, "weight":1},"timestamp":1417616435}
+]
+'
+</code></pre>
+
+<h4>
+<a id="5-insertbulk---post-graphsedgesinsertbulk" class="anchor" href="#5-insertbulk---post-graphsedgesinsertbulk" aria-hidden="true"><span class="octicon octicon-link"></span></a>5. insertBulk - <code>POST /graphs/edges/insertBulk</code>
+</h4>
+
+<p>insert edges without <strong><code>checking consistency</code></strong>. </p>
+
+<p>The following is an example inserting edges:</p>
+
+<pre><code>curl -XPOST localhost:9000/graphs/edges/insertBulk -H 'Content-Type: Application/json' -d '
+[
+  {"from":1,"to":101,"label":"graph_test","props":{"time":-1, "weight":10},"timestamp":1417616431},
+  {"from":1,"to":101,"label":"graph_test","props":{"time":0, "weight":11},"timestamp":1417616432}
+]
+'
+</code></pre>
+
+<h2>
+<a id="4-optionally-insert-and-manipulate-vertices" class="anchor" href="#4-optionally-insert-and-manipulate-vertices" aria-hidden="true"><span class="octicon octicon-link"></span></a>4. (Optionally) Insert and Manipulate Vertices</h2>
+
+<p>Vertices are the two ends that an edge is connecting, and correspond to a column defined for a service. In case you need to store some metadata corresponding to vertices and make queries regarding them, you can insert and manipulate vertices rather than edges.</p>
+
+<p>Unlike edges and their labels, properties on vertices are not indexed and do not require a predefined schema nor default values. The following fields are used when operating on vertices. </p>
+
+<table>
+<thead>
+<tr>
+<th align="left">field name</th>
+<th>definition</th>
+<th align="center">data type</th>
+<th>note</th>
+<th align="left">example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">timestamp</td>
+<td></td>
+<td align="center">long</td>
+<td>required. in seconds since the epoch</td>
+<td align="left">1417616431</td>
+</tr>
+<tr>
+<td align="left">operation</td>
+<td>the operation to perform; one of insert, delete, update, increment</td>
+<td align="center">string</td>
+<td>required only for bulk operations; alias are insert: i, delete:d, update: u, increment: in, default is insert.</td>
+<td align="left">"i", "insert"</td>
+</tr>
+<tr>
+<td align="left"><strong>serviceName</strong></td>
+<td>corresponding service's name</td>
+<td align="center">"string"</td>
+<td>required.</td>
+<td align="left">"kakaotalk"/"kakaogroup"</td>
+</tr>
+<tr>
+<td align="left"><strong>columnName</strong></td>
+<td>corresponding column's name</td>
+<td align="center">string</td>
+<td>required.</td>
+<td align="left">"xxx_service_ user_id"</td>
+</tr>
+<tr>
+<td align="left">id</td>
+<td>a unique identifier of this vertex</td>
+<td align="center">long/string</td>
+<td>required. prefer long if possible.</td>
+<td align="left">101</td>
+</tr>
+<tr>
+<td align="left"><strong>props</strong></td>
+<td>extra properties of this vertex.</td>
+<td align="center">json dictionary</td>
+<td>required.</td>
+<td align="left">{"is_active_user": true, "age":10, "gender": "F", "country_iso": "kr"}</td>
+</tr>
+</tbody>
+</table>
+
+<hr>
+
+<h4>
+<a id="1-insert---post-graphsverticesinsertservicenamecolumnname" class="anchor" href="#1-insert---post-graphsverticesinsertservicenamecolumnname" aria-hidden="true"><span class="octicon octicon-link"></span></a>1. Insert - <code>POST /graphs/vertices/insert/:serviceName/:columnName</code>
+</h4>
+
+<pre><code>curl -XPOST localhost:9000/graphs/vertices/insert/s2graph/account_id -H 'Content-Type: Application/json' -d '
+[
+  {"id":1,"props":{"is_active":true, "talk_user_id":10},"timestamp":1417616431},
+  {"id":2,"props":{"is_active":true, "talk_user_id":12},"timestamp":1417616431},
+  {"id":3,"props":{"is_active":false, "talk_user_id":13},"timestamp":1417616431},
+  {"id":4,"props":{"is_active":true, "talk_user_id":14},"timestamp":1417616431},
+  {"id":5,"props":{"is_active":true, "talk_user_id":15},"timestamp":1417616431}
+]
+'
+</code></pre>
+
+<h4>
+<a id="2-delete---post-graphsverticesdeleteservicenamecolumnname" class="anchor" href="#2-delete---post-graphsverticesdeleteservicenamecolumnname" aria-hidden="true"><span class="octicon octicon-link"></span></a>2. delete - <code>POST /graphs/vertices/delete/:serviceName/:columnName</code>
+</h4>
+
+<p>This operation will delete only the vertex data of a specified column and will <strong>not</strong> delete all edges connected to those vertices. </p>
+
+<p><strong>Important notes</strong></p>
+
+<blockquote>
+<p><strong>This means that edges returned by a query can contain deleted vertices. Clients need to check if those vertices are valid.</strong></p>
+</blockquote>
+
+<h4>
+<a id="3-deleteall---post-graphsverticesdeleteservicenamecolumnname" class="anchor" href="#3-deleteall---post-graphsverticesdeleteservicenamecolumnname" aria-hidden="true"><span class="octicon octicon-link"></span></a>3. deleteAll - <code>POST /graphs/vertices/delete/:serviceName/:columnName</code>
+</h4>
+
+<p>This operation will delete all vertex data of a specified column and also delete all edges that are connected to those vertices. Example:</p>
+
+<pre><code>curl -XPOST localhost:9000/graphs/vertices/deleteAll/s2graph/account_id -H 'Content-Type: Application/json' -d '
+[{"id": 1, "timestamp": 193829198}]
+'
+</code></pre>
+
+<p>This is an extremely expensive operation; The following is a pseudocode showing how this operation works:</p>
+
+<pre><code>vertices = vertex list to delete
+for vertex in vertices
+    labals = fetch all labels that this vertex is included.
+    for label in labels
+        for index in label.indices
+            edges = G.read with limit 50K
+            for edge in edges
+                edge.delete
+</code></pre>
+
+<p>The total complexity is O(L * L.I) reads + O(L * L.I * 50K) writes in the worst case. <strong>If a vertex to delete has more than 50K edges, the delete operation will not be consistent.</strong> </p>
+
+<h4>
+<a id="3-update---post-graphsverticesupdateservicenamecolumnname" class="anchor" href="#3-update---post-graphsverticesupdateservicenamecolumnname" aria-hidden="true"><span class="octicon octicon-link"></span></a>3. update - <code>POST /graphs/vertices/update/:serviceName/:columnName</code>
+</h4>
+
+<p>The update operation on vertices uses the same parameters as in the insert operation.</p>
+
+<h4>
+<a id="4-increment" class="anchor" href="#4-increment" aria-hidden="true"><span class="octicon octicon-link"></span></a>4. increment</h4>
+
+<p>Not yet implemented; stay tuned.</p>
+
+<h2>
+<a id="5-query" class="anchor" href="#5-query" aria-hidden="true"><span class="octicon octicon-link"></span></a>5. Query</h2>
+
+<h3>
+<a id="1-definition" class="anchor" href="#1-definition" aria-hidden="true"><span class="octicon octicon-link"></span></a>1. Definition</h3>
+
+<hr>
+
+<p>Once you have your graph data uploaded to s2graph, you can traverse your graph using our REST APIs. Queries contain the vertex to start traversing, and list of labels paired with filters and scoring weights used during the traversal. Query requests are structures as follows:</p>
+
+<table>
+<thead>
+<tr>
+<th align="left">field name</th>
+<th>definition</th>
+<th align="center">data type</th>
+<th>note</th>
+<th align="left">example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">srcVertices</td>
+<td>vertices to start traversing.</td>
+<td align="center">json array of json dictionary specifying each vertex, with "serviceName", "columnName", "id" fields.</td>
+<td>required.</td>
+<td align="left"><code>[{"serviceName": "kakao", "columnName": "account_id", "id":1}]</code></td>
+</tr>
+<tr>
+<td align="left"><strong>steps</strong></td>
+<td>list of steps for traversing.</td>
+<td align="center">json array of steps</td>
+<td>explained below</td>
+<td align="left"><code>[[{"label": "graph_test", "direction": "out", "limit": 100, "scoring":{"time": 0, "weight": 1}}]]</code></td>
+</tr>
+<tr>
+<td align="left">removeCycle</td>
+<td>when traverse to next step, don`t traverse already visited vertices</td>
+<td align="center">true/false. default is true</td>
+<td>already visited is defined by following(label, vertex). <br> so if steps are friend -&gt; friend, then remove second depth friends if they exist in first depth friends</td>
+<td align="left"></td>
+</tr>
+</tbody>
+</table>
+
+<p><strong>step</strong>: Each step define what to traverse in a single hop on the graph. The first step has to be a direct neighbor of the starting vertices, the second step is a direct neighbor of vertices from the first step and so on. A step is specified with a list of <strong>query param</strong>s, hence the <code>steps</code> field of a query request becoming an array of arrays of dictionaries.</p>
+
+<p><strong>query param</strong>: </p>
+
+<table>
+<thead>
+<tr>
+<th align="left">field name</th>
+<th>definition</th>
+<th align="center">data type</th>
+<th>note</th>
+<th align="left">example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">label</td>
+<td>name of label to traverse.</td>
+<td align="center">string</td>
+<td>required. must be an existing label.</td>
+<td align="left">"graph_test"</td>
+</tr>
+<tr>
+<td align="left">direction</td>
+<td>in/out direction to traverse</td>
+<td align="center">string</td>
+<td>optional, default out</td>
+<td align="left">"out"</td>
+</tr>
+<tr>
+<td align="left">limit</td>
+<td>how many edges to fetch</td>
+<td align="center">int</td>
+<td>optional, default 10</td>
+<td align="left">10</td>
+</tr>
+<tr>
+<td align="left">offset</td>
+<td>start position on this index</td>
+<td align="center">int</td>
+<td>optional, default 0</td>
+<td align="left">50</td>
+</tr>
+<tr>
+<td align="left">interval</td>
+<td>the range to filter on indexed properties</td>
+<td align="center">json dict</td>
+<td>optional</td>
+<td align="left"><code>{"from": {"time": 0, "weight": 1}, "to": {"time": 1, "weight": 15}}</code></td>
+</tr>
+<tr>
+<td align="left">duration</td>
+<td>time range</td>
+<td align="center">json dict</td>
+<td>optional</td>
+<td align="left"><code>{"from": 1407616431, "to": 1417616431}</code></td>
+</tr>
+<tr>
+<td align="left">scoring</td>
+<td>a mapping from indexed properties' names to their weights <br> the weighted sum of property values will be the final score.</td>
+<td align="center">json dict</td>
+<td>optional</td>
+<td align="left"><code>{"time": 1, "weight": 2}</code></td>
+</tr>
+<tr>
+<td align="left">where</td>
+<td>filter condition(like sql`s where clause). <br> logical operation(<strong>and/or</strong>) is supported and each condition can have exact equal(=), sets(in), and range(between x and y). <br> <strong>do not use any quotes for string type</strong>
+</td>
+<td align="center">string</td>
+<td>optional</td>
+<td align="left">ex) "((_from = 123 and _to = abcd) or gender = M) and is_hidden = false and weight between 1 and 10 or time in (1, 2, 3)". <br> note that it only support <strong>long/string/boolean type</strong>
+</td>
+</tr>
+<tr>
+<td align="left">outputField</td>
+<td>replace edge`s to field with this field in props</td>
+<td align="center">string</td>
+<td>optional</td>
+<td align="left">"outputField": "service_user_id". this change to field into props['service_user_id']</td>
+</tr>
+<tr>
+<td align="left">exclude</td>
+<td>decide if vertices that appear on this label and different labels in this step should be filtered out</td>
+<td align="center">boolean</td>
+<td>optional, default false</td>
+<td align="left">true, exclude vertices that appear on this label and other labels in this step will be filtered out.</td>
+</tr>
+<tr>
+<td align="left">include</td>
+<td>decide if vertices that appear on this label and different labels in this step should be remain in result.</td>
+<td align="center">boolean</td>
+<td>optional, default false</td>
+<td align="left"></td>
+</tr>
+<tr>
+<td align="left">duplicate</td>
+<td>policy on how to deal with duplicate edges. <br> duplicate edges means edges with same (from, to, label, direction).</td>
+<td align="center">string <br> one of "first", "sum", "countSum", "raw"</td>
+<td>optional, default "<strong>first</strong>"</td>
+<td align="left">"<strong>first</strong>" means only first occurrence of edge survive. <br> "<strong>sum</strong>" means sums up all scores of same edges but only one edge survive. <br>"<strong>countSum</strong>" means counts up occurrence of same edges but only one edge survive. <br>"<strong>raw</strong>" means same edges will be survived as they are.</td>
+</tr>
+<tr>
+<td align="left">rpcTimeout</td>
+<td>timeout for this request</td>
+<td align="center">integer</td>
+<td>optional, default 100ms</td>
+<td align="left">note: maximum value should be less than 1000ms</td>
+</tr>
+<tr>
+<td align="left">maxAttempt</td>
+<td>how many times client will try to fetch result from HBase</td>
+<td align="center">integer</td>
+<td>optional, default 1</td>
+<td align="left">note: maximum value should be less than 5</td>
+</tr>
+</tbody>
+</table>
+
+<h3>
+<a id="2-query-api" class="anchor" href="#2-query-api" aria-hidden="true"><span class="octicon octicon-link"></span></a>2. Query API</h3>
+
+<h4>
+<a id="21-edge-queries" class="anchor" href="#21-edge-queries" aria-hidden="true"><span class="octicon octicon-link"></span></a>2.1. Edge Queries</h4>
+
+<p>edge query provide following 4 APIs. s2graph itself would not provide any business logic dependent query. it would rather provide necessary data to help implementing business logic.</p>
+
+<h5>
+<a id="1-post-graphsgetedges" class="anchor" href="#1-post-graphsgetedges" aria-hidden="true"><span class="octicon octicon-link"></span></a>1. POST /graphs/getEdges</h5>
+
+<p>get all edges. flat hierarchy.</p>
+
+<pre><code>{
+    "size": 2,
+    "results": [
+        {
+            "from": 1,
+            "to": 88277115755635400,
+            "label": "talk_friend_long_term_agg_by_account_id",
+            "direction": "out",
+            "_timestamp": 1425088498,
+            "props": {
+                "talk_user_id": 41780,
+                "score": 8,
+                "service_user_id": 88277115755635400,
+                "profile_id": 424,
+                "birth_date": 517,
+                "birth_year": 1977,
+                "gender": "F"
+            },
+            "score": 8
+        },
+        {
+            "from": 1,
+            "to": 88300639020224930,
+            "label": "talk_friend_long_term_agg_by_account_id",
+            "direction": "out",
+            "_timestamp": 1425088493,
+            "props": {
+                "talk_user_id": 1545029,
+                "score": 0,
+                "service_user_id": 88300639020224930,
+                "profile_id": 9571562,
+                "birth_date": 605,
+                "birth_year": 1979,
+                "gender": "F"
+            },
+            "score": 0
+        }
+    ]
+}
+</code></pre>
+
+<h5>
+<a id="2-post-graphsgetedgesgrouped" class="anchor" href="#2-post-graphsgetedgesgrouped" aria-hidden="true"><span class="octicon octicon-link"></span></a>2. POST /graphs/getEdges/grouped</h5>
+
+<p>get all edges with group by edge`s target vertex.</p>
+
+<pre><code>{
+    "size": 2,
+    "results": [
+        {
+            "name": "account_id",
+            "id": "88277115755635393",
+            "scoreSum": 8,
+            "aggr": {
+                "name": "account_id",
+                "ids": [
+                    "1"
+                ]
+            }
+        },
+        {
+            "name": "account_id",
+            "id": "88300639020224928",
+            "scoreSum": 0,
+            "aggr": {
+                "name": "account_id",
+                "ids": [
+                    "1"
+                ]
+            }
+        }
+    ]
+}
+</code></pre>
+
+<h5>
+<a id="3-post-graphsgetedgesexcluded" class="anchor" href="#3-post-graphsgetedgesexcluded" aria-hidden="true"><span class="octicon octicon-link"></span></a>3. POST /graphs/getEdgesExcluded</h5>
+
+<p>get all edges excluding all edges from srcVertices to last step.</p>
+
+<h5>
+<a id="4-post-graphsgetedgesexcludedgrouped" class="anchor" href="#4-post-graphsgetedgesexcludedgrouped" aria-hidden="true"><span class="octicon octicon-link"></span></a>4. POST /graphs/getEdgesExcluded/grouped</h5>
+
+<p>get all edges excluding all edges from srcVertices to last step with group by edge`s target vertex.</p>
+
+<h4>
+<a id="22-vertex-queries" class="anchor" href="#22-vertex-queries" aria-hidden="true"><span class="octicon octicon-link"></span></a>2.2. Vertex Queries</h4>
+
+<h5>
+<a id="1-post-graphsgetvertices" class="anchor" href="#1-post-graphsgetvertices" aria-hidden="true"><span class="octicon octicon-link"></span></a>1. POST /graphs/getVertices</h5>
+
+<p>get all vertex data. </p>
+
+<h3>
+<a id="3-query-examples" class="anchor" href="#3-query-examples" aria-hidden="true"><span class="octicon octicon-link"></span></a>3. Query Examples</h3>
+
+<h4>
+<a id="31-edge-queries" class="anchor" href="#31-edge-queries" aria-hidden="true"><span class="octicon octicon-link"></span></a>3.1. Edge Queries</h4>
+
+<p>Example 1. Selecting the first 100 edges of label <code>graph_test</code>, which start from the vertex with <code>account_id=1</code>, sorted using the default index of <code>graph_test</code>.</p>
+
+<div class="highlight highlight-javascript"><pre>curl <span class="pl-k">-</span>XPOST localhost<span class="pl-k">:</span><span class="pl-c1">9000</span>/graphs/getEdges <span class="pl-k">-</span>H <span class="pl-s"><span class="pl-pds">'</span>Content-Type: Application/json<span class="pl-pds">'</span></span> <span class="pl-k">-</span>d <span class="pl-s"><span class="pl-pds">'</span></span>
+<span class="pl-s">{</span>
+<span class="pl-s">    "srcVertices": [{"serviceName": "s2graph", "columnName": "account_id", "id":1}],</span>
+<span class="pl-s">    "steps": [</span>
+<span class="pl-s">      [{"label": "graph_test", "direction": "out", "offset": 0, "limit": 100</span>
+<span class="pl-s">      }]</span>
+<span class="pl-s">    ]</span>
+<span class="pl-s">}</span>
+<span class="pl-s"><span class="pl-pds">'</span></span></pre></div>
+
+<p>Example 2. Selecting the 50th ~ 100th edges from the same vertex.</p>
+
+<div class="highlight highlight-javascript"><pre>curl <span class="pl-k">-</span>XPOST localhost<span class="pl-k">:</span><span class="pl-c1">9000</span>/graphs/getEdges <span class="pl-k">-</span>H <span class="pl-s"><span class="pl-pds">'</span>Content-Type: Application/json<span class="pl-pds">'</span></span> <span class="pl-k">-</span>d <span class="pl-s"><span class="pl-pds">'</span></span>
+<span class="pl-s">{</span>
+<span class="pl-s">    "srcVertices": [{"serviceName": "s2graph", "columnName": "account_id", "id":1}],</span>
+<span class="pl-s">    "steps": [</span>
+<span class="pl-s">      [{"label": "graph_test", "direction": "in", "offset": 50, "limit": 50}]</span>
+<span class="pl-s">    ]</span>
+<span class="pl-s">}</span>
+<span class="pl-s"><span class="pl-pds">'</span></span></pre></div>
+
+<p>Example 3. Selecting the 50th ~ 100th edges from the same vertex, now with a time range filter.</p>
+
+<div class="highlight highlight-javascript"><pre>curl <span class="pl-k">-</span>XPOST localhost<span class="pl-k">:</span><span class="pl-c1">9000</span>/graphs/getEdges <span class="pl-k">-</span>H <span class="pl-s"><span class="pl-pds">'</span>Content-Type: Application/json<span class="pl-pds">'</span></span> <span class="pl-k">-</span>d <span class="pl-s"><span class="pl-pds">'</span></span>
+<span class="pl-s">{</span>
+<span class="pl-s">    "srcVertices": [{"serviceName": "s2graph", "columnName": "account_id", "id":1}],</span>
+<span class="pl-s">    "steps": [</span>
+<span class="pl-s">      [{"label": "graph_test", "direction": "in", "offset": 50, "limit": 50, "duration": {"from": 1416214118, "to": 1416214218}]</span>
+<span class="pl-s">    ]</span>
+<span class="pl-s">}</span>
+<span class="pl-s"><span class="pl-pds">'</span></span></pre></div>
+
+<p>Example 4. Selecting 50th ~ 100th edges from the same vertex, sorted using the indexed properties <code>time</code> and <code>weight</code>, with the same time range filter, and applying weighted sum using <code>time: 1.5, weight: 10</code></p>
+
+<div class="highlight highlight-javascript"><pre>curl <span class="pl-k">-</span>XPOST localhost<span class="pl-k">:</span><span class="pl-c1">9000</span>/graphs/getEdges <span class="pl-k">-</span>H <span class="pl-s"><span class="pl-pds">'</span>Content-Type: Application/json<span class="pl-pds">'</span></span> <span class="pl-k">-</span>d <span class="pl-s"><span class="pl-pds">'</span></span>
+<span class="pl-s">{</span>
+<span class="pl-s">    "srcVertices": [{"serviceName": "s2graph", "columnName": "account_id", "id":1}],</span>
+<span class="pl-s">    "steps": [</span>
+<span class="pl-s">      [{"label": "graph_test", "direction": "in", "offset": 50, "limit": 50, "duration": {"from": 1416214118, "to": 1416214218}, "scoring": {"time": 1.5, "weight": 10}]</span>
+<span class="pl-s">    ]</span>
+<span class="pl-s">}</span>
+<span class="pl-s"><span class="pl-pds">'</span></span></pre></div>
+
+<p>Example 5. Selecting 100 edges representing <code>friends</code>, from the vertex with <code>account_id=1</code>, and again selecting their 10 friends, therefore selecting at most 1,000 "friends of friends".</p>
+
+<div class="highlight highlight-javascript"><pre>curl <span class="pl-k">-</span>XPOST localhost<span class="pl-k">:</span><span class="pl-c1">9000</span>/graphs/getEdges <span class="pl-k">-</span>H <span class="pl-s"><span class="pl-pds">'</span>Content-Type: Application/json<span class="pl-pds">'</span></span> <span class="pl-k">-</span>d <span class="pl-s"><span class="pl-pds">'</span></span>
+<span class="pl-s">{</span>
+<span class="pl-s">    "srcVertices": [{"serviceName": "s2graph", "columnName": "account_id", "id":1}],</span>
+<span class="pl-s">    "steps": [</span>
+<span class="pl-s">      [{"label": "friends", "direction": "out", "limit": 100}],</span>
+<span class="pl-s">      [{"label": "friends", "direction": "out", "limit": 10}]</span>
+<span class="pl-s">    ]</span>
+<span class="pl-s">}</span>
+<span class="pl-s"><span class="pl-pds">'</span></span></pre></div>
+
+<p>Example 6. Selecting 100 edges representing <code>friends</code> and their 10 <code>listened_music</code> edges, to get "music that my friends have listened to".</p>
+
+<div class="highlight highlight-javascript"><pre>curl <span class="pl-k">-</span>XPOST localhost<span class="pl-k">:</span><span class="pl-c1">9000</span>/graphs/getEdges <span class="pl-k">-</span>H <span class="pl-s"><span class="pl-pds">'</span>Content-Type: Application/json<span class="pl-pds">'</span></span> <span class="pl-k">-</span>d <span class="pl-s"><span class="pl-pds">'</span></span>
+<span class="pl-s">{</span>
+<span class="pl-s">    "srcVertices": [{"serviceName": "s2graph", "columnName": "account_id", "id":1}],</span>
+<span class="pl-s">    "steps": [</span>
+<span class="pl-s">      [{"label": "talk_friend", "direction": "out", "limit": 100}],</span>
+<span class="pl-s">      [{"label": "play_music", "direction": "out", "limit": 10}]</span>
+<span class="pl-s">    ]</span>
+<span class="pl-s">}</span>
+<span class="pl-s"><span class="pl-pds">'</span></span></pre></div>
+
+<h4>
+<a id="32-vertex-queries" class="anchor" href="#32-vertex-queries" aria-hidden="true"><span class="octicon octicon-link"></span></a>3.2. Vertex Queries</h4>
+
+<p>Example 1. Selecting all vertices from column <code>account_id</code> of a service <code>s2graph</code>.</p>
+
+<div class="highlight highlight-javascript"><pre>curl <span class="pl-k">-</span>XPOST localhost<span class="pl-k">:</span><span class="pl-c1">9000</span>/graphs/getVertices <span class="pl-k">-</span>H <span class="pl-s"><span class="pl-pds">'</span>Content-Type: Application/json<span class="pl-pds">'</span></span> <span class="pl-k">-</span>d <span class="pl-s"><span class="pl-pds">'</span></span>
+<span class="pl-s">[</span>
+<span class="pl-s">    {"serviceName": "s2graph", "columnName": "account_id", "ids": [1, 2, 3]},</span>
+<span class="pl-s">    {"serviceName": "agit", "columnName": "user_id", "ids": [1, 2, 3]}</span>
+<span class="pl-s">]</span>
+<span class="pl-s"><span class="pl-pds">'</span></span></pre></div>
+
+<h2>
+<a id="6-bulk-loading" class="anchor" href="#6-bulk-loading" aria-hidden="true"><span class="octicon octicon-link"></span></a>6. Bulk Loading</h2>
+
+<p>In many cases, the first step to start using s2graph is to migrate a large dataset into s2graph. s2graph provides a bulk loading script for importing the initial dataset. </p>
+
+<p>To use bulk load, you need running <a href="https://spark.apache.org/">Spark</a> cluster and <strong>TSV file</strong> with bulk load format.</p>
+
+<p>Note that if you don't need extra properties on vertices(i.e., you only need vertex id), you only need to publish the edges and not the vertices. Publishing edges will effectively create vertices with empty properties.</p>
+
+<h4>
+<a id="edge-format" class="anchor" href="#edge-format" aria-hidden="true"><span class="octicon octicon-link"></span></a>Edge Format</h4>
+
+<table>
+<thead>
+<tr>
+<th align="left">timestamp</th>
+<th>operation</th>
+<th align="center">logType</th>
+<th>from</th>
+<th>to</th>
+<th>label</th>
+<th>props</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">1416236400</td>
+<td>insert</td>
+<td align="center">edge</td>
+<td>56493</td>
+<td>26071316</td>
+<td>talk_friend_long_term_agg_by_account_id</td>
+<td>{"timestamp":1416236400,"score":0}</td>
+</tr>
+</tbody>
+</table>
+
+<h4>
+<a id="vertex-format" class="anchor" href="#vertex-format" aria-hidden="true"><span class="octicon octicon-link"></span></a>Vertex Format</h4>
+
+<table>
+<thead>
+<tr>
+<th align="left">timestamp</th>
+<th>operation</th>
+<th align="center">logType</th>
+<th>id</th>
+<th>serviceName</th>
+<th>columnName</th>
+<th>props</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">1416236400</td>
+<td>insert</td>
+<td align="center">vertex</td>
+<td>56493</td>
+<td>kakaotalk</td>
+<td>account_id</td>
+<td><code>{"is_active":true, "country_iso": "kr"}</code></td>
+</tr>
+</tbody>
+</table>
+
+<h3>
+<a id="build" class="anchor" href="#build" aria-hidden="true"><span class="octicon octicon-link"></span></a>Build</h3>
+
+<p>to build bulk loader, you need to build loader project. just run following commend.</p>
+
+<blockquote>
+<p>`sbt "project loader" "clean" "assembly"</p>
+</blockquote>
+
+<p>you will see <strong>s2graph-loader-assembly-0.0.4-SNAPSHOT.jar</strong> under loader/target/scala-2.xx/</p>
+
+<h3>
+<a id="source-data-storage-options" class="anchor" href="#source-data-storage-options" aria-hidden="true"><span class="octicon octicon-link"></span></a>Source Data Storage Options</h3>
+
+<p>For bulk loading, source data can be either in HDFS or Kafka queue.</p>
+
+<h4>
+<a id="1-when-the-source-data-is-in-hdfs" class="anchor" href="#1-when-the-source-data-is-in-hdfs" aria-hidden="true"><span class="octicon octicon-link"></span></a>1. When the source data is in HDFS.</h4>
+
+<ul>
+<li>run subscriber.GraphSubscriber to bulk upload HDFS TSV file into s2graph. </li>
+<li>make sure how many edges are parsed/stored by looking at Spark UI.</li>
+</ul>
+
+<h4>
+<a id="2-when-the-source-data-is-in-kafka" class="anchor" href="#2-when-the-source-data-is-in-kafka" aria-hidden="true"><span class="octicon octicon-link"></span></a>2. When the source data is in Kafka.</h4>
+
+<p>assumes that data is bulk loading format and constantly comming into Kafka MQ.</p>
+
+<ul>
+<li>run subscriber.GraphSubscriberStreaming to extract and load into s2graph from kafka topic.</li>
+<li>make sure how many edges are parsed/stored by looking at Spark UI.</li>
+</ul>
+
+<h4>
+<a id="3-online-migration" class="anchor" href="#3-online-migration" aria-hidden="true"><span class="octicon octicon-link"></span></a>3. online migration</h4>
+
+<p>following is the way we do online migration from RDBMS to s2graph. assumes that client send same events that goes to primary storage(RDBMS) and s2graph.</p>
+
+<ul>
+<li>mark label as isAsync true. this will queue all events into kafka queue.</li>
+<li>dump RDBMS and build bulk load file in TSV. </li>
+<li>update TSV file with subscriber.GraphSubscriber.</li>
+<li>mark label as isAsync false. this will stop queuing events into kafka queue and apply changes into s2graph directly. </li>
+<li>since s2graph is Idempotent, it is safe to replay queued message while bulk load process. so just use subscriber.GraphSubscriberStreaming to queued events.</li>
+</ul>
+
+<h2>
+<a id="7-benchmark" class="anchor" href="#7-benchmark" aria-hidden="true"><span class="octicon octicon-link"></span></a>7. Benchmark</h2>
+
+<h3>
+<a id="test-data" class="anchor" href="#test-data" aria-hidden="true"><span class="octicon octicon-link"></span></a>Test data</h3>
+
+<ol>
+<li>kakao talk full graph(8.8 billion edges)</li>
+<li>sample 10 million user id that have more than 100 friends.</li>
+<li>number of region server for HBase = 20</li>
+</ol>
+
+<h4>
+<a id="1-friend-of-friend" class="anchor" href="#1-friend-of-friend" aria-hidden="true"><span class="octicon octicon-link"></span></a>1. friend of friend</h4>
+
+<p><strong>find 50 talk friends then find 20 talk friends</strong></p>
+
+<pre><code> {
+    "srcVertices": [{"serviceName": "kakaotalk", "columnName": "talk_user_id", "id":$id}],
+    "steps": [
+      [{"label": "talk_friend", "direction": "out", "limit": 50}],
+      [{"label": "talk_friend", "direction": "out", "limit": 20}]
+    ]
+    }
+</code></pre>
+
+<p>total vuser = 980</p>
+
+<table>
+<thead>
+<tr>
+<th align="left">number of rest server</th>
+<th>tps</th>
+<th align="center">mean test time</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">10</td>
+<td>5,981.5</td>
+<td align="center">151.36 ms</td>
+</tr>
+<tr>
+<td align="left">20</td>
+<td>10,589</td>
+<td align="center">86.45 ms</td>
+</tr>
+<tr>
+<td align="left">30</td>
+<td>16,295.4</td>
+<td align="center">56.43 ms</td>
+</tr>
+</tbody>
+</table>
+
+<h4>
+<a id="2-friends" class="anchor" href="#2-friends" aria-hidden="true"><span class="octicon octicon-link"></span></a>2. friends</h4>
+
+<p><strong>find 100 talk friends</strong></p>
+
+<pre><code> {
+    "srcVertices": [{"serviceName": "kakaotalk", "columnName": "talk_user_id", "id":$id}],
+    "steps": [
+      [{"label": "talk_friend", "direction": "out", "limit": 100}]
+    ]
+    }
+</code></pre>
+
+<p>total vuser = 2,072</p>
+
+<table>
+<thead>
+<tr>
+<th align="left">number of rest server</th>
+<th>tps</th>
+<th align="center">mean test time</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">20</td>
+<td>53,713.4</td>
+<td align="center">37.31 ms</td>
+</tr>
+</tbody>
+</table>
+
+<h2>
+<a id="new-benchmark-asynchbase" class="anchor" href="#new-benchmark-asynchbase" aria-hidden="true"><span class="octicon octicon-link"></span></a>new benchmark (asynchbase)</h2>
+
+<h4>
+<a id="1-one-step-query" class="anchor" href="#1-one-step-query" aria-hidden="true"><span class="octicon octicon-link"></span></a>1. one step query</h4>
+
+<pre><code>{
+    "srcVertices": [
+        {
+            "serviceName": "kakaotalk",
+            "columnName": "talk_user_id",
+            "id": %s    
+        }
+    ],
+    "steps": [
+      [
+        {
+          "label": "talk_friend_long_term_agg", 
+          "direction": "out", 
+          "offset": 0, 
+          "limit": %d
+        }
+      ]
+    ]
+}
+</code></pre>
+
+<table>
+<thead>
+<tr>
+<th align="left">number of rest server</th>
+<th>vuser</th>
+<th align="center">offset</th>
+<th>first step limit</th>
+<th>tps</th>
+<th>latency</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">1</td>
+<td>30</td>
+<td align="center">0</td>
+<td>10</td>
+<td>9790TPS</td>
+<td>3ms</td>
+</tr>
+<tr>
+<td align="left">1</td>
+<td>30</td>
+<td align="center">80</td>
+<td>10</td>
+<td>9,958.2TPS</td>
+<td>2.91ms</td>
+</tr>
+<tr>
+<td align="left">1</td>
+<td>30</td>
+<td align="center">0</td>
+<td>20</td>
+<td>7,418.1TPS</td>
+<td>3.92ms</td>
+</tr>
+<tr>
+<td align="left">1</td>
+<td>30</td>
+<td align="center">0</td>
+<td>40</td>
+<td>5,118.5TPS</td>
+<td>5.72ms</td>
+</tr>
+<tr>
+<td align="left">1</td>
+<td>30</td>
+<td align="center">0</td>
+<td>60</td>
+<td>3,966.9TPS</td>
+<td>7.38ms</td>
+</tr>
+<tr>
+<td align="left">1</td>
+<td>30</td>
+<td align="center">0</td>
+<td>80</td>
+<td>3,408.4TPS</td>
+<td>8.58ms</td>
+</tr>
+<tr>
+<td align="left">1</td>
+<td>30</td>
+<td align="center">0</td>
+<td>100</td>
+<td>3,048.1TPS</td>
+<td>9.76ms</td>
+</tr>
+<tr>
+<td align="left">2</td>
+<td>60</td>
+<td align="center">0</td>
+<td>100</td>
+<td>5,869.4TPS</td>
+<td>10.04ms</td>
+</tr>
+<tr>
+<td align="left">4</td>
+<td>120</td>
+<td align="center">0</td>
+<td>100</td>
+<td>11,473.1TPS</td>
+<td>10.27ms</td>
+</tr>
+</tbody>
+</table>
+
+<h4>
+<a id="2-two-step-query" class="anchor" href="#2-two-step-query" aria-hidden="true"><span class="octicon octicon-link"></span></a>2. two step query</h4>
+
+<pre><code>{
+    "srcVertices": [
+        {
+            "serviceName": "kakaotalk",
+            "columnName": "talk_user_id",
+            "id": %s    
+        }
+    ],
+    "steps": [
+      [
+        {
+          "label": "talk_friend_long_term_agg", 
+          "direction": "out", 
+          "offset": 0, 
+          "limit": %d
+        }
+      ], 
+      [
+        {
+          "label": "talk_friend_long_term_agg", 
+          "direction": "out", 
+          "offset": 0, 
+          "limit": %d
+        }
+      ]
+    ]
+}
+</code></pre>
+
+<table>
+<thead>
+<tr>
+<th align="left">number of rest server</th>
+<th>vuser</th>
+<th align="center">first step limit</th>
+<th>second step limit</th>
+<th>tps</th>
+<th>latency</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">1</td>
+<td>30</td>
+<td align="center">10</td>
+<td>10</td>
+<td>2,008.2TPS</td>
+<td>14.7ms</td>
+</tr>
+<tr>
+<td align="left">1</td>
+<td>30</td>
+<td align="center">10</td>
+<td>20</td>
+<td>1,221.3TPS</td>
+<td>24.13ms</td>
+</tr>
+<tr>
+<td align="left">1</td>
+<td>30</td>
+<td align="center">10</td>
+<td>40</td>
+<td>678TPS</td>
+<td>43.92ms</td>
+</tr>
+<tr>
+<td align="left">1</td>
+<td>30</td>
+<td align="center">10</td>
+<td>60</td>
+<td>488.2TPS</td>
+<td>60.72ms</td>
+</tr>
+<tr>
+<td align="left">1</td>
+<td>30</td>
+<td align="center">10</td>
+<td>80</td>
+<td>360.2TPS</td>
+<td>82.55ms</td>
+</tr>
+<tr>
+<td align="left">1</td>
+<td>30</td>
+<td align="center">10</td>
+<td>100</td>
+<td>312.1TPS</td>
+<td>94.7ms</td>
+</tr>
+<tr>
+<td align="left">1</td>
+<td>20</td>
+<td align="center">10</td>
+<td>100</td>
+<td>297TPS</td>
+<td>66.73ms</td>
+</tr>
+<tr>
+<td align="left">1</td>
+<td>10</td>
+<td align="center">10</td>
+<td>100</td>
+<td>302TPS</td>
+<td>32.86ms</td>
+</tr>
+<tr>
+<td align="left">1</td>
+<td>30</td>
+<td align="center">20</td>
+<td>10</td>
+<td>1163.3TPS</td>
+<td>25.5ms</td>
+</tr>
+<tr>
+<td align="left">1</td>
+<td>30</td>
+<td align="center">20</td>
+<td>20</td>
+<td>645.9TPS</td>
+<td>45.79ms</td>
+</tr>
+<tr>
+<td align="left">1</td>
+<td>30</td>
+<td align="center">40</td>
+<td>10</td>
+<td>618.4TPS</td>
+<td>47.96ms</td>
+</tr>
+<tr>
+<td align="left">1</td>
+<td>30</td>
+<td align="center">60</td>
+<td>10</td>
+<td>448.9TPS</td>
+<td>66.16ms</td>
+</tr>
+<tr>
+<td align="left">1</td>
+<td>30</td>
+<td align="center">80</td>
+<td>10</td>
+<td>339.3TPS</td>
+<td>87.82ms</td>
+</tr>
+<tr>
+<td align="left">1</td>
+<td>30</td>
+<td align="center">100</td>
+<td>10</td>
+<td>272.5TPS</td>
+<td>108.65ms</td>
+</tr>
+<tr>
+<td align="left">1</td>
+<td>20</td>
+<td align="center">100</td>
+<td>10</td>
+<td>288.5TPS</td>
+<td>68.34ms</td>
+</tr>
+<tr>
+<td align="left">1</td>
+<td>10</td>
+<td align="center">100</td>
+<td>10</td>
+<td>261.4TPS</td>
+<td>37.49ms</td>
+</tr>
+<tr>
+<td align="left">2</td>
+<td>60</td>
+<td align="center">100</td>
+<td>10</td>
+<td>412.9TPS</td>
+<td>143.83ms</td>
+</tr>
+<tr>
+<td align="left">4</td>
+<td>120</td>
+<td align="center">100</td>
+<td>10</td>
+<td>791.7TPS</td>
+<td>150.06ms</td>
+</tr>
+</tbody>
+</table>
+
+<h4>
+<a id="3-three-step-query" class="anchor" href="#3-three-step-query" aria-hidden="true"><span class="octicon octicon-link"></span></a>3. three step query</h4>
+
+<pre><code>{
+    "srcVertices": [
+        {
+            "serviceName": "kakaotalk",
+            "columnName": "talk_user_id",
+            "id": %s    
+        }
+    ],
+    "steps": [
+      [
+        {
+          "label": "talk_friend_long_term_agg", 
+          "direction": "out", 
+          "offset": 0, 
+          "limit": %d
+        }
+      ], 
+      [
+        {
+          "label": "talk_friend_long_term_agg", 
+          "direction": "out", 
+          "offset": 0, 
+          "limit": %d
+        }
+      ],
+      [
+        {
+          "label": "talk_friend_long_term_agg", 
+          "direction": "out", 
+          "offset": 0, 
+          "limit": %d
+        }
+      ]
+    ]
+}
+</code></pre>
+
+<table>
+<thead>
+<tr>
+<th align="left">number of rest server</th>
+<th>vuser</th>
+<th align="center">first step limit</th>
+<th>second step limit</th>
+<th>third step limit</th>
+<th>tps</th>
+<th>latency</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">1</td>
+<td>30</td>
+<td align="center">10</td>
+<td>10</td>
+<td>10</td>
+<td>250.2TPS</td>
+<td>118.86ms</td>
+</tr>
+<tr>
+<td align="left">1</td>
+<td>30</td>
+<td align="center">10</td>
+<td>10</td>
+<td>20</td>
+<td>90.4TPS</td>
+<td>329.46ms</td>
+</tr>
+<tr>
+<td align="left">1</td>
+<td>20</td>
+<td align="center">10</td>
+<td>10</td>
+<td>20</td>
+<td>83.2TPS</td>
+<td>238.42ms</td>
+</tr>
+<tr>
+<td align="left">1</td>
+<td>10</td>
+<td align="center">10</td>
+<td>10</td>
+<td>20</td>
+<td>82.6TPS</td>
+<td>120.16ms</td>
+</tr>
+</tbody>
+</table>
+      </section>
+    </div>
+
+    <!-- FOOTER  -->
+    <div id="footer_wrap" class="outer">
+      <footer class="inner">
+        <p class="copyright">S2graph maintained by <a href="https://github.com/daumkakao">daumkakao</a></p>
+        <p>Published with <a href="https://pages.github.com">GitHub Pages</a></p>
+      </footer>
+    </div>
+
+              <script type="text/javascript">
+            var gaJsHost = (("https:" == document.location.protocol) ? "https://ssl." : "http://www.");
+            document.write(unescape("%3Cscript src='" + gaJsHost + "google-analytics.com/ga.js' type='text/javascript'%3E%3C/script%3E"));
+          </script>
+          <script type="text/javascript">
+            try {
+              var pageTracker = _gat._getTracker("UA-18845229-1");
+            pageTracker._trackPageview();
+            } catch(err) {}
+          </script>
+
+
+  </body>
+</html>
