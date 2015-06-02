@@ -223,7 +223,7 @@ To create a Label, the following fields needs to be specified in the request.
 >>3. **_to** is reserved for 
 
 ### 1.2 label example
-The following is an example that creates a label named `graph_test`, which represents the relation between `account_id` in service named `s2graph` and `account_id` in the same service, with indexed properties `timestamp` and `affinity_score` which both have the zero default value.
+The following is an example that creates a label named `graph_test`, which represents the relation between `account_id` in service named `s2graph` and `item_id` in the same service, with indexed properties `timestamp` and `affinity_score` which both have the zero default value.
 
 ```
 curl -XPOST localhost:9000/graphs/createLabel -H 'Content-Type: Application/json' -d '
