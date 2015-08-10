@@ -7,13 +7,14 @@ import scala.util.hashing.MurmurHash3
 
 //import com.daumkakao.s2graph.core.models._
 
+import com.daumkakao.s2graph.core.Graph.edgeCf
 import com.daumkakao.s2graph.core.parsers.Where
 import com.daumkakao.s2graph.core.types2._
-import play.api.Logger
-import scala.collection.mutable.ListBuffer
 import org.apache.hadoop.hbase.util.Bytes
-import org.hbase.async.{GetRequest, ScanFilter, ColumnRangeFilter}
-import Graph.{edgeCf}
+import org.hbase.async.{ColumnRangeFilter, GetRequest, ScanFilter}
+import play.api.Logger
+
+import scala.collection.mutable.ListBuffer
 
 object Query {
   val initialScore = 1.0
@@ -87,7 +88,8 @@ case class Query(vertices: Seq[Vertex] = Seq.empty[Vertex],
 }
 
 object EdgeTransformer {
-  val defaultJson = Json.arr(Json.arr("_to"))
+  val defaultTransformField = Json.arr("_to")
+  val defaultJson = Json.arr(defaultTransformField)
 }
 
 /**
@@ -102,7 +104,7 @@ case class EdgeTransformer(queryParam: QueryParam, jsValue: JsValue) {
               nextStepOpt: Option[Step]): Seq[InnerValLike] = {
     val tokens = fmt.split(delimiter)
     val mergedStr = tokens.zip(values).map { case (prefix, innerVal) => prefix + innerVal.toString }.mkString
-//    Logger.error(s"${tokens.toList}, ${values}, $mergedStr")
+    //    Logger.error(s"${tokens.toList}, ${values}, $mergedStr")
     val nextQueryParams = nextStepOpt.map(_.queryParams).getOrElse(Seq(queryParam)).filter { qParam =>
       if (qParam.labelWithDir.dir == GraphUtil.directions("out")) qParam.label.tgtColumnType == "string"
       else qParam.label.srcColumnType == "string"
@@ -119,12 +121,12 @@ case class EdgeTransformer(queryParam: QueryParam, jsValue: JsValue) {
       case LabelMeta.to.name => Option(edge.tgtVertex.innerId)
       case LabelMeta.from.name => Option(edge.srcVertex.innerId)
       case _ =>
-//        val columnType =
-//          if (queryParam.labelWithDir.dir == GraphUtil.directions("out")) queryParam.label.tgtColumnType
-//          else queryParam.label.srcColumnType
+        //        val columnType =
+        //          if (queryParam.labelWithDir.dir == GraphUtil.directions("out")) queryParam.label.tgtColumnType
+        //          else queryParam.label.srcColumnType
         for {
           labelMeta <- queryParam.label.metaPropsInvMap.get(fieldName)
-//          if labelMeta.dataType == columnType
+          //          if labelMeta.dataType == columnType
           value <- edge.propsWithTs.get(labelMeta.seq)
         } yield value.innerVal
     }
@@ -132,8 +134,8 @@ case class EdgeTransformer(queryParam: QueryParam, jsValue: JsValue) {
 
   def transform(edge: Edge, nextStepOpt: Option[Step]): Seq[Edge] = {
     val edges = for {
-      eachOutputFields <- jsValue.asOpt[List[JsValue]].getOrElse(Nil)
-      fields = eachOutputFields.as[List[String]]
+      target <- jsValue.asOpt[List[List[String]]].toList
+      fields <- target if fields != EdgeTransformer.defaultTransformField.as[List[String]]
       innerVal <- {
         if (fields.size == 1) {
           val fieldName = fields.head
@@ -144,8 +146,8 @@ case class EdgeTransformer(queryParam: QueryParam, jsValue: JsValue) {
         }
       }
     } yield edge.updateTgtVertex(innerVal)
-//    Logger.debug(s"[Transformer]: $edge -> $edges")
-    edges
+
+    edge :: edges
   }
 }
 
@@ -215,9 +217,9 @@ object QueryParam {
 
 case class QueryParam(labelWithDir: LabelWithDirection, timestamp: Long = System.currentTimeMillis()) {
 
-  import Query.DuplicatePolicy._
-  import Query.DuplicatePolicy
   import HBaseSerializable._
+  import Query.DuplicatePolicy
+  import Query.DuplicatePolicy._
 
   val label = Label.findById(labelWithDir.labelId)
   val defaultKey = LabelIndex.defaultSeq
@@ -294,7 +296,6 @@ case class QueryParam(labelWithDir: LabelWithDirection, timestamp: Long = System
   }
 
   def interval(from: Seq[(Byte, InnerValLike)], to: Seq[(Byte, InnerValLike)]): QueryParam = {
-    import types2.HBaseDeserializable._
     //    val len = label.orderTypes.size.toByte
     //    val len = label.extraIndicesMap(labelOrderSeq).sortKeyTypes.size.toByte
     //    Logger.error(s"indicesMap: ${label.indicesMap(labelOrderSeq)}")
