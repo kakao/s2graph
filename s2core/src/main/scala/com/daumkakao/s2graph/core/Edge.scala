@@ -4,9 +4,10 @@ import java.util
 import java.util.concurrent.TimeUnit
 
 import com.daumkakao.s2graph.core.mysqls._
+import com.stumbleupon.async.{Callback, Deferred}
 
 import scala.concurrent.duration.{Duration, FiniteDuration}
-import scala.util.Random
+import scala.util.{Failure, Success, Try, Random}
 import scala.util.hashing.MurmurHash3
 
 //import com.daumkakao.s2graph.core.models._
@@ -19,6 +20,7 @@ import org.apache.hadoop.hbase.util.Bytes
 import org.hbase.async._
 import play.api.Logger
 import scala.collection.mutable.ListBuffer
+import scala.collection.JavaConversions._
 
 
 case class EdgeWithIndexInverted(srcVertex: Vertex,
@@ -68,7 +70,7 @@ case class EdgeWithIndexInverted(srcVertex: Vertex,
 
   def buildDeleteAsync() = {
     val ret = new DeleteRequest(label.hbaseTableName.getBytes, rowKey.bytes, edgeCf, qualifier.bytes, version)
-//    Logger.debug(s"$ret, $version")
+    //    Logger.debug(s"$ret, $version")
     ret
   }
 
@@ -178,6 +180,17 @@ case class EdgeWithIndex(srcVertex: Vertex,
     }
   }
 
+  def buildIncrementsCountAsync(amount: Long = 1L): List[HBaseRpc] = {
+    if (!hasAllPropsForIndex) {
+      Logger.error(s"$this dont have all props for index")
+      List.empty[AtomicIncrementRequest]
+    } else {
+      val incr = new AtomicIncrementRequest(label.hbaseTableName.getBytes, rowKey.bytes, edgeCf, qualifier.bytes, amount)
+      Logger.debug(s"$incr")
+      List(incr)
+    }
+  }
+
   def buildDeletes(): List[Delete] = {
     if (!hasAllPropsForIndex) List.empty[Delete]
     else {
@@ -191,7 +204,7 @@ case class EdgeWithIndex(srcVertex: Vertex,
     if (!hasAllPropsForIndex) List.empty[DeleteRequest]
     else {
       val deleteRequest = new DeleteRequest(label.hbaseTableName.getBytes, rowKey.bytes, edgeCf, qualifier.bytes, ts)
-//      Logger.error(s"$deleteRequest, $ts")
+      //      Logger.error(s"$deleteRequest, $ts")
       List(deleteRequest)
     }
   }
@@ -226,8 +239,9 @@ case class Edge(srcVertex: Vertex,
   def schemaVer = label.schemaVersion
 
   def props = for ((k, v) <- propsWithTs) yield (k -> v.innerVal)
-//    if (op == GraphUtil.operations("delete")) Map(LabelMeta.timeStampSeq -> InnerVal.withLong(ts, schemaVer))
-//    else for ((k, v) <- propsWithTs) yield (k -> v.innerVal)
+
+  //    if (op == GraphUtil.operations("delete")) Map(LabelMeta.timeStampSeq -> InnerVal.withLong(ts, schemaVer))
+  //    else for ((k, v) <- propsWithTs) yield (k -> v.innerVal)
 
   def relatedEdges = {
     labelWithDir.dir match {
@@ -325,7 +339,7 @@ case class Edge(srcVertex: Vertex,
   }
 
   override def hashCode(): Int = {
-//    Logger.debug(s"Edge.hashCode: $this")
+    //    Logger.debug(s"Edge.hashCode: $this")
     MurmurHash3.stringHash(srcVertex.innerId + "," + labelWithDir + "," + tgtVertex.innerId)
   }
 
@@ -431,6 +445,7 @@ case class Edge(srcVertex: Vertex,
       e.buildDegreeDeletesAsync()
     }
   }
+
   def deleteBulkEdgeUpdate(invertedEdgeOpt: Option[Edge], requestEdge: Edge): EdgeUpdate = {
     val oldPropsWithTs = invertedEdgeOpt.map(_.propsWithTs).getOrElse(Map.empty)
     val newPropsWithTs = Map(LabelMeta.lastDeletedAt ->
@@ -450,7 +465,7 @@ case class Edge(srcVertex: Vertex,
     val indexedEdgeMutations = for {
       relEdge <- requestEdge.relatedEdges
       edgeWithIndex <- relEdge.edgesWithIndex
-//      edgeWithIndex <- relEdge.copy(version = relEdge.version + Edge.incrementVersion).edgesWithIndex
+      //      edgeWithIndex <- relEdge.copy(version = relEdge.version + Edge.incrementVersion).edgesWithIndex
       rpc <- edgeWithIndex.buildDeletesAsync() ++ edgeWithIndex.buildIncrementsAsync(-1L)
     } yield {
         Logger.debug(s"$rpc")
@@ -458,14 +473,14 @@ case class Edge(srcVertex: Vertex,
       }
 
     val invertedEdgeMutations =
-//      if (!shouldReplace) Nil else
-        newInvertedEdgeOpt.map(e => List(e.buildPutAsync())).getOrElse(Nil)
+    //      if (!shouldReplace) Nil else
+      newInvertedEdgeOpt.map(e => List(e.buildPutAsync())).getOrElse(Nil)
 
     EdgeUpdate(indexedEdgeMutations, invertedEdgeMutations, newInvertedEdge = newInvertedEdgeOpt)
   }
 
   def deleteBulk(): Unit = {
-//    mutate(deleteBulkEdgeUpdate)
+    //    mutate(deleteBulkEdgeUpdate)
     for {
       (queryParam, invertedEdgeOpt) <- fetchInvertedAsync()
       edgeUpdate = deleteBulkEdgeUpdate(invertedEdgeOpt, this)
@@ -606,7 +621,7 @@ case class Edge(srcVertex: Vertex,
         (seq, w) <- r.keySeqAndWeights
       } {
         seq match {
-          case -1 => {
+          case LabelMeta.countSeq => {
             //case key == "count"
             sum += 1
           }
@@ -959,7 +974,7 @@ object Edge extends JSONParser {
   //    ret
   //  }
 
-  def toEdges(kvs: Seq[KeyValue], queryParam: QueryParam, prevScore: Double = 1.0, isSnapshotEdge: Boolean = false): Seq[(Edge, Double)] = {
+  def toEdges(kvs: Seq[KeyValue], queryParam: QueryParam, prevScore: Double = 1.0): Seq[(Edge, Double)] = {
     if (kvs.isEmpty) Seq.empty
     else {
       val first = kvs.head
@@ -967,7 +982,7 @@ object Edge extends JSONParser {
       val edgeRowKeyLike = Option(EdgeRowKey.fromBytes(firstKeyBytes, 0, firstKeyBytes.length, queryParam.label.schemaVersion)._1)
       for {
         kv <- kvs
-        edge <- if (isSnapshotEdge) toSnapshotEdge(kv, queryParam, edgeRowKeyLike) else toEdge(kv, queryParam, edgeRowKeyLike)
+        edge <- if (queryParam.isSnapshotEdge) toSnapshotEdge(kv, queryParam, edgeRowKeyLike) else toEdge(kv, queryParam, edgeRowKeyLike)
       } yield {
         (edge, edge.rank(queryParam.rank) * prevScore)
       }
@@ -1025,7 +1040,7 @@ object Edge extends JSONParser {
   }
 
   def toEdge(kv: KeyValue, param: QueryParam, edgeRowKeyLike: Option[EdgeRowKeyLike] = None): Option[Edge] = {
-//    Logger.debug(s"$param -> $kv")
+    Logger.debug(s"$param -> $kv")
 
     val version = kv.timestamp()
     val keyBytes = kv.key()
@@ -1049,7 +1064,16 @@ object Edge extends JSONParser {
       } else {
         /** edge */
         val (qualifier, _) = EdgeQualifier.fromBytes(kvQual, 0, kvQual.length, param.label.schemaVersion)
-        val (value, _) = EdgeValue.fromBytes(vBytes, 0, vBytes.length, param.label.schemaVersion)
+
+        val (value, _) = if (qualifier.op == GraphUtil.operations("incrementCount")) {
+          val countVal = Bytes.toLong(vBytes)
+          val dummyProps = Seq((LabelMeta.countSeq -> InnerVal.withLong(countVal, param.label.schemaVersion)))
+          (EdgeValue(dummyProps)(param.label.schemaVersion), 8)
+        } else {
+          EdgeValue.fromBytes(vBytes, 0, vBytes.length, param.label.schemaVersion)
+        }
+
+
 
         val index = param.label.indicesMap.get(rowKey.labelOrderSeq).getOrElse(
           throw new RuntimeException(s"can`t find index sequence for $rowKey ${param.label}"))
@@ -1110,14 +1134,14 @@ object Edge extends JSONParser {
       //        val ret = if (matches.size == param.hasFilters.size && param.where.map(_.filter(edge)).getOrElse(true)) {
       val ret = if (param.where.map(_.filter(edge)).getOrElse(true)) {
         //      val edge = Edge(Vertex(srcVertexId, ts), Vertex(tgtVertexId, ts), rowKey.labelWithDir, op, ts, version, props)
-      //              Logger.debug(s"fetchedEdge: $edge")
+        //              Logger.debug(s"fetchedEdge: $edge")
         Some(edge)
       } else {
         None
       }
-//      Logger.debug(s"fetchedEdge: $ret")
+      //      Logger.debug(s"fetchedEdge: $ret")
       //        val ret = Option(edge)
-      Logger.debug(s"$param, $kv, $ret")
+      //      Logger.debug(s"$param, $kv, $ret")
       //    Logger.debug(s"${cell.getQualifier().toList}, ${ret.map(x => x.toStringRaw)}")
       ret
     }
@@ -1143,4 +1167,31 @@ object Edge extends JSONParser {
     }
   }
 
+
+  def incrementCounts(edges: Seq[Edge]): Future[Seq[(Boolean, Long)]] = {
+    implicit val ex = Graph.executionContext
+    val defers: Seq[Deferred[(Boolean, Long)]] = for {
+      edge <- edges
+    } yield {
+        Try {
+          val edgeWithIndex = edge.edgesWithIndex.head
+          val countWithTs = edge.propsWithTs(LabelMeta.countSeq)
+          val countVal = countWithTs.innerVal.toString().toLong
+          val incr = edgeWithIndex.buildIncrementsCountAsync(countVal).head
+          val request = incr.asInstanceOf[AtomicIncrementRequest]
+          val client = Graph.getClient(edge.label.hbaseZkAddr)
+          val defered = Graph.deferredCallbackWithFallback[java.lang.Long, (Boolean, Long)](client.bufferAtomicIncrement(request))({
+            (resultCount: java.lang.Long) => (true, resultCount)
+          }, {
+            (false, -1L)
+          })
+          defered
+        } match {
+          case Success(r) => r
+          case Failure(ex) => Deferred.fromResult((false, -1L))
+        }
+      }
+    val grouped: Deferred[util.ArrayList[(Boolean, Long)]] = Deferred.groupInOrder(defers)
+    Graph.deferredToFutureWithoutFallback(grouped).map(_.toSeq)
+  }
 }
