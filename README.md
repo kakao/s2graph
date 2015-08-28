@@ -179,6 +179,13 @@ curl -XPOST localhost:9000/graphs/createService -H 'Content-Type: Application/js
 {"serviceName": "s2graph", "cluster": "address for zookeeper", "hTableName": "hbase table name", "hTableTTL": 86000, "preSplitSize": # of pre split}
 '
 ```
+```
+curl -XPOST localhost:9000/graphs/createService -H 'Content-Type: Application/json' -d '
+{"serviceName": "s2graph_news", "cluster": "address for zookeeper", "hTableName": "hbase table name", "hTableTTL": 86000, "preSplitSize": # of pre split}
+'
+```
+
+>note that optional value for your service is only advanced users only. stick to default if you don`t know what you are doing.
 >note that optional value for your service is only advanced users only. stick to default if you don`t know what you are doing.
 
 You can also look up all labels corresponding to a service.
@@ -270,11 +277,12 @@ curl -XPOST localhost:9000/graphs/createLabel -H 'Content-Type: Application/json
     "srcServiceName": "s2graph",
     "srcColumnName": "user_id",
     "srcColumnType": "long",
-    "tgtServiceName": "s2graph",
+    "tgtServiceName": "s2graph_news",
     "tgtColumnName": "article_id",
     "tgtColumnType": "string",
-    "indexProps": [], // _timestamp will be used as default
-    "props": []
+    "indices": [], // _timestamp will be used as default
+    "props": [],
+    "serviceName": "s2graph_news"
 }
 '
 ```
