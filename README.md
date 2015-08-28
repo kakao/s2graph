@@ -270,12 +270,11 @@ curl -XPOST localhost:9000/graphs/createLabel -H 'Content-Type: Application/json
     "srcServiceName": "s2graph",
     "srcColumnName": "user_id",
     "srcColumnType": "long",
-    "tgtServiceName": "s2graph_news",
+    "tgtServiceName": "s2graph",
     "tgtColumnName": "article_id",
     "tgtColumnType": "string",
     "indexProps": [], // _timestamp will be used as default
-    "props": [],
-    "serviceName": "s2graph_news"
+    "props": []
 }
 '
 ```
