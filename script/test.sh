@@ -1,9 +1,16 @@
-# create service.
+# create <s2graph> service.
 curl -XPOST localhost:9000/graphs/createService -H 'Content-Type: Application/json' -d '
 {"serviceName": "s2graph"}
 '
 # check service.
 curl -XGET localhost:9000/graphs/getService/s2graph
+
+# create <s2graph_news> service.
+curl -XPOST localhost:9000/graphs/createService -H 'Content-Type: Application/json' -d '
+{"serviceName": "s2graph_news"}
+'
+# check service.
+curl -XGET localhost:9000/graphs/getService/s2graph_news
 
 # create label.
 curl -XPUT localhost:9000/graphs/deleteLabel/graph_test
