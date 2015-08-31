@@ -23,6 +23,8 @@ lazy val s2core = project
 
 lazy val spark = project
 
+lazy val s2counter_core = project
+
 lazy val loader = project.dependsOn(s2core, spark)
 
 libraryDependencies ++= Seq(
