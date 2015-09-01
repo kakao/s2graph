@@ -7,7 +7,7 @@ import com.typesafe.config.Config
 import org.apache.hadoop.hbase.CellUtil
 import org.apache.hadoop.hbase.client._
 import org.apache.hadoop.hbase.util.Bytes
-import org.hbase.async.KeyValue
+import org.hbase.async.{ColumnRangeFilter, FilterList, GetRequest, KeyValue}
 import org.slf4j.LoggerFactory
 import s2.config.S2CounterConfig
 import s2.counter.core.ExactCounter.ExactValueMap
@@ -47,7 +47,6 @@ class ExactStorageHBaseV1(config: Config) extends ExactStorage {
                    timeRange: Seq[(TimedQualifier, TimedQualifier)],
                    dimQuery: Map[String, Set[String]])
                   (implicit ex: ExecutionContext): Future[Seq[FetchedCountsGrouped]] = {
-    import org.hbase.async.{ColumnRangeFilter, FilterList, GetRequest}
 
     val tableName = getTableName(policy)
 
@@ -198,7 +197,6 @@ class ExactStorageHBaseV1(config: Config) extends ExactStorage {
   override def get(policy: Counter,
                    queries: Seq[(ExactKeyTrait, Seq[ExactQualifier])])
                   (implicit ex: ExecutionContext): Future[Seq[FetchedCounts]] = {
-    import org.hbase.async.GetRequest
 
     val tableName = getTableName(policy)
 

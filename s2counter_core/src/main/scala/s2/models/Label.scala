@@ -3,6 +3,7 @@ package s2.models
 import com.typesafe.config.Config
 import org.slf4j.LoggerFactory
 import s2.config.S2CounterConfig
+import s2.util.CollectionCacheConfig
 import scalikejdbc._
 
 /**
@@ -11,7 +12,7 @@ import scalikejdbc._
 class LabelModel(config: Config) extends CachedDBModel[Label] {
   private lazy val s2Config = new S2CounterConfig(config)
   // enable negative cache
-  override val cacheConfig: ConfigurableCacheConfig = new ConfigurableCacheConfig(s2Config.CACHE_MAX_SIZE, s2Config.CACHE_TTL_SECONDS, true)
+  override val cacheConfig: CollectionCacheConfig = new CollectionCacheConfig(s2Config.CACHE_MAX_SIZE, s2Config.CACHE_TTL_SECONDS, true)
 
   val log = LoggerFactory.getLogger(this.getClass)
 

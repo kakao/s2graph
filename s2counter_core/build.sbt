@@ -1,4 +1,4 @@
-organization := "com.daumkakao"
+organization := Common.organization
 
 name := "s2counter-core"
 
@@ -31,7 +31,3 @@ libraryDependencies ++= Seq(
 }
 
 resolvers ++= Common.resolvers
-
-publishTo := Some("artifactory" at "http://maven.daumcorp.com/content/repositories/dk-aa-snapshots/")
-
-credentials += Credentials(Path.userHome / ".ivy2" / ".credentials")

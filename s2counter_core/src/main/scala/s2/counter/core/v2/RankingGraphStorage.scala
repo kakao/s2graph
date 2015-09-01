@@ -1,6 +1,5 @@
 package s2.counter.core.v2
 
-import aa.mango.json._
 import com.typesafe.config.Config
 import org.apache.http.HttpStatus
 import org.slf4j.LoggerFactory
@@ -61,20 +60,6 @@ case class RankingGraphStorage(config: Config) extends RankingStorage {
       log.error(s"$respLs")
       throw new RuntimeException("update failed.")
     }
-  }
-
-  def delete(key: RankingKey, deleteRankingMap: Map[String, Double]) = {
-    // /graphs/edges/delete
-    val bucket = makeBucketSimple(key)
-
-    val timestamp: Long = System.currentTimeMillis
-    val valueArray = deleteRankingMap.map { case (item, value) =>
-      S2GraphInsertUpdateDeleteReq(bucket, item, "s2counter_ranking", timestamp, Map("score" -> value.toLong))
-    }.toArray
-
-    Http(s"$s2graphUrl/graphs/edges/delete")
-      .postData(toJson(valueArray))
-      .header("content-type", "application/json").execute()
   }
 
   private def toWithScoreLs(edges: List[JsValue]): List[(String, Double)] = {

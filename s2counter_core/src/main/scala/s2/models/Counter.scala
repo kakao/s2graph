@@ -2,7 +2,7 @@ package s2.models
 
 import com.typesafe.config.Config
 import s2.config.S2CounterConfig
-import s2.util.CollectionCache
+import s2.util.{CollectionCache, CollectionCacheConfig}
 import scalikejdbc._
 
 /**
@@ -68,8 +68,8 @@ object Counter extends SQLSyntaxSupport[Counter] {
 class CounterModel(config: Config) extends CachedDBModel[Counter] {
   private lazy val s2Config = new S2CounterConfig(config)
   // enable negative cache
-  override val cacheConfig: ConfigurableCacheConfig =
-    new ConfigurableCacheConfig(s2Config.CACHE_MAX_SIZE, s2Config.CACHE_TTL_SECONDS,
+  override val cacheConfig: CollectionCacheConfig =
+    new CollectionCacheConfig(s2Config.CACHE_MAX_SIZE, s2Config.CACHE_TTL_SECONDS,
       negativeCache = true, s2Config.CACHE_NEGATIVE_TTL_SECONDS)
 
   val c = Counter.syntax("c")

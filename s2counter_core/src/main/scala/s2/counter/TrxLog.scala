@@ -1,8 +1,6 @@
 package s2.counter
 
-import org.apache.hadoop.hbase.client.Result
 import play.api.libs.json.Json
-import s2.counter.core.ExactQualifier
 
 /**
  * Created by alec on 15. 4. 7..
