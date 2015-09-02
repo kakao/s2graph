@@ -1,12 +1,14 @@
 package s2.counter.core.v2
 
+import com.daumkakao.s2graph.core.mysqls.Label
+import com.daumkakao.s2graph.core.types2.HBaseType
 import com.typesafe.config.Config
 import org.apache.http.HttpStatus
 import org.slf4j.LoggerFactory
 import play.api.libs.json.{JsNumber, JsString, JsValue, Json}
 import s2.counter.core.ExactCounter.ExactValueMap
 import s2.counter.core._
-import s2.models.{Counter, Label, LabelModel}
+import s2.models.Counter
 import s2.util.CartesianProduct
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -26,8 +28,6 @@ case class ExactStorageGraph(config: Config) extends ExactStorage {
 
   private val SERVICE_NAME = "s2counter"
   private val COLUMN_NAME = "bucket"
-//  private val counterModel = new CounterModel(config)
-  private val labelModel = new LabelModel(config)
   private val labelPostfix = "_counts"
 
   val s2graphUrl = config.getString("s2graph.url")
@@ -85,9 +85,18 @@ case class ExactStorageGraph(config: Config) extends ExactStorage {
     } yield {
       val from = exactKey.itemKey
       val to = eq.dimension
-      val json = Json.obj("timestamp" -> timestamp, "operation" -> "incrementCount",
-        "from" -> from, "to" -> to, "label" -> labelName,
-        "props" -> Json.obj("_count" -> value, "time_unit" -> eq.tq.q.toString, "time_value" -> eq.tq.ts))
+      val json = Json.obj(
+        "timestamp" -> timestamp,
+        "operation" -> "incrementCount",
+        "from" -> from,
+        "to" -> to,
+        "label" -> labelName,
+        "props" -> Json.obj(
+          "_count" -> value,
+          "time_unit" -> eq.tq.q.toString,
+          "time_value" -> eq.tq.ts
+        )
+      )
       (exactKey, eq, json)
     }
   }
@@ -98,7 +107,8 @@ case class ExactStorageGraph(config: Config) extends ExactStorage {
                    dimQuery: Map[String, Set[String]])
                   (implicit ex: ExecutionContext): Future[Seq[FetchedCountsGrouped]] = {
     val labelName = policy.action + labelPostfix
-    val label = labelModel.findByName(labelName).get
+    val label = Label.findByName(labelName).get
+//    val label = labelModel.findByName(labelName).get
 
     val ids = Json.toJson(items)
 
@@ -203,7 +213,7 @@ case class ExactStorageGraph(config: Config) extends ExactStorage {
   private def getInner(policy: Counter, key: ExactKeyTrait, eqs: Seq[ExactQualifier])
                       (implicit ex: ExecutionContext): Future[Seq[FetchedCounts]] = {
     val labelName = policy.action + labelPostfix
-    val label = labelModel.findByName(labelName).get
+    val label = Label.findByName(labelName).get
 
     val src = Json.obj("serviceName" -> policy.service, "columnName" -> label.srcColumnName, "id" -> key.itemKey)
     val step = {
@@ -276,9 +286,9 @@ case class ExactStorageGraph(config: Config) extends ExactStorage {
     val action = policy.action
 
     if (!existsLabel(policy)) {
-      val defaultLabel = Label(-1, action, -1, "", "", -1, "s2counter_id", policy.itemType.toString.toLowerCase,
-        isDirected = true, service, -1, "weak", "", None, isAsync = false)
-      val label = labelModel.findByName(action, useCache = false)
+      val defaultLabel = Label(None, action, -1, "", "", -1, "s2counter_id", policy.itemType.toString.toLowerCase,
+        isDirected = true, service, -1, "weak", "", None, HBaseType.DEFAULT_VERSION, isAsync = false, "lz4")
+      val label = Label.findByName(action, useCache = false)
         .getOrElse(defaultLabel)
 
       val counterLabelName = action + labelPostfix

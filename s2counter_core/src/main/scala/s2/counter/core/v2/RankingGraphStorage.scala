@@ -1,12 +1,14 @@
 package s2.counter.core.v2
 
+import com.daumkakao.s2graph.core.mysqls.Label
+import com.daumkakao.s2graph.core.types2.HBaseType
 import com.typesafe.config.Config
 import org.apache.http.HttpStatus
 import org.slf4j.LoggerFactory
 import play.api.libs.json.{JsString, JsValue, Json}
 import s2.counter.core.RankingCounter.RankingValueMap
 import s2.counter.core.{RankingKey, RankingResult, RankingStorage}
-import s2.models.{Counter, CounterModel, Label, LabelModel}
+import s2.models.{Counter, CounterModel}
 
 import scalaj.http.{Http, HttpResponse}
 
@@ -20,7 +22,6 @@ case class RankingGraphStorage(config: Config) extends RankingStorage {
   private val SERVICE_NAME = "s2counter"
   private val COLUMN_NAME = "bucket"
   private val counterModel = new CounterModel(config)
-  private val labelModel = new LabelModel(config)
   private val labelPostfix = "_topK"
 
   /**
@@ -178,9 +179,9 @@ case class RankingGraphStorage(config: Config) extends RankingStorage {
 
     if (!existsLabel(policy)) {
       val graphLabel = rateActionOpt.getOrElse(action)
-      val defaultLabel = Label(-1, graphLabel, -1, "", "", -1, "s2counter_id", policy.itemType.toString.toLowerCase,
-        isDirected = true, service, -1, "weak", "", None, isAsync = false)
-      val label = labelModel.findByName(graphLabel, useCache = false)
+      val defaultLabel = Label(None, graphLabel, -1, "", "", -1, "s2counter_id", policy.itemType.toString.toLowerCase,
+        isDirected = true, service, -1, "weak", "", None, HBaseType.DEFAULT_VERSION, isAsync = false, "lz4")
+      val label = Label.findByName(graphLabel, useCache = false)
         .getOrElse(defaultLabel)
 
       val counterLabelName = action + labelPostfix
