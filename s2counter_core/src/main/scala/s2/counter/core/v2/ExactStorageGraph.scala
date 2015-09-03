@@ -6,6 +6,7 @@ import com.typesafe.config.Config
 import org.apache.http.HttpStatus
 import org.slf4j.LoggerFactory
 import play.api.libs.json.{JsNumber, JsString, JsValue, Json}
+import s2.config.S2CounterConfig
 import s2.counter.core.ExactCounter.ExactValueMap
 import s2.counter.core._
 import s2.models.Counter
@@ -17,23 +18,15 @@ import scalaj.http.Http
 /**
  * Created by hsleep(honeysleep@gmail.com) on 15. 8. 19..
  */
-object ExactStorageGraph {
-  case class RespGraph(success: Boolean, result: Long)
-  implicit val respGraphFormat = Json.format[RespGraph]
-
-  // using play-ws without play app
-  private val builder = new com.ning.http.client.AsyncHttpClientConfig.Builder()
-  private val wsClient = new play.api.libs.ws.ning.NingWSClient(builder.build)
-}
-
 case class ExactStorageGraph(config: Config) extends ExactStorage {
   private val log = LoggerFactory.getLogger(this.getClass)
+  private val s2config = new S2CounterConfig(config)
 
   private val SERVICE_NAME = "s2counter"
   private val COLUMN_NAME = "bucket"
   private val labelPostfix = "_counts"
 
-  val s2graphUrl = config.getString("s2graph.url")
+  val s2graphUrl = s2config.GRAPH_URL
 
   import ExactStorageGraph._
 
@@ -324,3 +317,13 @@ case class ExactStorageGraph(config: Config) extends ExactStorage {
     }
   }
 }
+
+object ExactStorageGraph {
+  case class RespGraph(success: Boolean, result: Long)
+  implicit val respGraphFormat = Json.format[RespGraph]
+
+  // using play-ws without play app
+  private val builder = new com.ning.http.client.AsyncHttpClientConfig.Builder()
+  private val wsClient = new play.api.libs.ws.ning.NingWSClient(builder.build)
+}
+

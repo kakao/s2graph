@@ -6,6 +6,7 @@ import com.typesafe.config.Config
 import org.apache.http.HttpStatus
 import org.slf4j.LoggerFactory
 import play.api.libs.json.{JsString, JsValue, Json}
+import s2.config.S2CounterConfig
 import s2.counter.core.RankingCounter.RankingValueMap
 import s2.counter.core.{RankingKey, RankingResult, RankingStorage}
 import s2.models.{Counter, CounterModel}
@@ -17,12 +18,15 @@ import scalaj.http.{Http, HttpResponse}
  */
 case class RankingStorageGraph(config: Config) extends RankingStorage {
   private[counter] val log = LoggerFactory.getLogger(this.getClass)
-  val s2graphUrl = config.getString("s2graph.url")
+  private val s2config = new S2CounterConfig(config)
+
   private val K_MAX = 500
   private val SERVICE_NAME = "s2counter"
   private val COLUMN_NAME = "bucket"
   private val counterModel = new CounterModel(config)
   private val labelPostfix = "_topK"
+
+  val s2graphUrl = s2config.GRAPH_URL
 
   /**
    * indexProps: ["time_unit", "time_value", "score"]

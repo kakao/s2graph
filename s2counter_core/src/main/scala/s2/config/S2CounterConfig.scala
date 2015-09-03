@@ -33,8 +33,11 @@ class S2CounterConfig(config: Config) extends ConfigFunctions(config) {
     s <- config.getStringList("redis.instances")
   } yield {
     val sp = s.split(':')
-    (sp(0), if (sp.size > 1) sp(1).toInt else 6379)
+    (sp(0), if (sp.length > 1) sp(1).toInt else 6379)
   }).toList
+
+  // graph
+  lazy val GRAPH_URL = getOrElse("s2graph.url", "http://localhost:9000")
 
   // Cache
   lazy val CACHE_TTL_SECONDS = getOrElse("cache.ttl.seconds", 600)

@@ -13,6 +13,7 @@ import s2.config.S2CounterConfig
 import s2.counter.core.TimedQualifier.IntervalUnit
 import s2.counter.core._
 import s2.counter.core.v1.{ExactStorageHBaseV1, RankingStorageV1}
+import s2.counter.core.v2.{ExactStorageGraph, RankingStorageGraph}
 import s2.models.Counter.ItemType
 import s2.models.{Counter, CounterModel}
 import s2.util.{CartesianProduct, ReduceMapValue, UnitConverter}
@@ -24,13 +25,20 @@ import scala.util.{Failure, Success, Try}
  * Created by hsleep(honeysleep@gmail.com) on 15. 5. 22..
  */
 object CounterController extends Controller {
-  val VERSION: Byte = s2.counter.VERSION_1
-
   val config = Play.current.configuration.underlying
   val s2config = new S2CounterConfig(config)
 
-  val exactCounter = new ExactCounter(config, new ExactStorageHBaseV1(config))
-  val rankingCounter = new RankingCounter(config, new RankingStorageV1(config))
+  private val exactCounterMap = Map(
+    s2.counter.VERSION_1 -> new ExactCounter(config, new ExactStorageHBaseV1(config)),
+    s2.counter.VERSION_2 -> new ExactCounter(config, new ExactStorageGraph(config))
+  )
+  private val rankingCounterMap = Map(
+    s2.counter.VERSION_1 -> new RankingCounter(config, new RankingStorageV1(config)),
+    s2.counter.VERSION_2 -> new RankingCounter(config, new RankingStorageGraph(config))
+  )
+
+  private def exactCounter(version: Byte): ExactCounter = exactCounterMap(version)
+  private def rankingCounter(version: Byte): RankingCounter = rankingCounterMap(version)
 
   lazy val counterModel = new CounterModel(config)
 
@@ -42,6 +50,7 @@ object CounterController extends Controller {
     counterModel.findByServiceAction(service, action, useCache = false) match {
       case None =>
         val body = request.body
+        val version = (body \ "version").asOpt[Byte].getOrElse(s2.counter.VERSION_2)
         val autoComb = (body \ "autoComb").asOpt[Boolean].getOrElse(true)
         val dimension = (body \ "dimension").asOpt[String].getOrElse("")
         val useProfile = (body \ "useProfile").asOpt[Boolean].getOrElse(false)
@@ -91,13 +100,13 @@ object CounterController extends Controller {
             val strItemType = (body \ "itemType").asOpt[String].getOrElse("STRING")
             ItemType.withName(strItemType.toUpperCase)
         }
-        val policy = Counter(useFlag = true, VERSION, service, action, itemType, autoComb = autoComb, dimension,
+        val policy = Counter(useFlag = true, version, service, action, itemType, autoComb = autoComb, dimension,
           useProfile = useProfile, ttl, dailyTtl, Some(hbaseTable), intervalUnit, rateActionId, rateBaseId, rateThreshold)
 
         // prepare exact storage
-        exactCounter.prepare(policy)
+        exactCounter(version).prepare(policy)
         // prepare ranking storage
-        rankingCounter.prepare(policy, rateAction.flatMap(_.get("action")))
+        rankingCounter(version).prepare(policy, rateAction.flatMap(_.get("action")))
         counterModel.createServiceAction(policy)
         Ok(Json.toJson(Map("msg" -> s"created $service/$action")))
       case Some(policy) =>
@@ -270,7 +279,7 @@ object CounterController extends Controller {
                                 timeRange: Seq[(TimedQualifier, TimedQualifier)],
                                 limitOpt: Option[Int],
                                 dimQueryValues: Map[String, Set[String]]): Future[JsValue] = {
-    exactCounter.getCountsAsync(policy, Seq(item), timeRange, dimQueryValues).map { seq =>
+    exactCounter(policy.version).getCountsAsync(policy, Seq(item), timeRange, dimQueryValues).map { seq =>
       val items = {
         for {
           fetched <- seq
@@ -281,32 +290,12 @@ object CounterController extends Controller {
       Json.toJson(ExactCounterResult(ExactCounterResultMeta(policy.service, policy.action, item), items))
     }
   }
-
-  private def getDecayedCountToJs(policy: Counter,
-                                  items: Seq[String],
-                                  timeRange: Seq[(TimedQualifier, TimedQualifier)],
-                                  dimQueryValues: Map[String, Set[String]],
-                                  qsSum: Option[String]): Future[Seq[JsValue]] = {
-    exactCounter.getDecayedCountsAsync(policy, items, timeRange, dimQueryValues, qsSum).map { seq =>
-      val results = {
-        for {
-          decayedCounts <- seq
-        } yield {
-          val meta = ExactCounterResultMeta(policy.service, policy.action, decayedCounts.exactKey.itemKey)
-          val intervalItems = decayedToResult(decayedCounts)
-          Json.toJson(ExactCounterResult(meta, intervalItems))
-        }
-      }
-      results
-    }
-  }
-
   private def getDecayedCountToJs(policy: Counter,
                                   item: String,
                                   timeRange: Seq[(TimedQualifier, TimedQualifier)],
                                   dimQueryValues: Map[String, Set[String]],
                                   qsSum: Option[String]): Future[JsValue] = {
-    exactCounter.getDecayedCountsAsync(policy, Seq(item), timeRange, dimQueryValues, qsSum).map { seq =>
+    exactCounter(policy.version).getDecayedCountsAsync(policy, Seq(item), timeRange, dimQueryValues, qsSum).map { seq =>
       val decayedCounts = seq.head
       val meta = ExactCounterResultMeta(policy.service, policy.action, decayedCounts.exactKey.itemKey)
       val intervalItems = decayedToResult(decayedCounts)
@@ -410,7 +399,7 @@ object CounterController extends Controller {
           for {
             key <- keys
           } {
-            rankingCounter.delete(key)
+            rankingCounter(policy.version).delete(key)
           }
 
           Ok(JsObject(
@@ -441,7 +430,7 @@ object CounterController extends Controller {
                                     timeRange: (TimedQualifier, TimedQualifier),
                                     dimension: Map[String, String],
                                     qsSum: Option[String]): Future[Seq[(ExactKeyTrait, Double)]] = {
-    exactCounter.getDecayedCountsAsync(policy, items, Seq(timeRange), dimension.mapValues(s => Set(s)), qsSum).map { seq =>
+    exactCounter(policy.version).getDecayedCountsAsync(policy, items, Seq(timeRange), dimension.mapValues(s => Set(s)), qsSum).map { seq =>
       for {
         DecayedCounts(exactKey, qcMap) <- seq
         value <- qcMap.values
@@ -461,7 +450,7 @@ object CounterController extends Controller {
       } yield {
         val tqs = keys.map(rk => rk.eq.tq)
         val (tqFrom, tqTo) = (tqs.last, tqs.head)
-        val items = rankingCounter.getAllItems(keys, kValue)
+        val items = rankingCounter(policy.version).getAllItems(keys, kValue)
 //        Logger.warn(s"item count: ${items.length}")
         val future = {
           if (policy.isRateCounter) {
@@ -518,7 +507,7 @@ object CounterController extends Controller {
               (exactKey, score) = ranking(idx)
             } yield {
               val realId = policy.itemType match {
-                case ItemType.BLOB => exactCounter.getBlobValue(policy, exactKey.itemKey)
+                case ItemType.BLOB => exactCounter(policy.version).getBlobValue(policy, exactKey.itemKey)
                   .getOrElse(throw new Exception(s"not found blob id. ${policy.service}.${policy.action} ${exactKey.itemKey}"))
                 case _ => exactKey.itemKey
               }
@@ -543,7 +532,7 @@ object CounterController extends Controller {
         (dimension, keys) <- dimKeys
         key <- keys
       } yield {
-        val rankingValue = rankingCounter.getTopK(key, kValue)
+        val rankingValue = rankingCounter(policy.version).getTopK(key, kValue)
         val ranks = {
           for {
             rValue <- rankingValue.toSeq
@@ -552,7 +541,10 @@ object CounterController extends Controller {
           } yield {
             val (id, score) = rValue.values(idx)
             val realId = policy.itemType match {
-              case ItemType.BLOB => exactCounter.getBlobValue(policy, id).getOrElse(throw new Exception(s"not found blob id. ${policy.service}.${policy.action} $id"))
+              case ItemType.BLOB =>
+                exactCounter(policy.version)
+                  .getBlobValue(policy, id)
+                  .getOrElse(throw new Exception(s"not found blob id. ${policy.service}.${policy.action} $id"))
               case _ => id
             }
             RankCounterItem(rank, realId, score)

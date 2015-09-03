@@ -5,7 +5,7 @@ import kafka.producer.KeyedMessage
 import kafka.serializer.StringDecoder
 import org.apache.spark.streaming.Durations._
 import org.apache.spark.streaming.kafka.KafkaRDDFunctions.rddToKafkaRDDFunctions
-import s2.config.{ActorConfig, S2ConfigFactory, S2CounterConfig, StreamingConfig}
+import s2.config.{S2ConfigFactory, S2CounterConfig, StreamingConfig}
 import s2.spark.{HashMapParam, SparkApp, WithKafka}
 
 import scala.collection.mutable
@@ -18,7 +18,6 @@ import scala.collection.mutable.{HashMap => MutableHashMap}
 object GraphToETLStreaming extends SparkApp with WithKafka {
   lazy val config = S2ConfigFactory.config
   lazy val s2Config = new S2CounterConfig(config)
-  lazy val actorConfig = new ActorConfig(config)
   lazy val className = getClass.getName.stripSuffix("$")
   lazy val producer = getProducer[String, String](StreamingConfig.KAFKA_BROKERS)
 
