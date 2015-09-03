@@ -17,7 +17,7 @@ testOptions in Test += Tests.Argument("-oDF")
 
 resolvers ++= Common.resolvers
 
-lazy val root = project.in(file(".")).enablePlugins(PlayScala).dependsOn(s2core)
+lazy val root = project.in(file(".")).enablePlugins(PlayScala).dependsOn(s2core, s2counter_core)
 
 lazy val s2core = project
 
