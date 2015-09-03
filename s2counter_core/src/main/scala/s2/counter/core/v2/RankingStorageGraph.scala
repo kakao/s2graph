@@ -15,7 +15,7 @@ import scalaj.http.{Http, HttpResponse}
 /**
  * Created by shon on 7/28/15.
  */
-case class RankingGraphStorage(config: Config) extends RankingStorage {
+case class RankingStorageGraph(config: Config) extends RankingStorage {
   private[counter] val log = LoggerFactory.getLogger(this.getClass)
   val s2graphUrl = config.getString("s2graph.url")
   private val K_MAX = 500

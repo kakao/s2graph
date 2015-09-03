@@ -3,7 +3,7 @@ package s2.counter
 import play.api.libs.json.Json
 
 /**
- * Created by alec on 15. 4. 7..
+ * Created by hsleep(honeysleep@gmail.com) on 15. 4. 7..
  */
 // item1 -> likedCount -> month:2015-10, 1
 // edge

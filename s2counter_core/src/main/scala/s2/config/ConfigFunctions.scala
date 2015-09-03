@@ -6,7 +6,7 @@ import scala.collection.JavaConversions._
 import scala.reflect.ClassTag
 
 /**
- * Created by alec on 15. 3. 2..
+ * Created by hsleep(honeysleep@gmail.com) on 15. 3. 2..
  */
 abstract class ConfigFunctions(conf: Config) {
   def getOrElse[T: ClassTag](key: String, default: T): T = {

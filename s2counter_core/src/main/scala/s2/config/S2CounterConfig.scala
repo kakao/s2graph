@@ -5,7 +5,7 @@ import com.typesafe.config.Config
 import scala.collection.JavaConversions._
 
 /**
- * Created by alec on 15. 3. 2..
+ * Created by hsleep(honeysleep@gmail.com) on 15. 3. 2..
  */
 class S2CounterConfig(config: Config) extends ConfigFunctions(config) {
   // HBase

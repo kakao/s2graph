@@ -14,6 +14,9 @@ import s2.util.CartesianProduct
 import scala.concurrent.{ExecutionContext, Future}
 import scalaj.http.Http
 
+/**
+ * Created by hsleep(honeysleep@gmail.com) on 15. 8. 19..
+ */
 object ExactStorageGraph {
   case class RespGraph(success: Boolean, result: Long)
   implicit val respGraphFormat = Json.format[RespGraph]

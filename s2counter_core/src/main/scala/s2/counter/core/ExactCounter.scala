@@ -12,6 +12,10 @@ import s2.util.FunctionParser
 import scala.concurrent.duration._
 import scala.concurrent.{Await, ExecutionContext, Future}
 
+/**
+ * Created by hsleep(honeysleep@gmail.com) on 15. 6. 11..
+ */
+
 case class ExactCounterRow(key: ExactKeyTrait, value: Map[ExactQualifier, Long])
 
 case class FetchedCounts(exactKey: ExactKeyTrait, qualifierWithCountMap: Map[ExactQualifier, Long])
