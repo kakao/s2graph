@@ -30,7 +30,8 @@ lazy val s2counter_core = project.dependsOn(s2core)
 lazy val s2counter_loader = project.dependsOn(s2counter_core, spark)
 
 libraryDependencies ++= Seq(
+  "com.github.danielwegener" % "logback-kafka-appender" % "0.0.3",
   ws,
   filters,
-  "org.json4s" %% "json4s-native" % "3.2.11"
+  "org.json4s" %% "json4s-native" % "3.2.11" % Test
 )
