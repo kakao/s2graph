@@ -1,7 +1,7 @@
 package s2.counter.core.v2
 
 import com.daumkakao.s2graph.core.mysqls.Label
-import com.daumkakao.s2graph.core.types2.HBaseType
+import com.daumkakao.s2graph.core.types.HBaseType
 import com.typesafe.config.Config
 import org.apache.http.HttpStatus
 import org.slf4j.LoggerFactory
@@ -18,6 +18,15 @@ import scalaj.http.Http
 /**
  * Created by hsleep(honeysleep@gmail.com) on 15. 8. 19..
  */
+object ExactStorageGraph {
+  case class RespGraph(success: Boolean, result: Long)
+  implicit val respGraphFormat = Json.format[RespGraph]
+
+  // using play-ws without play app
+  private val builder = new com.ning.http.client.AsyncHttpClientConfig.Builder()
+  private val wsClient = new play.api.libs.ws.ning.NingWSClient(builder.build)
+}
+
 case class ExactStorageGraph(config: Config) extends ExactStorage {
   private val log = LoggerFactory.getLogger(this.getClass)
   private val s2config = new S2CounterConfig(config)
@@ -317,13 +326,3 @@ case class ExactStorageGraph(config: Config) extends ExactStorage {
     }
   }
 }
-
-object ExactStorageGraph {
-  case class RespGraph(success: Boolean, result: Long)
-  implicit val respGraphFormat = Json.format[RespGraph]
-
-  // using play-ws without play app
-  private val builder = new com.ning.http.client.AsyncHttpClientConfig.Builder()
-  private val wsClient = new play.api.libs.ws.ning.NingWSClient(builder.build)
-}
-

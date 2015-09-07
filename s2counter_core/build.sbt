@@ -1,10 +1,4 @@
-organization := Common.organization
-
 name := "s2counter-core"
-
-version := Common.version
-
-scalaVersion := Common.scalaVersion
 
 scalacOptions ++= Seq("-feature", "-deprecation", "-language:existentials")
 
@@ -29,5 +23,3 @@ libraryDependencies ++= Seq(
 ).map { moduleId =>
   moduleId.exclude("org.slf4j", "slf4j-log4j12")
 }
-
-resolvers ++= Common.resolvers

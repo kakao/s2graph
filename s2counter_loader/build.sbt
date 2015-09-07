@@ -1,12 +1,6 @@
 import sbtassembly.Plugin.AssemblyKeys._
 
-organization := Common.organization
-
 name := "s2counter-loader"
-
-version := Common.version
-
-scalaVersion := Common.scalaVersion
 
 scalacOptions ++= Seq("-deprecation", "-feature")
 
@@ -30,8 +24,6 @@ libraryDependencies ++= Seq(
 fork := true
 
 transitiveClassifiers ++= Seq()
-
-resolvers ++= Common.resolvers
 
 assemblySettings
 
