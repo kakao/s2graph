@@ -163,6 +163,8 @@ CREATE TABLE `buckets` (
   `traffic_ratios` varchar(64) NOT NULL,
   `http_verb` varchar(8) NOT NULL,
   `api_path` text NOT NULL,
+  `uuid_key` varchar(128),
+  `uuid_placeholder` varchar(64),
   `request_body` text NOT NULL,
   `timeout` int NOT NULL DEFAULT 1000,
   `impression_id` varchar(64) NOT NULL,
