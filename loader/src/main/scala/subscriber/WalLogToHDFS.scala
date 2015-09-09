@@ -6,7 +6,7 @@ import java.util.Date
 import com.daumkakao.s2graph.core.Graph
 import kafka.serializer.StringDecoder
 import org.apache.spark.streaming.Durations._
-import org.apache.spark.streaming.kafka.HasOffsetRanges
+import org.apache.spark.streaming.kafka.KafkaRDDFunctions._
 import s2.spark.{HashMapParam, SparkApp, WithKafka}
 
 import scala.collection.mutable.{HashMap => MutableHashMap}
@@ -63,8 +63,6 @@ object WalLogToHDFS extends SparkApp with WithKafka {
     val mapAcc = sc.accumulable(new MutableHashMap[String, Long](), "Throughput")(HashMapParam[String, Long](_ + _))
 
     stream.foreachRDD { (rdd, time) =>
-      val offsets = rdd.asInstanceOf[HasOffsetRanges].offsetRanges
-
       val elements = rdd.mapPartitions { partition =>
         // set executor setting.
         val phase = System.getProperty("phase")
@@ -82,13 +80,9 @@ object WalLogToHDFS extends SparkApp with WithKafka {
       val path = s"$outputPath/${toOutputPath(ts)}"
       elements.saveAsTextFile(path)
 
-      elements.mapPartitionsWithIndex { (i, part) =>
-        // commit offset range
-        val osr = offsets(i)
+      elements.foreachPartitionWithOffsetRange { (osr, part) =>
+        // do something with part
         getStreamHelper(kafkaParams).commitConsumerOffset(osr)
-        Iterator.empty
-      }.foreach {
-        (_: Nothing) => ()
       }
     }
 
