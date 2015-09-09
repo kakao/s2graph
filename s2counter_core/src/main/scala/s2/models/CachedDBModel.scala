@@ -11,5 +11,5 @@ trait CachedDBModel[T] {
 
   val cacheConfig: CollectionCacheConfig
 //  lazy val cache = new ConfigurableCache[T](cacheConfig)
-  val cache = new CollectionCache[Option[T]](cacheConfig)
+  lazy val cache = new CollectionCache[Option[T]](cacheConfig)
 }
