@@ -35,5 +35,6 @@ libraryDependencies ++= Seq(
   "com.github.danielwegener" % "logback-kafka-appender" % "0.0.3",
   ws,
   filters,
-  "org.json4s" %% "json4s-native" % "3.2.11" % Test
+  "org.json4s" %% "json4s-native" % "3.2.11" % Test,
+  "com.beachape.metascraper" %% "metascraper" % "0.2.8"
 )
