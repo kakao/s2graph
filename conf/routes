@@ -99,3 +99,6 @@ PUT   /graphs/loadCache                                                        c
 
 # Experiment API
 POST     /graphs/experiment/:accessToken/:experimentName/:uuid                    controllers.ExperimentController.experiment(accessToken, experimentName, uuid)
+
+# Like API
+POST     /like/:user/:url   controllers.LikeController.like(user, url)
