@@ -5,7 +5,7 @@ import com.daumkakao.s2graph.core.mysqls._
 //import com.daumkakao.s2graph.core.models._
 
 
-import com.daumkakao.s2graph.core.types2.{InnerVal, LabelWithDirection}
+import com.daumkakao.s2graph.core.types.{InnerVal, LabelWithDirection}
 import com.typesafe.config.ConfigFactory
 
 import scala.concurrent.ExecutionContext
@@ -15,7 +15,7 @@ import scala.concurrent.ExecutionContext
  */
 trait TestCommonWithModels {
   import InnerVal._
-  import types2.HBaseType._
+  import types.HBaseType._
 
   val zkQuorum = "localhost"
   val serviceName = "_test_service"
@@ -92,16 +92,16 @@ trait TestCommonWithModels {
 
   def createTestLabel() = {
     Management.createLabel(labelName, serviceName, columnName, columnType, serviceName, columnName, columnType,
-      isDirected = true, serviceName, testIdxProps, testProps, consistencyLevel, Some(hTableName), hTableTTL, VERSION1, false)
+      isDirected = true, serviceName, testIdxProps, testProps, consistencyLevel, Some(hTableName), hTableTTL, VERSION1, false, "lg4")
 
     Management.createLabel(labelNameV2, serviceNameV2, columnNameV2, columnTypeV2, serviceNameV2, tgtColumnNameV2, tgtColumnTypeV2,
-      isDirected = true, serviceNameV2, testIdxProps, testProps, consistencyLevel, Some(hTableName), hTableTTL, VERSION2, false)
+      isDirected = true, serviceNameV2, testIdxProps, testProps, consistencyLevel, Some(hTableName), hTableTTL, VERSION2, false, "lg4")
 
     Management.createLabel(undirectedLabelName, serviceName, columnName, columnType, serviceName, tgtColumnName, tgtColumnType,
-      isDirected = false, serviceName, testIdxProps, testProps, consistencyLevel, Some(hTableName), hTableTTL, VERSION1, false)
+      isDirected = false, serviceName, testIdxProps, testProps, consistencyLevel, Some(hTableName), hTableTTL, VERSION1, false, "lg4")
 
     Management.createLabel(undirectedLabelNameV2, serviceNameV2, columnNameV2, columnTypeV2, serviceNameV2, tgtColumnNameV2, tgtColumnTypeV2,
-      isDirected = false, serviceName, testIdxProps, testProps, consistencyLevel, Some(hTableName), hTableTTL, VERSION2, false)
+      isDirected = false, serviceName, testIdxProps, testProps, consistencyLevel, Some(hTableName), hTableTTL, VERSION2, false, "lg4")
   }
 
   /** */
