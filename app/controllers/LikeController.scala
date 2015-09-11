@@ -1,5 +1,6 @@
 package controllers
 
+import java.net.{URLDecoder, URLEncoder}
 import java.util.concurrent.TimeUnit
 import actors.{UrlScrapeActor, LikeUtil, QueueActor}
 import com.beachape.metascraper.Messages.{ScrapeUrl, ScrapedData}
@@ -28,12 +29,62 @@ object LikeController extends Controller with RequestParser {
   def notAllowedActionTypeException(actionType: String) = new RuntimeException(s"not allowd action type: $actionType")
 
   /** select */
-//  def fetchLikes(accessToken: String, user: String) = withHeaderAsync(parse.json) { request =>
-//
+//  def select(accessToken: String, user: String) = withHeaderAsync(parse.anyContent) { request =>
+//    val actionType = "like"
+//    val service = Service.findByAccessToken(accessToken).getOrElse(throw badAccessTokenException(accessToken))
+//    val labelName = LikeUtil.userUrlLabels.get(actionType).getOrElse(throw notAllowedActionTypeException(actionType))
+//    val limit = 100
+//    val serviceId = service.id.get
+//    val queryString = s"""
+//          | {"srcVertices": [{"serviceName": "${LikeUtil.serviceName}", "columnName": "${LikeUtil.srcColumnName}", "id": "$user"}],
+//          | "steps": [
+//          |    {"step": [
+//          |      {
+//          |        "label": "$labelName", "limit": $limit, "index": "IDX_SERVICE_ID",
+//          |        "interval": {"from": {"serviceId": $serviceId}, "to": {"serviceId": $serviceId}}}]
+//          |      },
+//          |    {"step": [{"label": "${LikeUtil.urlSelfLabelName}", "limit": 1}]}
+//          |  ]
+//       """.stripMargin
+//    val queryJson = Json.parse(queryString)
+//    QueryController.getEdgesInner(queryJson)
 //  }
 
+  def selectAll(user: String) = withHeaderAsync(parse.anyContent) { request =>
+    val actionType = "like"
+    val labelName = LikeUtil.userUrlLabels.get(actionType).getOrElse(throw notAllowedActionTypeException(actionType))
+
+    val queryJson =
+      Json.parse(s"""
+         |{
+         |    "srcVertices": [
+         |        {
+         |            "serviceName": "${LikeUtil.serviceName}",
+         |            "columnName": "${LikeUtil.srcColumnName}",
+         |            "id": "$user"
+         |        }
+         |    ],
+         |    "steps": [
+         |        {
+         |            "step": [
+         |              {"label": "$labelName", "limit": 100, "index": "_PK"}
+         |            ]
+         |        },
+         |        {
+         |            "step": [
+         |              {"label": "${LikeUtil.urlSelfLabelName}", "limit": 1}
+         |            ]
+         |        }
+         |    ]
+         |}
+       """.stripMargin)
+    QueryController.getEdgesInner(queryJson)
+  }
+
   /** write */
+
   def scrape(rawUrl: String) = withHeaderAsync(parse.anyContent) { request =>
+//    val url = urlWithProtocol(URLDecoder.decode(encodedUrl, "utf-8"))
     val url = urlWithProtocol(rawUrl)
     for {
       scrapedData <- scraper.fetch(ScrapeUrl(url))
@@ -44,6 +95,7 @@ object LikeController extends Controller with RequestParser {
       jsonResponse(json)
     }
   }
+
   def like(accessToken: String) = withHeaderAsync(parse.json) { request =>
     val service = Service.findByAccessToken(accessToken).getOrElse(throw badAccessTokenException(accessToken))
     likeInner(service.id.get)(request.body).map { ret =>
