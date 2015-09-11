@@ -1,6 +1,6 @@
 package actors
 
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.{Executors, TimeUnit}
 
 import actors.Protocol.{FlushAll}
 import akka.pattern.ask
@@ -8,10 +8,12 @@ import akka.actor._
 import akka.routing.{SmallestMailboxRouter, RoundRobinRoutingLogic}
 import akka.util.Timeout
 import com.beachape.metascraper.Messages.{ScrapeUrl, ScrapedData}
-import com.beachape.metascraper.ScraperActor
+import com.beachape.metascraper.{Scraper, ScraperActor}
 import com.daumkakao.s2graph.core.ExceptionHandler._
 import com.daumkakao.s2graph.core._
 import com.daumkakao.s2graph.logger
+import com.ning.http.client.{ProxyServer, AsyncHttpClient, AsyncHttpClientConfig}
+import dispatch.Http
 
 import scala.concurrent.Future
 
@@ -82,10 +84,39 @@ class UrlScrapeActor extends Actor with RequestParser {
   val rateLimitTimeStep = 1000 / timeUnitInMillis
   val rateLimit = Config.LOCAL_QUEUE_ACTOR_RATE_LIMIT / rateLimitTimeStep
 
-  val scraper = context.system.actorOf(ScraperActor())
+//  val scraper = context.system.actorOf(ScraperActor())
+val validSchemas = Seq("http", "https")
+  // Http client config
+  val followRedirects = true
+  val connectionPooling = true
+  val compressionEnabled = true
+
+
+  val httpExecutorThreads: Int = 10
+  val maxConnectionsPerHost: Int = 30
+  val connectionTimeoutInMs: Int = 10000
+  val requestTimeoutInMs: Int = 15000
+
+  private val proxyServer = new ProxyServer("proxy.daumkakao.io", 3128)
+  private val executorService = Executors.newFixedThreadPool(httpExecutorThreads)
+  private val config = new AsyncHttpClientConfig.Builder()
+    .setExecutorService(executorService)
+    .setIOThreadMultiplier(1) // otherwise we might not have enough threads
+    .setMaximumConnectionsPerHost(maxConnectionsPerHost)
+    .setAllowPoolingConnection(connectionPooling)
+    .setAllowSslConnectionPool(connectionPooling)
+    .setConnectionTimeoutInMs(connectionTimeoutInMs)
+    .setRequestTimeoutInMs(requestTimeoutInMs)
+    .setCompressionEnabled(compressionEnabled)
+    .setProxyServer(proxyServer)
+    .setFollowRedirects(followRedirects).build
+  private val asyncHttpClient = new AsyncHttpClient(config)
+  private val httpClient = new Http(asyncHttpClient)
+
+  val scraper = new Scraper(httpClient, validSchemas)
   val urlSelfLabelName = LikeUtil.urlSelfLabelName
 
-  val cacheTTL = 60000
+  val cacheTTL = 600000
   lazy val cache = CacheBuilder.newBuilder()
     .expireAfterWrite(cacheTTL, TimeUnit.MILLISECONDS)
     .maximumSize(10000)
@@ -131,8 +162,10 @@ class UrlScrapeActor extends Actor with RequestParser {
     val urlHash = GraphUtil.murmur3(url)
     val oldVal = cache.getIfPresent(urlHash)
     if (oldVal == null) {
+      Logger.error(s"cache miss: $url, $urlHash")
       for {
-        future <- scraper.ask(ScrapeUrl(url)).mapTo[Either[Throwable,ScrapedData]]
+        future <- scraper.fetch(ScrapeUrl(url)).mapTo[Either[Throwable,ScrapedData]]
+//        future <- scraper.ask(ScrapeUrl(url)).mapTo[Either[Throwable,ScrapedData]]
       } {
         future match {
           case Left(throwable) => {
@@ -148,7 +181,7 @@ class UrlScrapeActor extends Actor with RequestParser {
       }
 
     } else {
-      Logger.debug(s"cache hit: $url")
+      Logger.error(s"cache hit: $url, $urlHash")
     }
   }
 }
