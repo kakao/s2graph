@@ -1,7 +1,7 @@
 
 import java.util.concurrent.Executors
 
-import actors.QueueActor
+import actors._
 import com.daumkakao.s2graph.core.{ExceptionHandler, Graph}
 import com.daumkakao.s2graph.logger
 import config.Config
@@ -18,7 +18,7 @@ object Global extends WithFilters(new GzipFilter()) {
 
   override def onStart(app: Application) {
     QueueActor.init()
-
+    UrlScrapeActor.init()
     ApplicationController.isHealthy = false
 
     if (Config.IS_WRITE_SERVER && Config.KAFKA_PRODUCER_POOL_SIZE > 0) {
@@ -41,6 +41,7 @@ object Global extends WithFilters(new GzipFilter()) {
 
   override def onStop(app: Application) {
     QueueActor.shutdown()
+    UrlScrapeActor.shutdown()
 
     if (Config.IS_WRITE_SERVER && Config.KAFKA_PRODUCER_POOL_SIZE > 0) {
       ExceptionHandler.shutdown()

@@ -1,12 +1,16 @@
 package controllers
 
 import java.util.concurrent.TimeUnit
+import actors.{UrlScrapeActor, LikeUtil, QueueActor}
 import com.beachape.metascraper.Messages.{ScrapeUrl, ScrapedData}
 import com.beachape.metascraper.Scraper
+import com.daumkakao.s2graph.core.mysqls.Service
 import com.daumkakao.s2graph.core.{Graph, GraphUtil}
+import com.daumkakao.s2graph.logger
 import com.google.common.cache.CacheBuilder
 import dispatch.Http
-import play.api.libs.json.{Json, JsObject}
+import play.api.Logger
+import play.api.libs.json.{JsValue, Json, JsObject}
 import play.api.mvc.{Action, Controller}
 
 import scala.concurrent.Future
@@ -15,61 +19,62 @@ import scala.concurrent.Future
  * Created by shon on 9/11/15.
  */
 object LikeController extends Controller with RequestParser {
-
+  import scala.concurrent.ExecutionContext.Implicits.global
   import ApplicationController._
 
-  val scraper = new Scraper(Http, Seq("http", "https"))
 
-  //  val fData: Future[ScrapedData] = scraper.fetch(ScrapeUrl("https://google.com"))
-  val cacheTTL = 60000
-  lazy val cache = CacheBuilder.newBuilder()
-    .expireAfterWrite(cacheTTL, TimeUnit.MILLISECONDS)
-    .maximumSize(10000)
-    .build[java.lang.Integer, ScrapedData]()
-  val userUrlLabelName = "user_urls"
-  val urlSelfLabelName = "url_url"
+  def badAccessTokenException(accessToken: String) = new RuntimeException(s"bad accessToken: $accessToken")
+  def notAllowedActionTypeException(actionType: String) = new RuntimeException(s"not allowd action type: $actionType")
 
-  def like(user: String, url: String) = withHeaderAsync(parse.anyContent) { request =>
-    likeInner(user, url).map { ret =>
-      Ok(ret)
+  def like(accessToken: String) = withHeaderAsync(parse.json) { request =>
+    val service = Service.findByAccessToken(accessToken).getOrElse(throw badAccessTokenException(accessToken))
+    likeInner(service.id.get)(request.body).map { ret =>
+      Ok(s"$ret")
     }
   }
-  def likeInner(user: String,
-                url: String): Future[Boolean] = {
+
+  def likes(accessToken: String) = withHeaderAsync(parse.json) { request =>
+    val service = Service.findByAccessToken(accessToken).getOrElse(throw badAccessTokenException(accessToken))
+
+    val jsVals = request.body.asOpt[Seq[JsValue]].getOrElse(Nil)
+    likesInner(service.id.get)(jsVals).map { rets =>
+      Ok(s"$rets")
+    }
+  }
+
+  def likesInner(serviceId: Int)(jsVals: Seq[JsValue]): Future[Seq[Boolean]] = {
+    val futures = jsVals.map(likeInner(serviceId)(_))
+    Future.sequence(futures)
+  }
+
+  def likeInner(serviceId: Int)(jsVal: JsValue): Future[Boolean] = {
+    val (user, url, actionType) = toParams(jsVal)
+    likeInner(serviceId, user, url, actionType)
+  }
+  /** fire user-url action edge into local queue, and fire scrap request simultaneously */
+  def likeInner(serviceId: Int, user: String,
+                url: String, actionType: String): Future[Boolean] = {
+    val labelName = LikeUtil.userUrlLabels.get(actionType).getOrElse(throw notAllowedActionTypeException(actionType))
     val ts = System.currentTimeMillis()
-    for {
-      scrapedData <- toScrapedData(url, ts)
-      urlProps = toJsObject(scrapedData)
-      urlJson = Json.obj("timestamp" -> ts, "from" -> url,
-        "to" -> toShortenUrl(url), "label" -> urlSelfLabelName,
-        "props"  -> urlProps)
-      edgeJson = Json.obj("timestamp" -> ts, "from" -> user,
-        "to" -> url, "label" -> userUrlLabelName, "props" -> urlProps)
-      edges = toEdges(Json.arr(edgeJson, urlJson), "insertBulk")
-      rets <- Graph.mutateEdges(edges)
-    } yield rets.forall(identity)
+    val edgeJson = Json.obj("timestamp" -> ts, "from" -> user, "to" -> url,
+      "label" -> labelName, "props" -> Json.obj("serviceId" -> serviceId))
+    val edge = toEdge(edgeJson, "insert")
+
+    // fire insert request for edge for (user, url)
+    Logger.info(s"$edge")
+    QueueActor.router ! edge
+    logger.info(s"$QueueActor.scrapeRouter")
+    UrlScrapeActor.router ! url
+    Future.successful(true)
   }
 
-  private def toShortenUrl(url: String): String = {
-    url
+
+  /** helper for manupulation */
+  def toParams(jsValue: JsValue) = {
+    val user = (jsValue \ "user").asOpt[String].getOrElse(throw new RuntimeException("user is not provided."))
+    val url = (jsValue \ "url").asOpt[String].getOrElse(throw new RuntimeException("url is not provided."))
+    val actionType = (jsValue \ "actionType").asOpt[String].getOrElse("like")
+    (user, url, actionType)
   }
-  private def toScrapedData(url: String, ts: Long): Future[ScrapedData] = {
-    val cacheTsVal = ts / cacheTTL
-    val urlHash = GraphUtil.murmur3(cacheTsVal + url)
-    val oldVal = cache.getIfPresent(urlHash)
-    if (oldVal == null) scraper.fetch(ScrapeUrl(url))
-    else {
-      Future.successful(oldVal)
-    }
-  }
-  //FIXME:
-  private def toJsObject(scrapedData: ScrapedData): JsObject = {
-    Json.obj(
-      "url" -> scrapedData.url,
-      "mainImageUrl" -> scrapedData.mainImageUrl,
-      "title" -> scrapedData.title,
-      "description" -> scrapedData.description,
-      "imageUrls" -> scrapedData.imageUrls.mkString(",")
-    )
-  }
+
 }
