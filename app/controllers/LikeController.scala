@@ -21,11 +21,29 @@ import scala.concurrent.Future
 object LikeController extends Controller with RequestParser {
   import scala.concurrent.ExecutionContext.Implicits.global
   import ApplicationController._
-
+  import UrlScrapeActor._
+  val scraper = new Scraper(Http, Seq("http", "https"))
 
   def badAccessTokenException(accessToken: String) = new RuntimeException(s"bad accessToken: $accessToken")
   def notAllowedActionTypeException(actionType: String) = new RuntimeException(s"not allowd action type: $actionType")
 
+  /** select */
+//  def fetchLikes(accessToken: String, user: String) = withHeaderAsync(parse.json) { request =>
+//
+//  }
+
+  /** write */
+  def scrape(rawUrl: String) = withHeaderAsync(parse.anyContent) { request =>
+    val url = urlWithProtocol(rawUrl)
+    for {
+      scrapedData <- scraper.fetch(ScrapeUrl(url))
+      edge = toUrlSelfEdge(url, toShortenUrl(url), scrapedData)
+      ret <- Graph.mutateEdgeWithWait(edge)
+    } yield {
+      val json = Json.obj("url" -> url, "data" -> toJsObject(scrapedData))
+      jsonResponse(json)
+    }
+  }
   def like(accessToken: String) = withHeaderAsync(parse.json) { request =>
     val service = Service.findByAccessToken(accessToken).getOrElse(throw badAccessTokenException(accessToken))
     likeInner(service.id.get)(request.body).map { ret =>

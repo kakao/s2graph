@@ -103,3 +103,4 @@ POST     /graphs/experiment/:accessToken/:experimentName/:uuid                  
 # Like API
 POST     /like/:accessToken   controllers.LikeController.like(accessToken: String)
 POST     /likes/:accessToken  controllers.LikeController.likes(accessToken)
+POST     /scrape/:url  controllers.LikeController.scrape(url: String)

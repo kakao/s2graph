@@ -13,6 +13,8 @@ import com.daumkakao.s2graph.core.ExceptionHandler._
 import com.daumkakao.s2graph.core._
 import com.daumkakao.s2graph.logger
 
+import scala.concurrent.Future
+
 //import com.daumkakao.s2graph.Logger
 import com.google.common.cache.CacheBuilder
 import config.Config
@@ -27,7 +29,7 @@ import scala.concurrent.duration.Duration
 import scala.concurrent.duration._
 import scala.language.postfixOps
 
-object UrlScrapeActor {
+object UrlScrapeActor extends RequestParser {
   /** we are throttling down here so fixed number of actor to constant */
   var router: ActorRef = _
 
@@ -41,13 +43,36 @@ object UrlScrapeActor {
     Akka.system.shutdown()
     Thread.sleep(Config.ASYNC_HBASE_CLIENT_FLUSH_INTERVAL * 2)
   }
-
+  def urlWithProtocol(url: String): String = {
+    if (url.startsWith("http://")) url
+    else if (url.startsWith("https://")) url
+    else {
+      s"http://$url"
+    }
+  }
+  def toShortenUrl(url: String): String = {
+    url
+  }
+  def toJsObject(scrapedData: ScrapedData): JsObject = {
+    Json.obj(
+      "url" -> scrapedData.url,
+      "mainImageUrl" -> scrapedData.mainImageUrl,
+      "title" -> scrapedData.title,
+      "description" -> scrapedData.description,
+      "imageUrls" -> scrapedData.imageUrls.mkString(",")
+    )
+  }
+  def toUrlSelfEdge(url: String, shortenUrl: String, scrapedData: ScrapedData): Edge = {
+    val ts = System.currentTimeMillis()
+    toEdge(Json.obj("timestamp" -> ts,
+      "from" -> url, "to" -> toShortenUrl(url), "label" -> LikeUtil.urlSelfLabelName,
+      "props" -> toJsObject(scrapedData)), "insert")
+  }
 }
 class UrlScrapeActor extends Actor with RequestParser {
-  logger.error(s"$this")
 
   import Protocol._
-
+  import UrlScrapeActor._
   implicit val ec = context.system.dispatcher
   //  logger.error(s"QueueActor: $self")
   val queue = scala.collection.mutable.Queue.empty[String]
@@ -71,7 +96,6 @@ class UrlScrapeActor extends Actor with RequestParser {
 
   override def receive: Receive = {
     case element: String =>
-
       if (queueSize > maxQueueSize) {
         //        ExceptionHandler.enqueue(toKafkaMessage(Config.KAFKA_FAIL_TOPIC, element, None))
         logger.error(s"over flow")
@@ -100,25 +124,7 @@ class UrlScrapeActor extends Actor with RequestParser {
 
     case _ => logger.error("unknown protocol")
   }
-  private def urlWithProtocol(url: String): String = {
-    if (url.startsWith("http://")) url
-    else if (url.startsWith("https://")) url
-    else {
-      s"http://$url"
-    }
-  }
-  private def toShortenUrl(url: String): String = {
-    url
-  }
-  private def toJsObject(scrapedData: ScrapedData): JsObject = {
-    Json.obj(
-      "url" -> scrapedData.url,
-      "mainImageUrl" -> scrapedData.mainImageUrl,
-      "title" -> scrapedData.title,
-      "description" -> scrapedData.description,
-      "imageUrls" -> scrapedData.imageUrls.mkString(",")
-    )
-  }
+
   private def work(urlToScrape: String): Unit = {
     Logger.info(s"scrape url: $urlToScrape")
     val url = urlWithProtocol(urlToScrape)
@@ -134,12 +140,9 @@ class UrlScrapeActor extends Actor with RequestParser {
             //TODO: publish to failed queue.
           }
           case Right(data) => {
-            val ts = System.currentTimeMillis()
-            val urlEdge = toEdge(Json.obj("timestamp" -> ts,
-              "from" -> urlToScrape, "to" -> toShortenUrl(urlToScrape), "label" -> urlSelfLabelName,
-              "props" -> toJsObject(data)), "insert")
-            Graph.mutateEdge(urlEdge)
-            Logger.debug(s"new url: $url is updated.")
+            val edge = toUrlSelfEdge(urlToScrape, toShortenUrl(urlToScrape), data)
+            Graph.mutateEdge(edge)
+            Logger.debug(s"new url: $url is updated. $data")
           }
         }
       }

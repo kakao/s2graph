@@ -604,6 +604,12 @@ object Graph {
       rets.forall(identity)
     }
   }
+  def mutateEdgeWithWait(edge: Edge): Future[Boolean] = {
+    implicit val ex = this.executionContext
+    writeAsyncWithWait(edge.label.hbaseZkAddr, Seq(edge).map(e => e.buildPutsAll())).map { rets =>
+      rets.forall(identity)
+    }
+  }
 
   def mutateEdges(edges: Seq[Edge]): Future[Seq[Boolean]] = {
     implicit val ex = this.executionContext
