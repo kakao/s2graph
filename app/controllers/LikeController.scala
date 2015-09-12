@@ -92,7 +92,7 @@ object LikeController extends Controller with RequestParser {
       ret <- Graph.mutateEdgeWithWait(edge)
     } yield {
       val json = Json.obj("url" -> url, "data" -> toJsObject(scrapedData))
-      jsonResponse(json)
+      jsonResponse(json, "Access-Control-Allow-Origin" -> "*")
     }
   }
 
