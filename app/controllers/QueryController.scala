@@ -10,7 +10,6 @@ import play.api.libs.json.{JsValue, Json}
 import play.api.mvc.{Action, Controller, Result}
 
 import scala.concurrent._
-import scala.util.Try
 
 object QueryController extends Controller with RequestParser {
 
@@ -45,9 +44,8 @@ object QueryController extends Controller with RequestParser {
         filterOutResultsLs <- filterOutQueryResultsLs
       } yield {
         val json = post(queryResultsLs, filterOutResultsLs)
-        val resultSize = Try((json \ "size").toString).getOrElse("0")
-
-        jsonResponse(json, "result_size" -> resultSize)
+        val resultSize = (json \ "size").asOpt[Int].getOrElse(0)
+        jsonResponse(json, "result_size" -> resultSize.toString)
       }
     } catch {
       case e: KGraphExceptions.BadQueryException =>
@@ -68,7 +66,8 @@ object QueryController extends Controller with RequestParser {
 
       for (exclude <- Graph.getEdgesAsync(filterOutQuery); queryResultLs <- Graph.getEdgesAsync(q)) yield {
         val json = post(queryResultLs, exclude)
-        jsonResponse(json)
+        val resultSize = (json \ "size").asOpt[Int].getOrElse(0)
+        jsonResponse(json, "result_size" -> resultSize.toString)
       }
     } catch {
       case e: KGraphExceptions.BadQueryException =>
@@ -127,7 +126,8 @@ object QueryController extends Controller with RequestParser {
 
       for (exclude <- Graph.getEdgesAsync(filterOutQuery); queryResultLs <- Graph.getEdgesAsync(q)) yield {
         val json = PostProcess.summarizeWithListExclude(queryResultLs, exclude)
-        jsonResponse(json)
+        val resultSize = (json \ "size").asOpt[Int].getOrElse(0)
+        jsonResponse(json, "result_size" -> resultSize.toString)
       }
     } catch {
       case e: KGraphExceptions.BadQueryException =>
@@ -154,7 +154,8 @@ object QueryController extends Controller with RequestParser {
 
       for (exclude <- Graph.getEdgesAsync(filterOutQuery); queryResultLs <- Graph.getEdgesAsync(q)) yield {
         val json = PostProcess.summarizeWithListExcludeFormatted(queryResultLs, exclude)
-        jsonResponse(json)
+        val resultSize = (json \ "size").asOpt[Int].getOrElse(0)
+        jsonResponse(json, "result_size" -> resultSize.toString)
       }
     } catch {
       case e: KGraphExceptions.BadQueryException =>
@@ -206,14 +207,15 @@ object QueryController extends Controller with RequestParser {
           (src, tgt, label, dir.toInt)
         }
 
-      Graph.checkEdges(quads).map { case queryResultLs =>
+      Graph.checkEdges(quads, isInnerCall = false).map { case queryResultLs =>
         val edgeJsons = for {
           queryResult <- queryResultLs
           (edge, score) <- queryResult.edgeWithScoreLs
           edgeJson <- PostProcess.edgeToJson(if (isReverted) edge.duplicateEdge else edge, score, queryResult)
         } yield edgeJson
 
-        jsonResponse(Json.toJson(edgeJsons))
+        val json = Json.toJson(edgeJsons)
+        jsonResponse(json, "result_size" -> edgeJsons.size.toString)
       }
     } catch {
       case e: Throwable =>
@@ -246,7 +248,8 @@ object QueryController extends Controller with RequestParser {
 
       Graph.getVerticesAsync(vertices) map { vertices =>
         val json = PostProcess.verticesToJson(vertices)
-        jsonResponse(json)
+        val resultSize = (json \ "size").asOpt[Int].getOrElse(0)
+        jsonResponse(json, "result_size" -> resultSize.toString)
       }
     } catch {
       case e: play.api.libs.json.JsResultException =>
