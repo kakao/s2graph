@@ -18,7 +18,7 @@ object Global extends WithFilters(new GzipFilter()) {
 
   override def onStart(app: Application) {
     QueueActor.init()
-    UrlScrapeActor.init()
+    KafkaConsumerWithThrottle.init()
     ApplicationController.isHealthy = false
 
     if (Config.IS_WRITE_SERVER && Config.KAFKA_PRODUCER_POOL_SIZE > 0) {
@@ -41,7 +41,7 @@ object Global extends WithFilters(new GzipFilter()) {
 
   override def onStop(app: Application) {
     QueueActor.shutdown()
-    UrlScrapeActor.shutdown()
+    KafkaConsumerWithThrottle.shutdown()
 
     if (Config.IS_WRITE_SERVER && Config.KAFKA_PRODUCER_POOL_SIZE > 0) {
       ExceptionHandler.shutdown()

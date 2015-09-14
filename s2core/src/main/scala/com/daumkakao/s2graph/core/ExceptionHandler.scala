@@ -63,11 +63,6 @@ object ExceptionHandler {
     routees.foreach ( _ ! msg )
   }
 
-  def enqueue(topic: String, key: String, value: String) = {
-    routees.foreach { routee =>
-      routee ! new ProducerRecord[String, String](topic, key, value)
-    }
-  }
 
   def kafkaConfig(config: Config) = {
     val props = new Properties();

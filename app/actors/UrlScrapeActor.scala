@@ -6,7 +6,7 @@ import java.util.concurrent.{Executors, TimeUnit}
 import actors.Protocol.{Consume, Flush, FlushAll}
 import akka.pattern.ask
 import akka.actor._
-import akka.routing.{SmallestMailboxRouter, RoundRobinRoutingLogic}
+import akka.routing.{Broadcast, SmallestMailboxRouter, RoundRobinRoutingLogic}
 import akka.util.Timeout
 import com.beachape.metascraper.Messages.{ScrapeUrl, ScrapedData}
 import com.beachape.metascraper.{Scraper, ScraperActor}
@@ -15,9 +15,11 @@ import com.daumkakao.s2graph.core._
 import com.daumkakao.s2graph.logger
 import com.ning.http.client.{ProxyServer, AsyncHttpClient, AsyncHttpClientConfig}
 import dispatch.Http
-import org.apache.kafka.clients.consumer.KafkaConsumer
+import kafka.consumer.{Whitelist, ConsumerConfig, KafkaStream}
+import kafka.javaapi.consumer.ConsumerConnector
 
 import scala.concurrent.Future
+import scala.util.hashing.MurmurHash3
 
 //import com.daumkakao.s2graph.Logger
 import com.google.common.cache.{Cache, CacheBuilder}
@@ -32,7 +34,7 @@ import scala.collection.mutable
 import scala.concurrent.duration.Duration
 import scala.concurrent.duration._
 import scala.language.postfixOps
-
+import scala.collection.JavaConversions._
 //
 //object UrlScrapeActor extends RequestParser {
 //  /** we are throttling down here so fixed number of actor to constant */
@@ -195,40 +197,48 @@ object KafkaConsumerWithThrottle extends RequestParser {
   val cacheTTL = 60000
   val rateLimit = 10000
 
-  val config = new Properties()
-  config.put("metadata.broker.list", "localhost:9092")
-  config.put("group.id", "test")
-  config.put("enable.auto.commit", "true")
-  config.put("auto.commit.interval.ms", "1000")
-  config.put("session.timeout.ms", "30000")
-  config.put("key.serializer", "org.apache.kafka.common.serializers.StringSerializer")
-  config.put("value.serializer", "org.apache.kafka.common.serializers.StringSerializer")
 
-  val kafkaConsumer = new KafkaConsumer[String, String](config)
-  val topics = Seq("test")
+
+
+  val topicFilter = new Whitelist(Config.KAFKA_SCRAPE_TOPIC)
   val filter = CacheBuilder.newBuilder()
     .expireAfterWrite(cacheTTL, TimeUnit.MILLISECONDS)
     .maximumSize(10000)
-    .build[Integer, String]()
+    .build[Integer, ScrapedData]()
 
+  def createConsumerConfig(zookeeper: String, groupId: String): ConsumerConfig = {
+    val props = new Properties()
+    props.put("zookeeper.connect", zookeeper)
+    props.put("group.id", groupId)
+    props.put("zookeeper.session.timeout.ms", "400")
+    props.put("zookeeper.sync.time.ms", "200")
+    props.put("auto.commit.interval.ms", "1000")
 
-  def props() = {
-    Props(new KafkaConsumerWithThrottle[String, String](kafkaConsumer, topics, rateLimit, filter, router))
+    new ConsumerConfig(props)
   }
+//  def props() = {
+//    Props(new KafkaConsumerWithThrottle[String, String](kafkaConsumer, topics, rateLimit, filter, router))
+//  }
   /** we are throttling down here so fixed number of actor to constant */
-  var router: ActorRef = _
-  var consumerActor: ActorRef = _
-
+  var workerRouter: ActorRef = _
+  var consumerActors: Seq[ActorRef] = _
+  var connector: ConsumerConnector = _
   def init() = {
-    router = Akka.system.actorOf(Props[ScraperActor].withRouter(SmallestMailboxRouter(numOfScraper)))
-    consumerActor = Akka.system.actorOf(props())
+    connector = kafka.consumer.Consumer.createJavaConsumerConnector(
+      createConsumerConfig(Config.KAFKA_ZOOKEEPER_QUORUM, "KafkaConsumerWithThrottle"))
+    workerRouter = Akka.system.actorOf(Props(new ScrapeWorker(filter)).withRouter(SmallestMailboxRouter(numOfScraper)))
+    consumerActors = connector.createMessageStreamsByFilter(topicFilter).map { stream =>
+      Akka.system.actorOf(Props(new KafkaConsumerWithThrottle(stream, rateLimit, filter, workerRouter)))
+    }
   }
-
   def shutdown() = {
-    router ! FlushAll
-    consumerActor ! FlushAll
-
-    kafkaConsumer.close()
+    workerRouter ! Broadcast(FlushAll)
+    for {
+      consumerActor <- consumerActors
+    } {
+      consumerActor ! PoisonPill
+    }
+    connector.shutdown()
     Akka.system.shutdown()
     Thread.sleep(Config.ASYNC_HBASE_CLIENT_FLUSH_INTERVAL * 2)
   }
@@ -258,60 +268,61 @@ object KafkaConsumerWithThrottle extends RequestParser {
       "props" -> toJsObject(scrapedData)), "insert")
   }
 }
-case class KafkaConsumerWithThrottle[K, V](kafkaConsumer: KafkaConsumer[K, V],
-                                           topics: Seq[String],
+case class KafkaConsumerWithThrottle(kafkaStream: KafkaStream[Array[Byte], Array[Byte]],
                                            rateLimit: Int,
-                                           filter: Cache[Integer, String],
+                                           filter: Cache[Integer, ScrapedData],
                                            router: ActorRef) extends Actor with RequestParser {
-  /** register subscriber */
-  kafkaConsumer.subscribe(topics: _ *)
 
+  implicit val ex = context.system.dispatcher
   var numOfMsgs = 0L
   val timeOutInMillis = 100
-  val cacheTTL = 60000
+  val cacheTTL = 100000
 
   context.system.scheduler.schedule(Duration.Zero, Duration(1, TimeUnit.SECONDS), self, Consume)
 
-  private def toHashKey(url: String): Int = GraphUtil.murmur3(url)
+  private def toHashKey(url: String): Int = MurmurHash3.stringHash(url)
 
   override def receive: Actor.Receive = {
     case Consume =>
+      logger.error(s"Consume")
       /** consume kafka message as rateLimit specified */
+      val iter = kafkaStream.iterator()
       for {
-        i <- (0 until rateLimit)
-        (topic, (key, value)) <- kafkaConsumer.poll(timeOutInMillis)
-      } yield {
+        i <- (0 until rateLimit) if iter.hasNext()
+      } {
+        val value = new String(iter.next().message())
         val oldVal = filter.getIfPresent(toHashKey(value))
         if (oldVal == null) {
-          // send to scrapper actor.
           router ! ScrapeUrl(value)
         } else {
-          // ignore.
+          logger.info(s"$value is cached. ignored")
         }
       }
-
   }
 }
-class ScrapeWorker extends Actor {
+class ScrapeWorker(filter: Cache[Integer, ScrapedData]) extends Actor {
   import KafkaConsumerWithThrottle._
-
-  val scraper = new Scraper(Http, Seq("http", "https"))
+  import akka.pattern.ask
+  implicit val timeout = Timeout(10 seconds)
+  implicit val ex = context.system.dispatcher
+  val scraperActor = context.system.actorOf(ScraperActor())
 
   override def receive: Actor.Receive = {
-    case scrapeUrl @ ScrapeUrl(url) =>
+    case scrapeUrl: ScrapeUrl =>
       for {
-        future <- scraper.fetch(ScrapeUrl(url)).mapTo[Either[Throwable,ScrapedData]]
-      //        future <- scraper.ask(ScrapeUrl(url)).mapTo[Either[Throwable,ScrapedData]]
+        future <- ask(scraperActor, scrapeUrl).mapTo[Either[Throwable,ScrapedData]]
       } {
         future match {
           case Left(throwable) => {
-            Logger.error(s"failed to scrape url: $url")
+            logger.error(s"failed to scrape url: $scrapeUrl")
             //TODO: publish to failed queue.
           }
           case Right(data) => {
-            val edge = toUrlSelfEdge(url, toShortenUrl(url), data)
+            val edge = toUrlSelfEdge(scrapeUrl.url, toShortenUrl(scrapeUrl.url), data)
             Graph.mutateEdge(edge)
-            Logger.debug(s"new url: $url is updated. $data")
+            val hash = MurmurHash3.stringHash(scrapeUrl.url)
+            filter.put(hash, data)
+            logger.info(s"new url: $scrapeUrl is updated. $data")
           }
         }
       }

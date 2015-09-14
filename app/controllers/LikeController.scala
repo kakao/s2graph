@@ -2,15 +2,17 @@ package controllers
 
 import java.net.{URLDecoder, URLEncoder}
 import java.util.concurrent.TimeUnit
-import actors.{UrlScrapeActor, LikeUtil, QueueActor}
+import actors.{LikeUtil, QueueActor}
 import com.beachape.metascraper.Messages.{ScrapeUrl, ScrapedData}
 import com.beachape.metascraper.Scraper
+import com.daumkakao.s2graph.core.ExceptionHandler.KafkaMessage
 import com.daumkakao.s2graph.core.mysqls.Service
 import com.daumkakao.s2graph.core.{ExceptionHandler, Graph, GraphUtil}
 import com.daumkakao.s2graph.logger
 import com.google.common.cache.CacheBuilder
 import config.Config
 import dispatch.Http
+import org.apache.kafka.clients.producer.ProducerRecord
 import play.api.Logger
 import play.api.libs.json.{JsValue, Json, JsObject}
 import play.api.mvc.{Action, Controller}
@@ -140,7 +142,7 @@ object LikeController extends Controller with RequestParser {
     Logger.info(s"$edge")
     QueueActor.router ! edge
     logger.info(s"$QueueActor.scrapeRouter")
-    ExceptionHandler.enqueue(Config.KAFKA_SCRAPE_TOPIC, null, url)
+    ExceptionHandler.enqueue(KafkaMessage(new ProducerRecord[String, String](Config.KAFKA_SCRAPE_TOPIC, null, url)))
 //
 //    UrlScrapeActor.router ! url
     Future.successful(true)

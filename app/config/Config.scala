@@ -23,10 +23,12 @@ object Config {
   //KAFKA
   lazy val KAFKA_METADATA_BROKER_LIST = conf.getString("kafka.metadata.broker.list").getOrElse("localhost")
   lazy val KAFKA_PRODUCER_POOL_SIZE = conf.getInt("kafka.producer.pool.size").getOrElse(0)
+  lazy val KAFKA_ZOOKEEPER_QUORUM = conf.getString("kafka.zookeeper.quorum").getOrElse("localhost")
   lazy val KAFKA_LOG_TOPIC = s"s2graphIn${PHASE}"
   lazy val KAFKA_LOG_TOPIC_ASYNC = s"s2graphIn${PHASE}Async"
   lazy val KAFKA_FAIL_TOPIC = s"s2graphIn${PHASE}Failed"
   lazy val KAFKA_SCRAPE_TOPIC = s"s2graphScrape${PHASE}"
+
 
   // use Keep-Alive
   lazy val USE_KEEP_ALIVE = conf.getBoolean("use.keep.alive").getOrElse(false)
