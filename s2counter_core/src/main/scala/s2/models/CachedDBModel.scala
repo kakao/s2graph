@@ -10,6 +10,5 @@ trait CachedDBModel[T] {
   implicit val s = AutoSession
 
   val cacheConfig: CollectionCacheConfig
-//  lazy val cache = new ConfigurableCache[T](cacheConfig)
   lazy val cache = new CollectionCache[Option[T]](cacheConfig)
 }

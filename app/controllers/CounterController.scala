@@ -25,6 +25,8 @@ import scala.util.{Failure, Success, Try}
  * Created by hsleep(honeysleep@gmail.com) on 15. 5. 22..
  */
 object CounterController extends Controller {
+  import play.api.libs.concurrent.Execution.Implicits.defaultContext
+
   val config = Play.current.configuration.underlying
   val s2config = new S2CounterConfig(config)
 
@@ -50,7 +52,7 @@ object CounterController extends Controller {
     counterModel.findByServiceAction(service, action, useCache = false) match {
       case None =>
         val body = request.body
-        val version = (body \ "version").asOpt[Byte].getOrElse(s2.counter.VERSION_2)
+        val version = (body \ "version").asOpt[Int].map(_.toByte).getOrElse(s2.counter.VERSION_2)
         val autoComb = (body \ "autoComb").asOpt[Boolean].getOrElse(true)
         val dimension = (body \ "dimension").asOpt[String].getOrElse("")
         val useProfile = (body \ "useProfile").asOpt[Boolean].getOrElse(false)
