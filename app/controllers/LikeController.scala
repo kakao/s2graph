@@ -19,9 +19,6 @@ import play.api.mvc.{Action, Controller}
 
 import scala.concurrent.Future
 
-/**
- * Created by shon on 9/11/15.
- */
 object LikeController extends Controller with RequestParser {
   import scala.concurrent.ExecutionContext.Implicits.global
   import ApplicationController._
@@ -37,55 +34,50 @@ object LikeController extends Controller with RequestParser {
     .maximumSize(10000)
     .build[Integer, String]()
   /** select */
-//  def select(accessToken: String, user: String) = withHeaderAsync(parse.anyContent) { request =>
-//    val actionType = "like"
-//    val service = Service.findByAccessToken(accessToken).getOrElse(throw badAccessTokenException(accessToken))
-//    val labelName = LikeUtil.userUrlLabels.get(actionType).getOrElse(throw notAllowedActionTypeException(actionType))
-//    val limit = 100
-//    val serviceId = service.id.get
+  def select(accessToken: String, user: String) = withHeaderAsync(parse.anyContent) { request =>
+    val actionType = "like"
+    val service = Service.findByAccessToken(accessToken).getOrElse(throw badAccessTokenException(accessToken))
+    val labelName = LikeUtil.userUrlLabels.get(actionType).getOrElse(throw notAllowedActionTypeException(actionType))
+    val limit = 100
+    val serviceId = service.id.get
 //    val queryString = s"""
-//          | {"srcVertices": [{"serviceName": "${LikeUtil.serviceName}", "columnName": "${LikeUtil.srcColumnName}", "id": "$user"}],
-//          | "steps": [
-//          |    {"step": [
+//          |{
+//          |   {"srcVertices": [{"serviceName": "${LikeUtil.serviceName}", "columnName": "${LikeUtil.srcColumnName}", "id": "$user"}]},
+//          |   "steps": [
+//          |    {
+//          |     "step": [
 //          |      {
-//          |        "label": "$labelName", "limit": $limit, "index": "IDX_SERVICE_ID",
-//          |        "interval": {"from": {"serviceId": $serviceId}, "to": {"serviceId": $serviceId}}}]
-//          |      },
+//          |       "label": "$labelName", "limit": $limit, "index": "IDX_SERVICE_ID",
+//          |       "interval": {"from": {"serviceId": $serviceId}, "to": {"serviceId": $serviceId}}
+//          |       }
+//          |     ]
+//          |    },
 //          |    {"step": [{"label": "${LikeUtil.urlSelfLabelName}", "limit": 1}]}
 //          |  ]
+//          |}
 //       """.stripMargin
 //    val queryJson = Json.parse(queryString)
-//    QueryController.getEdgesInner(queryJson)
-//  }
+    val queryJson = Json.obj("srcVertices" -> Json.arr(Json.obj("serviceName" -> LikeUtil.serviceName, "columnName" -> LikeUtil.srcColumnName, "id" -> user)),
+      "steps" -> Json.arr(
+        Json.obj("step" -> Json.arr(Json.obj("label" -> labelName, "index" -> "IDX_SERVICE_ID",
+          "interval" -> Json.obj("from" -> Json.obj("serviceId" -> serviceId), "to" -> Json.obj("serviceId" -> serviceId))))),
+        Json.obj("step" -> Json.arr(Json.obj("label" -> LikeUtil.urlSelfLabelName, "limit" -> 1)))
+      )
+    )
+    logger.info(s"$queryJson")
+    QueryController.getEdgesInner(queryJson)
+  }
 
-  def selectAll(user: String) = withHeaderAsync(parse.anyContent) { request =>
+  def selectAll(accessToken: String, user: String) = withHeaderAsync(parse.anyContent) { request =>
     val actionType = "like"
     val labelName = LikeUtil.userUrlLabels.get(actionType).getOrElse(throw notAllowedActionTypeException(actionType))
 
-    val queryJson =
-      Json.parse(s"""
-         |{
-         |    "srcVertices": [
-         |        {
-         |            "serviceName": "${LikeUtil.serviceName}",
-         |            "columnName": "${LikeUtil.srcColumnName}",
-         |            "id": "$user"
-         |        }
-         |    ],
-         |    "steps": [
-         |        {
-         |            "step": [
-         |              {"label": "$labelName", "limit": 100, "index": "_PK"}
-         |            ]
-         |        },
-         |        {
-         |            "step": [
-         |              {"label": "${LikeUtil.urlSelfLabelName}", "limit": 1}
-         |            ]
-         |        }
-         |    ]
-         |}
-       """.stripMargin)
+    val queryJson = Json.obj("srcVertices" -> Json.arr(Json.obj("serviceName" -> LikeUtil.serviceName, "columnName" -> LikeUtil.srcColumnName, "id" -> user)),
+      "steps" -> Json.arr(
+        Json.obj("step" -> Json.arr(Json.obj("label" -> labelName, "index" -> "_PK"))),
+        Json.obj("step" -> Json.arr(Json.obj("label" -> LikeUtil.urlSelfLabelName, "limit" -> 1)))
+      )
+    )
     QueryController.getEdgesInner(queryJson)
   }
 

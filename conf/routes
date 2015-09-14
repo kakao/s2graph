@@ -104,5 +104,5 @@ POST     /graphs/experiment/:accessToken/:experimentName/:uuid                  
 POST     /like/:accessToken   controllers.LikeController.like(accessToken: String)
 POST     /likes/:accessToken  controllers.LikeController.likes(accessToken)
 GET     /scrape  controllers.LikeController.scrape(url: String)
-GET     /like/select/:user  controllers.LikeController.selectAll(user: String)
-
+GET     /like/selectAll/:accessToken/:user  controllers.LikeController.selectAll(accessToken: String, user: String)
+GET     /like/select/:accessToken/:user controllers.LikeController.select(accessToken, user)
