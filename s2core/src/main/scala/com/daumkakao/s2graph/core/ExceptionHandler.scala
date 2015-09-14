@@ -60,9 +60,14 @@ object ExceptionHandler {
   }
 
   def enqueue(msg: KafkaMessage) = {
-    routees.map ( _ ! msg )
+    routees.foreach ( _ ! msg )
   }
 
+  def enqueue(topic: String, key: String, value: String) = {
+    routees.foreach { routee =>
+      routee ! new ProducerRecord[String, String](topic, key, value)
+    }
+  }
 
   def kafkaConfig(config: Config) = {
     val props = new Properties();
@@ -127,6 +132,29 @@ class KafkaAggregatorActor(kafkaProducer: Producer[String, String]) extends Stas
   }
 
   override def receive = {
+    case record: ProducerRecord[String, String] =>
+      try {
+        kafkaProducer.send(record, new Callback() {
+          override def onCompletion(meta: RecordMetadata, e: Exception) = {
+            if (e == null) {
+              // success
+              successCount.incrementAndGet()
+              unstashAll()
+              stashCount.set(0L)
+            } else {
+              // failure
+              log.error(s"onCompletion: $e", e)
+              failedCount.incrementAndGet()
+            }
+          }
+        })
+      } catch {
+        case e@(_: org.apache.kafka.clients.producer.BufferExhaustedException | _: Throwable) =>
+          log.error(s"$e", e)
+          log.info(s"stash")
+          stash()
+          stashCount.incrementAndGet()
+      }
     case ShowMetrics =>
       log.info(s"[Stats]: failed[${failedCount.get}], stashed[${stashCount.get}], success[${successCount.get}]")
 

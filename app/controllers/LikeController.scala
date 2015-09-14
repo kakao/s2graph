@@ -6,9 +6,10 @@ import actors.{UrlScrapeActor, LikeUtil, QueueActor}
 import com.beachape.metascraper.Messages.{ScrapeUrl, ScrapedData}
 import com.beachape.metascraper.Scraper
 import com.daumkakao.s2graph.core.mysqls.Service
-import com.daumkakao.s2graph.core.{Graph, GraphUtil}
+import com.daumkakao.s2graph.core.{ExceptionHandler, Graph, GraphUtil}
 import com.daumkakao.s2graph.logger
 import com.google.common.cache.CacheBuilder
+import config.Config
 import dispatch.Http
 import play.api.Logger
 import play.api.libs.json.{JsValue, Json, JsObject}
@@ -22,12 +23,17 @@ import scala.concurrent.Future
 object LikeController extends Controller with RequestParser {
   import scala.concurrent.ExecutionContext.Implicits.global
   import ApplicationController._
-  import UrlScrapeActor._
+  import actors.KafkaConsumerWithThrottle._
+
   val scraper = new Scraper(Http, Seq("http", "https"))
 
   def badAccessTokenException(accessToken: String) = new RuntimeException(s"bad accessToken: $accessToken")
   def notAllowedActionTypeException(actionType: String) = new RuntimeException(s"not allowd action type: $actionType")
-
+  val cacheTTL = 60000
+  val filter = CacheBuilder.newBuilder()
+    .expireAfterWrite(cacheTTL, TimeUnit.MILLISECONDS)
+    .maximumSize(10000)
+    .build[Integer, String]()
   /** select */
 //  def select(accessToken: String, user: String) = withHeaderAsync(parse.anyContent) { request =>
 //    val actionType = "like"
@@ -134,7 +140,9 @@ object LikeController extends Controller with RequestParser {
     Logger.info(s"$edge")
     QueueActor.router ! edge
     logger.info(s"$QueueActor.scrapeRouter")
-    UrlScrapeActor.router ! url
+    ExceptionHandler.enqueue(Config.KAFKA_SCRAPE_TOPIC, null, url)
+//
+//    UrlScrapeActor.router ! url
     Future.successful(true)
   }
 

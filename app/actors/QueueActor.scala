@@ -33,6 +33,8 @@ object Protocol {
 
   case object FlushAll
 
+  case object Consume
+
 }
 object LikeUtil {
   val serviceName = "kakao_test"
