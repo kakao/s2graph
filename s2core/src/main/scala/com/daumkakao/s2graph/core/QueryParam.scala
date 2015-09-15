@@ -305,7 +305,7 @@ case class QueryParam(labelWithDir: LabelWithDirection, timestamp: Long = System
   def interval(from: Seq[(Byte, InnerValLike)], to: Seq[(Byte, InnerValLike)]): QueryParam = {
     //    val len = label.orderTypes.size.toByte
     //    val len = label.extraIndicesMap(labelOrderSeq).sortKeyTypes.size.toByte
-    //    logger.error(s"indicesMap: ${label.indicesMap(labelOrderSeq)}")
+//        logger.error(s"indicesMap: ${label.indicesMap(labelOrderSeq)}")
     val len = label.indicesMap(labelOrderSeq).sortKeyTypes.size.toByte
 
     val minMetaByte = InnerVal.minMetaByte
@@ -319,6 +319,7 @@ case class QueryParam(labelWithDir: LabelWithDirection, timestamp: Long = System
     val maxBytes = fromVal
     val minBytes = toVal
     val rangeFilter = new ColumnRangeFilter(minBytes, true, maxBytes, true)
+//    logger.info(s"interval: ${minBytes.toList}, ${maxBytes.toList}")
     this.columnRangeFilter = rangeFilter
     this
   }
@@ -424,7 +425,9 @@ case class QueryParam(labelWithDir: LabelWithDirection, timestamp: Long = System
       duration, isInverted, exclude, include, hasFilters).mkString("\t")
     //      duration, isInverted, exclude, include, hasFilters, outputFields).mkString("\t")
   }
-
+  def toHashKey(getRequest: GetRequest): Int = {
+    MurmurHash3.stringHash(Seq(getRequest.toString, offset, limit, duration, columnRangeFilter).mkString(","))
+  }
 
   def buildGetRequest(srcVertex: Vertex) = {
     val (srcColumn, tgtColumn) =

@@ -273,7 +273,7 @@ object Graph {
   }
 
   private def fetchEdgesWithCache(getRequest: GetRequest, q: Query, stepIdx: Int, queryParam: QueryParam, prevScore: Double): Deferred[QueryResult] = {
-    val cacheKey = MurmurHash3.stringHash(getRequest.toString)
+    val cacheKey = queryParam.toHashKey(getRequest)
     def queryResultCallback(cacheKey: Int) = new Callback[QueryResult, QueryResult] {
       def call(arg: QueryResult): QueryResult = {
         //        logger.debug(s"queryResultCachePut, $arg")

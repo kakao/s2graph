@@ -2,7 +2,7 @@ package controllers
 
 import java.net.{URLDecoder, URLEncoder}
 import java.util.concurrent.TimeUnit
-import actors.{LikeUtil, QueueActor}
+import actors.{KafkaConsumerWithThrottle, LikeUtil, QueueActor}
 import com.beachape.metascraper.Messages.{ScrapeUrl, ScrapedData}
 import com.beachape.metascraper.Scraper
 import com.daumkakao.s2graph.core.ExceptionHandler.KafkaMessage
@@ -18,8 +18,10 @@ import play.api.libs.json.{JsValue, Json, JsObject}
 import play.api.mvc.{Action, Controller}
 
 import scala.concurrent.Future
+import scala.util.hashing.MurmurHash3
 
 object LikeController extends Controller with RequestParser {
+
   import scala.concurrent.ExecutionContext.Implicits.global
   import ApplicationController._
   import actors.KafkaConsumerWithThrottle._
@@ -27,12 +29,15 @@ object LikeController extends Controller with RequestParser {
   val scraper = new Scraper(Http, Seq("http", "https"))
 
   def badAccessTokenException(accessToken: String) = new RuntimeException(s"bad accessToken: $accessToken")
+
   def notAllowedActionTypeException(actionType: String) = new RuntimeException(s"not allowd action type: $actionType")
+
   val cacheTTL = 60000
   val filter = CacheBuilder.newBuilder()
     .expireAfterWrite(cacheTTL, TimeUnit.MILLISECONDS)
     .maximumSize(10000)
     .build[Integer, String]()
+
   /** select */
   def select(accessToken: String, user: String) = withHeaderAsync(parse.anyContent) { request =>
     val actionType = "like"
@@ -40,23 +45,6 @@ object LikeController extends Controller with RequestParser {
     val labelName = LikeUtil.userUrlLabels.get(actionType).getOrElse(throw notAllowedActionTypeException(actionType))
     val limit = 100
     val serviceId = service.id.get
-//    val queryString = s"""
-//          |{
-//          |   {"srcVertices": [{"serviceName": "${LikeUtil.serviceName}", "columnName": "${LikeUtil.srcColumnName}", "id": "$user"}]},
-//          |   "steps": [
-//          |    {
-//          |     "step": [
-//          |      {
-//          |       "label": "$labelName", "limit": $limit, "index": "IDX_SERVICE_ID",
-//          |       "interval": {"from": {"serviceId": $serviceId}, "to": {"serviceId": $serviceId}}
-//          |       }
-//          |     ]
-//          |    },
-//          |    {"step": [{"label": "${LikeUtil.urlSelfLabelName}", "limit": 1}]}
-//          |  ]
-//          |}
-//       """.stripMargin
-//    val queryJson = Json.parse(queryString)
     val queryJson = Json.obj("srcVertices" -> Json.arr(Json.obj("serviceName" -> LikeUtil.serviceName, "columnName" -> LikeUtil.srcColumnName, "id" -> user)),
       "steps" -> Json.arr(
         Json.obj("step" -> Json.arr(Json.obj("label" -> labelName, "index" -> "IDX_SERVICE_ID",
@@ -68,7 +56,7 @@ object LikeController extends Controller with RequestParser {
     QueryController.getEdgesInner(queryJson)
   }
 
-  def selectAll(accessToken: String, user: String) = withHeaderAsync(parse.anyContent) { request =>
+  def selectAll(user: String) = withHeaderAsync(parse.anyContent) { request =>
     val actionType = "like"
     val labelName = LikeUtil.userUrlLabels.get(actionType).getOrElse(throw notAllowedActionTypeException(actionType))
 
@@ -84,15 +72,23 @@ object LikeController extends Controller with RequestParser {
   /** write */
 
   def scrape(rawUrl: String) = withHeaderAsync(parse.anyContent) { request =>
-//    val url = urlWithProtocol(URLDecoder.decode(encodedUrl, "utf-8"))
+    //    val url = urlWithProtocol(URLDecoder.decode(encodedUrl, "utf-8"))
     val url = urlWithProtocol(rawUrl)
-    for {
-      scrapedData <- scraper.fetch(ScrapeUrl(url))
-      edge = toUrlSelfEdge(url, toShortenUrl(url), scrapedData)
-      ret <- Graph.mutateEdgeWithWait(edge)
-    } yield {
-      val json = Json.obj("url" -> url, "data" -> toJsObject(scrapedData))
-      jsonResponse(json)
+    import KafkaConsumerWithThrottle._
+    val hashKey = MurmurHash3.stringHash(url)
+    val oldVal = KafkaConsumerWithThrottle.filter.getIfPresent(hashKey)
+    if (oldVal == null) {
+      for {
+        scrapedData <- scraper.fetch(ScrapeUrl(url))
+        edge = toUrlSelfEdge(url, toShortenUrl(url), scrapedData)
+        ret <- Graph.mutateEdgeWithWait(edge)
+      } yield {
+        KafkaConsumerWithThrottle.filter.put(hashKey, scrapedData)
+        val json = Json.obj("url" -> url, "data" -> toJsObject(scrapedData))
+        jsonResponse(json)
+      }
+    } else {
+      Future.successful(jsonResponse(toJsObject(oldVal)))
     }
   }
 
@@ -121,6 +117,7 @@ object LikeController extends Controller with RequestParser {
     val (user, url, actionType) = toParams(jsVal)
     likeInner(serviceId, user, url, actionType)
   }
+
   /** fire user-url action edge into local queue, and fire scrap request simultaneously */
   def likeInner(serviceId: Int, user: String,
                 url: String, actionType: String): Future[Boolean] = {
@@ -135,8 +132,8 @@ object LikeController extends Controller with RequestParser {
     QueueActor.router ! edge
     logger.info(s"$QueueActor.scrapeRouter")
     ExceptionHandler.enqueue(KafkaMessage(new ProducerRecord[String, String](Config.KAFKA_SCRAPE_TOPIC, null, url)))
-//
-//    UrlScrapeActor.router ! url
+    //
+    //    UrlScrapeActor.router ! url
     Future.successful(true)
   }
 
