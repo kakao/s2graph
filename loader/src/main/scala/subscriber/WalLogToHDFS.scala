@@ -6,7 +6,7 @@ import java.util.Date
 import com.daumkakao.s2graph.core.Graph
 import kafka.serializer.StringDecoder
 import org.apache.spark.streaming.Durations._
-import org.apache.spark.streaming.kafka.KafkaRDDFunctions._
+import org.apache.spark.streaming.kafka.HasOffsetRanges
 import s2.spark.{HashMapParam, SparkApp, WithKafka}
 
 import scala.collection.mutable.{HashMap => MutableHashMap}
@@ -63,26 +63,46 @@ object WalLogToHDFS extends SparkApp with WithKafka {
     val mapAcc = sc.accumulable(new MutableHashMap[String, Long](), "Throughput")(HashMapParam[String, Long](_ + _))
 
     stream.foreachRDD { (rdd, time) =>
+      val offsets = rdd.asInstanceOf[HasOffsetRanges].offsetRanges
+
       val elements = rdd.mapPartitions { partition =>
         // set executor setting.
         val phase = System.getProperty("phase")
         GraphSubscriberHelper.apply(phase, dbUrl, "none", brokerList)
 
-        for {
-          (key, msg) <- partition
-          element <- Graph.toGraphElement(msg)
-        } yield {
-          Seq(msg, element.serviceName).mkString("\t")
+        partition.flatMap { case (key, msg) =>
+          val optMsg = Graph.toGraphElement(msg).map { element =>
+            val n = msg.split("\t", -1).length
+            if(n == 6) {
+              Seq(msg, "{}", element.serviceName).mkString("\t")
+            }
+            else if(n == 7) {
+              Seq(msg, element.serviceName).mkString("\t")
+            }
+            else {
+              null
+            }
+          }
+          optMsg
         }
       }
 
       val ts = time.milliseconds
       val path = s"$outputPath/${toOutputPath(ts)}"
-      elements.saveAsTextFile(path)
 
-      elements.foreachPartitionWithOffsetRange { (osr, part) =>
-        // do something with part
+      /** make sure that `elements` are not running at the same time */
+      val elementsWritten = {
+        elements.saveAsTextFile(path)
+        elements
+      }
+
+      elementsWritten.mapPartitionsWithIndex { (i, part) =>
+        // commit offset range
+        val osr = offsets(i)
         getStreamHelper(kafkaParams).commitConsumerOffset(osr)
+        Iterator.empty
+      }.foreach {
+        (_: Nothing) => ()
       }
     }
 
