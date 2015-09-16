@@ -73,6 +73,7 @@ object LikeController extends Controller with RequestParser {
   def scrape(rawUrl: String) = withHeaderAsync(parse.anyContent) { request =>
     //    val url = urlWithProtocol(URLDecoder.decode(encodedUrl, "utf-8"))
     val url = urlWithProtocol(rawUrl)
+
     import KafkaConsumerWithThrottle._
     val hashKey = MurmurHash3.stringHash(url)
     val oldVal = KafkaConsumerWithThrottle.filter.getIfPresent(hashKey)
@@ -84,7 +85,11 @@ object LikeController extends Controller with RequestParser {
       } yield {
         KafkaConsumerWithThrottle.filter.put(hashKey, scrapedData)
         val json = Json.obj("url" -> url, "data" -> toJsObject(scrapedData))
-        jsonResponse(json)
+        jsonResponse(json, "Access-Control-Allow-Origin" -> "*",
+          "Access-Control-Allow-Methods" -> "GET, POST, PUT, DELETE, OPTIONS",
+          "Access-Control-Allow-Headers" -> "Content-Type, X-Requested-With, Accept",
+          // cache access control response for one day
+          "Access-Control-Max-Age" -> (60 * 60 * 24).toString)
       }
     } else {
       Future.successful(jsonResponse(toJsObject(oldVal)))
