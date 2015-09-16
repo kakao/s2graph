@@ -32,18 +32,16 @@ object LikeController extends Controller with RequestParser {
 
   def notAllowedActionTypeException(actionType: String) = new RuntimeException(s"not allowd action type: $actionType")
 
-  val cacheTTL = 60000
+  val cacheTTL = 5000
   val filter = CacheBuilder.newBuilder()
     .expireAfterWrite(cacheTTL, TimeUnit.MILLISECONDS)
     .maximumSize(10000)
     .build[Integer, String]()
 
   /** select */
-  def select(accessToken: String, user: String) = withHeaderAsync(parse.anyContent) { request =>
-    val actionType = "like"
+  def select(accessToken: String, user: String, actionType: String) = withHeaderAsync(parse.anyContent) { request =>
     val service = Service.findByAccessToken(accessToken).getOrElse(throw badAccessTokenException(accessToken))
     val labelName = LikeUtil.userUrlLabels.get(actionType).getOrElse(throw notAllowedActionTypeException(actionType))
-    val limit = 100
     val serviceId = service.id.get
     val queryJson = Json.obj("srcVertices" -> Json.arr(Json.obj("serviceName" -> LikeUtil.serviceName, "columnName" -> LikeUtil.srcColumnName, "id" -> user)),
       "steps" -> Json.arr(
@@ -52,20 +50,21 @@ object LikeController extends Controller with RequestParser {
         Json.obj("step" -> Json.arr(Json.obj("label" -> LikeUtil.urlSelfLabelName, "limit" -> 1)))
       )
     )
-    logger.info(s"$queryJson")
+    logger.debug(s"$queryJson")
     QueryController.getEdgesInner(queryJson)
   }
 
-  def selectAll(user: String) = withHeaderAsync(parse.anyContent) { request =>
-    val actionType = "like"
+  def selectAll(user: String, actionType: String) = withHeaderAsync(parse.anyContent) { request =>
     val labelName = LikeUtil.userUrlLabels.get(actionType).getOrElse(throw notAllowedActionTypeException(actionType))
 
-    val queryJson = Json.obj("srcVertices" -> Json.arr(Json.obj("serviceName" -> LikeUtil.serviceName, "columnName" -> LikeUtil.srcColumnName, "id" -> user)),
-      "steps" -> Json.arr(
-        Json.obj("step" -> Json.arr(Json.obj("label" -> labelName, "index" -> "_PK"))),
-        Json.obj("step" -> Json.arr(Json.obj("label" -> LikeUtil.urlSelfLabelName, "limit" -> 1)))
+    val queryJson =
+      Json.obj("srcVertices" -> Json.arr(Json.obj("serviceName" -> LikeUtil.serviceName, "columnName" -> LikeUtil.srcColumnName, "id" -> user)),
+        "steps" -> Json.arr(
+          Json.obj("step" -> Json.arr(Json.obj("label" -> labelName, "index" -> "_PK"))),
+          Json.obj("step" -> Json.arr(Json.obj("label" -> LikeUtil.urlSelfLabelName, "limit" -> 1, "cacheTTL" -> cacheTTL)))
+        )
       )
-    )
+    logger.debug(s"$queryJson")
     QueryController.getEdgesInner(queryJson)
   }
 
