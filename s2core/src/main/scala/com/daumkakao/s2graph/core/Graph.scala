@@ -628,6 +628,12 @@ object Graph {
     Future.sequence(futures)
   }
 
+  def mutateEdgeWithWait(edge: Edge): Future[Boolean] = {
+    implicit val ex = this.executionContext
+    writeAsyncWithWait(edge.label.hbaseZkAddr, Seq(edge).map(e => e.buildPutsAll())).map { rets =>
+      rets.forall(identity)
+    }
+  }
   def mutateVertex(vertex: Vertex): Future[Boolean] = {
     implicit val ex = this.executionContext
     if (vertex.op == GraphUtil.operations("delete")) {
