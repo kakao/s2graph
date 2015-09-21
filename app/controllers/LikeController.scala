@@ -84,7 +84,7 @@ object LikeController extends Controller with RequestParser {
         ret <- Graph.mutateEdgeWithWait(edge)
       } yield {
         KafkaConsumerWithThrottle.filter.put(hashKey, scrapedData)
-        val json = Json.obj("url" -> url, "data" -> toJsObject(scrapedData))
+        val json = Json.obj("url" -> url, "data" -> toJsObject(scrapedData, serializeArray = false))
         jsonResponse(json, "Access-Control-Allow-Origin" -> "*",
           "Access-Control-Allow-Methods" -> "GET, POST, PUT, DELETE, OPTIONS",
           "Access-Control-Allow-Headers" -> "Content-Type, X-Requested-With, Accept",

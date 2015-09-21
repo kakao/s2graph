@@ -252,20 +252,20 @@ object KafkaConsumerWithThrottle extends RequestParser {
   def toShortenUrl(url: String): String = {
     url
   }
-  def toJsObject(scrapedData: ScrapedData): JsObject = {
+  def toJsObject(scrapedData: ScrapedData, serializeArray: Boolean = true): JsObject = {
     Json.obj(
       "url" -> scrapedData.url,
       "mainImageUrl" -> scrapedData.mainImageUrl,
       "title" -> scrapedData.title,
       "description" -> scrapedData.description,
-      "imageUrls" -> scrapedData.imageUrls.mkString(",")
+      "imageUrls" -> (if (serializeArray) scrapedData.imageUrls.mkString(",") else scrapedData.imageUrls)
     )
   }
   def toUrlSelfEdge(url: String, shortenUrl: String, scrapedData: ScrapedData): Edge = {
     val ts = System.currentTimeMillis()
     toEdge(Json.obj("timestamp" -> ts,
       "from" -> url, "to" -> toShortenUrl(url), "label" -> LikeUtil.urlSelfLabelName,
-      "props" -> toJsObject(scrapedData)), "insert")
+      "props" -> toJsObject(scrapedData, serializeArray = true)), "insert")
   }
 }
 case class KafkaConsumerWithThrottle(kafkaStream: KafkaStream[Array[Byte], Array[Byte]],
