@@ -164,13 +164,14 @@ case class Step(queryParams: List[QueryParam],
                 //                scoreThreshold: Double = 0.0,
                 nextStepScoreThreshold: Double = 0.0,
                 nextStepLimit: Int = -1,
-                shouldPropagate: Boolean = false ) {
+                shouldPropagate: Boolean = false,
+                sample: Int = -1) {
 
   lazy val excludes = queryParams.filter(_.exclude)
   lazy val includes = queryParams.filterNot(_.exclude)
   lazy val excludeIds = excludes.map(x => x.labelWithDir.labelId -> true).toMap
 
-  logger.debug(s"Step: $queryParams, $labelWeights, $nextStepScoreThreshold, $nextStepLimit")
+  logger.debug(s"Step: $queryParams, $labelWeights, $nextStepScoreThreshold, $nextStepLimit, $sample")
 }
 
 case class VertexParam(vertices: Seq[Vertex]) {

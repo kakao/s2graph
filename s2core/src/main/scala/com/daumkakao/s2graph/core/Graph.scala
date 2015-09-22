@@ -20,7 +20,7 @@ import scala.collection.mutable.ListBuffer
 import scala.concurrent._
 import scala.concurrent.duration._
 import scala.util.hashing.MurmurHash3
-import scala.util.{Failure, Success, Try}
+import scala.util.{Random, Failure, Success, Try}
 
 object Graph {
   val vertexCf = "v".getBytes()
@@ -274,7 +274,6 @@ object Graph {
         if (shouldPropagate) prevStepEdgesOpt.get
         else prevStepEdgesOpt.get.flatMap(_.ancestorEdges)
 
-
       fetchEdgesWithCache(ancestorEdges, getRequest, q, stepIdx, queryParam, prevScore)
     }
   }
@@ -319,7 +318,13 @@ object Graph {
 
       val successCallback = (kvs: util.ArrayList[KeyValue]) => {
         val edgeWithScores = Edge.toEdges(kvs, queryParam, prevScore, isInnerCall = false, ancestorEdges)
-        QueryResult(q, stepIdx, queryParam, edgeWithScores)
+        val sample = q.steps(stepIdx).sample
+        val sampledEdgeWithScores = if (sample >= 0 ) {
+          logger.debug(s"Sampling ${sample} edges from step #${stepIdx}")
+          Random.shuffle(edgeWithScores).take(q.steps(stepIdx).sample)
+        } else edgeWithScores
+
+        QueryResult(q, stepIdx, queryParam, sampledEdgeWithScores)
       }
 
       val fallback = QueryResult(q, stepIdx, queryParam)

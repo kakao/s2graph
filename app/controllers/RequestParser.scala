@@ -157,6 +157,7 @@ trait RequestParser extends JSONParser {
             case _ => -1
           }
           val shouldPropagate = (step \ "shouldPropagate").asOpt[Boolean].getOrElse(false)
+          val sample = (step \ "sample").asOpt[Int].getOrElse(-1)
 
           val queryParams =
             for {
@@ -180,7 +181,8 @@ trait RequestParser extends JSONParser {
             //            scoreThreshold = stepThreshold,
             nextStepScoreThreshold = nextStepScoreThreshold,
             nextStepLimit = nextStepLimit,
-            shouldPropagate = shouldPropagate)
+            shouldPropagate = shouldPropagate,
+            sample = sample)
         }
 
       val ret = Query(vertices, querySteps, removeCycle = removeCycle,
