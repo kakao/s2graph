@@ -213,6 +213,7 @@ object KafkaConsumerWithThrottle extends RequestParser {
     props.put("zookeeper.session.timeout.ms", "400")
     props.put("zookeeper.sync.time.ms", "200")
     props.put("auto.commit.interval.ms", "1000")
+    props.put("consumer.timeout.ms", "500")
 
     new ConsumerConfig(props)
   }
@@ -268,6 +269,7 @@ object KafkaConsumerWithThrottle extends RequestParser {
       "props" -> toJsObject(scrapedData, serializeArray = true)), "insert")
   }
 }
+
 case class KafkaConsumerWithThrottle(kafkaStream: KafkaStream[Array[Byte], Array[Byte]],
                                            rateLimit: Int,
                                            filter: Cache[Integer, ScrapedData],
@@ -281,22 +283,30 @@ case class KafkaConsumerWithThrottle(kafkaStream: KafkaStream[Array[Byte], Array
   context.system.scheduler.schedule(Duration.Zero, Duration(1, TimeUnit.SECONDS), self, Consume)
 
   private def toHashKey(url: String): Int = MurmurHash3.stringHash(url)
+  val iter = kafkaStream.iterator()
 
   override def receive: Actor.Receive = {
     case Consume =>
-      logger.error(s"Consume")
+//      logger.error(s"Consume")
       /** consume kafka message as rateLimit specified */
-      val iter = kafkaStream.iterator()
-      for {
-        i <- (0 until rateLimit) if iter.hasNext()
-      } {
-        val value = new String(iter.next().message())
-        val oldVal = filter.getIfPresent(toHashKey(value))
-        if (oldVal == null) {
-          router ! ScrapeUrl(value)
-        } else {
-          logger.info(s"$value is cached. ignored")
+      try {
+        for {
+          i <- (0 until rateLimit)
+        } {
+          val value = new String(iter.next().message())
+          logger.error(s"$value")
+          val oldVal = filter.getIfPresent(toHashKey(value))
+          if (oldVal == null) {
+            router ! ScrapeUrl(value)
+          } else {
+            logger.info(s"$value is cached. ignored")
+          }
         }
+      } catch {
+        case e: kafka.consumer.ConsumerTimeoutException =>
+          //logger.error(s"exception", e)
+        case e: Exception =>
+          logger.error(s"exception", e)
       }
   }
 }

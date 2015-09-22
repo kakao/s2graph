@@ -42,6 +42,7 @@ object LikeUtil {
   val urlSelfLabelName = "kakao_shorten_url_test"
   val allowedActionTypes = Set("like", "share", "click")
   val userUrlLabels = Map("like" -> "kakao_like_test", "share" -> "kakao_share_test", "click" -> "kakao_click_test")
+  val userUrlLabelsRev = userUrlLabels.map(kv => kv._2 -> kv._1)
 }
 
 object QueueActor {
