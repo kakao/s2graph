@@ -101,9 +101,6 @@ PUT   /graphs/loadCache                                                        c
 POST     /graphs/experiment/:accessToken/:experimentName/:uuid                    controllers.ExperimentController.experiment(accessToken, experimentName, uuid)
 
 # Like API
-POST     /like/:accessToken   controllers.LikeController.like(accessToken: String)
-POST     /likes/:accessToken  controllers.LikeController.likes(accessToken)
-GET     /scrape  controllers.LikeController.scrape(url: String)
-GET     /like/selectAll/:user  controllers.LikeController.selectAll(user: String, actionType: String ?= "like")
-GET     /like/select/:accessToken/:user controllers.LikeController.select(accessToken, user, actionType: String ?= "like")
+POST     /social/:accessToken  controllers.SocialController.likes(accessToken)
+GET     /scrape  controllers.SocialController.scrape(url: String)
 
