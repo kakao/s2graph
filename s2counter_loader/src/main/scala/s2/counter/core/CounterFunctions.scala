@@ -9,7 +9,6 @@ import s2.config.{S2ConfigFactory, StreamingConfig}
 import s2.counter.core.ExactCounter.ExactValueMap
 import s2.counter.core.RankingCounter.RankingValueMap
 import s2.counter.core.TimedQualifier.IntervalUnit
-import s2.counter.core.v1.{ExactStorageHBaseV1, RankingStorageV1}
 import s2.counter.core.v2.{ExactStorageGraph, RankingStorageGraph}
 import s2.counter.{CounterETLItem, TrxLog}
 import s2.models.{Counter, DBModel, DefaultCounterModel}
@@ -29,12 +28,12 @@ object CounterFunctions extends Logging with WithKafka {
 //  private[counter] val ttlMap: Map[String, Int] = Map("m" -> 3600 * 2, "H" -> 3600 * (1 + 24 * 2), "d" -> 3600 * (24 + 24 * 30))
 
   private val exactCounterMap = Map(
-    s2.counter.VERSION_1 -> new ExactCounter(S2ConfigFactory.config, new ExactStorageHBaseV1(S2ConfigFactory.config)),
+//    s2.counter.VERSION_1 -> new ExactCounter(S2ConfigFactory.config, new ExactStorageHBaseV1(S2ConfigFactory.config)),
     s2.counter.VERSION_2 -> new ExactCounter(S2ConfigFactory.config, new ExactStorageGraph(S2ConfigFactory.config))
   )
 
   private val rankingCounterMap = Map(
-    s2.counter.VERSION_1 -> new RankingCounter(S2ConfigFactory.config, new RankingStorageV1(S2ConfigFactory.config)),
+//    s2.counter.VERSION_1 -> new RankingCounter(S2ConfigFactory.config, new RankingStorageV1(S2ConfigFactory.config)),
     s2.counter.VERSION_2 -> new RankingCounter(S2ConfigFactory.config, new RankingStorageGraph(S2ConfigFactory.config))
   )
 

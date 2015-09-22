@@ -21,7 +21,7 @@ object RankingCounterStreaming extends SparkApp with WithKafka {
 
   val inputTopics = Set(StreamingConfig.KAFKA_TOPIC_COUNTER_TRX)
   val strInputTopics = inputTopics.mkString(",")
-  val groupId = buildKafkaGroupId(strInputTopics, "ranking")
+  val groupId = buildKafkaGroupId(strInputTopics, "ranking_v2")
   val kafkaParam = Map(
 //    "auto.offset.reset" -> "smallest",
     "group.id" -> groupId,

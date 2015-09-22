@@ -79,7 +79,7 @@ class CounterModel(config: Config) extends CachedDBModel[Counter] {
 
   def findById(id: Int, useCache: Boolean = true): Option[Counter] = {
     lazy val sql = withSQL {
-      selectFrom(Counter as c).where.eq(c.id, id).and.eq(c.useFlag, 1).and.eq(c.version, 2)
+      selectFrom(Counter as c).where.eq(c.id, id).and.eq(c.useFlag, 1)
     }.map(Counter(c))
 
     if (useCache) {
@@ -93,7 +93,7 @@ class CounterModel(config: Config) extends CachedDBModel[Counter] {
 
   def findByServiceAction(service: String, action: String, useCache: Boolean = true): Option[Counter] = {
     lazy val sql = withSQL {
-      selectFrom(Counter as c).where.eq(c.service, service).and.eq(c.action, action).and.eq(c.useFlag, 1).and.eq(c.version, 2)
+      selectFrom(Counter as c).where.eq(c.service, service).and.eq(c.action, action).and.eq(c.useFlag, 1)
     }.map(Counter(c))
 
     if (useCache) {
@@ -108,7 +108,7 @@ class CounterModel(config: Config) extends CachedDBModel[Counter] {
 
   def findByRateActionId(rateActionId: Int, useCache: Boolean = true): Seq[Counter] = {
     lazy val sql = withSQL {
-      selectFrom(Counter as c).where.eq(c.rateActionId, rateActionId).and.ne(c.rateBaseId, rateActionId).and.eq(c.useFlag, 1).and.eq(c.version, 2)
+      selectFrom(Counter as c).where.eq(c.rateActionId, rateActionId).and.ne(c.rateBaseId, rateActionId).and.eq(c.useFlag, 1)
     }.map(Counter(c))
 
     if (useCache) {
@@ -122,7 +122,7 @@ class CounterModel(config: Config) extends CachedDBModel[Counter] {
   
   def findByRateBaseId(rateBaseId: Int, useCache: Boolean = true): Seq[Counter] = {
     lazy val sql = withSQL {
-      selectFrom(Counter as c).where.eq(c.rateBaseId, rateBaseId).and.ne(c.rateActionId, rateBaseId).and.eq(c.useFlag, 1).and.eq(c.version, 2)
+      selectFrom(Counter as c).where.eq(c.rateBaseId, rateBaseId).and.ne(c.rateActionId, rateBaseId).and.eq(c.useFlag, 1)
     }.map(Counter(c))
 
     if (useCache) {
@@ -136,7 +136,7 @@ class CounterModel(config: Config) extends CachedDBModel[Counter] {
 
   def findByTrendActionId(trendActionId: Int, useCache: Boolean = true): Seq[Counter] = {
     lazy val sql = withSQL {
-      selectFrom(Counter as c).where.eq(c.rateActionId, trendActionId).and.eq(c.rateBaseId, trendActionId).and.eq(c.useFlag, 1).and.eq(c.version, 2)
+      selectFrom(Counter as c).where.eq(c.rateActionId, trendActionId).and.eq(c.rateBaseId, trendActionId).and.eq(c.useFlag, 1)
     }.map(Counter(c))
 
     if (useCache) {
