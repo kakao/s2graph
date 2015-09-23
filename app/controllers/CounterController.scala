@@ -120,11 +120,11 @@ object CounterController extends Controller {
   }
 
   def getAction(service: String, action: String) = Action { request =>
-    Ok()
+    Ok("")
   }
 
   def updateAction(service: String, action: String) = Action(s2parse.json) { request =>
-    Ok()
+    Ok("")
   }
 
   def deleteAction(service: String, action: String) = Action.apply {
