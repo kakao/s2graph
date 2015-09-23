@@ -51,7 +51,7 @@ object BytesUtilV1 extends BytesUtil {
     // qualifier: interval, ts, dimension 순서
     val tq = toTimedQualifier(bytes)
 
-    val dimension = Bytes.toString(bytes, 0, TIMED_QUALIFIER_SIZE)
+    val dimension = Bytes.toString(bytes, TIMED_QUALIFIER_SIZE, bytes.length - TIMED_QUALIFIER_SIZE)
     ExactQualifier(tq, dimension)
   }
 

@@ -165,6 +165,7 @@ object CounterController extends Controller {
     lazy val dimQueryValues = request.queryString.filterKeys { k => k.charAt(0) == ':' }.map { case (k, v) =>
       (k.substring(1), v.mkString(",").split(',').filter(_.nonEmpty).toSet)
     }
+//    Logger.warn(s"$dimQueryValues")
 
     counterModel.findByServiceAction(service, action) match {
       case Some(policy) =>
@@ -303,6 +304,7 @@ object CounterController extends Controller {
       Json.toJson(ExactCounterResult(ExactCounterResultMeta(policy.service, policy.action, item), items))
     }
   }
+
   private def getDecayedCountToJs(policy: Counter,
                                   item: String,
                                   timeRange: Seq[(TimedQualifier, TimedQualifier)],

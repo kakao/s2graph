@@ -17,6 +17,7 @@ case class ExactQualifier(tq: TimedQualifier, dimKeyValues: Map[String, String],
 //  }
 
   def checkDimensionEquality(dimQuery: Map[String, Set[String]]): Boolean = {
+//    println(s"self: $dimKeyValues, query: $dimQuery")
     dimQuery.size == dimKeyValues.size && {
       for {
         (k, v) <- dimKeyValues

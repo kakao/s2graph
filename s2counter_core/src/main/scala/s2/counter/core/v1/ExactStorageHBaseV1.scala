@@ -80,6 +80,8 @@ class ExactStorageHBaseV1(config: Config) extends ExactStorage {
       }
     }
 
+//    println(s"$messageForLog $gets")
+
     withAsyncHBase[Seq[FetchedCountsGrouped]] { client =>
       val deferreds: Seq[Deferred[FetchedCounts]] = {
         for {
@@ -95,7 +97,7 @@ class ExactStorageHBaseV1(config: Config) extends ExactStorage {
                   eq -> Bytes.toLong(kv.value())
                 }
               }.toMap
-//              log.warn(s"$key $qualifierWithCounts")
+//              println(s"$key $qualifierWithCounts")
               FetchedCounts(key, qualifierWithCounts)
             }
           }}
@@ -205,7 +207,7 @@ class ExactStorageHBaseV1(config: Config) extends ExactStorage {
         (key, eqs) <- queries
         (cf, eqsGrouped) <- eqs.groupBy(eq => intervalsMap(eq.tq.q))
       } yield {
-//        log.warn(s"$key $eqsGrouped")
+//        println(s"$key $eqsGrouped")
         val get = new GetRequest(tableName, BytesUtilV1.toBytes(key))
         get.family(cf.toString)
         get.qualifiers(eqsGrouped.map(BytesUtilV1.toBytes).toArray)
