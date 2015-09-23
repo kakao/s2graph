@@ -150,9 +150,10 @@ case class ExactStorageGraph(config: Config) extends ExactStorage {
         val stepJs =
           s"""
             |{
-            |  "limit": 100,
-            |  "label": "$labelName",
             |  "direction": "out",
+            |  "limit": -1,
+            |  "duplicate": "raw",
+            |  "label": "$labelName",
             |  "interval": $intervalJs
             |}
            """.stripMargin
@@ -177,7 +178,7 @@ case class ExactStorageGraph(config: Config) extends ExactStorage {
       """.stripMargin
 
     val reqJs = Json.parse(reqJsStr)
-//    println(s"query: ${reqJs.toString()}")
+//    log.warn(s"query: ${reqJs.toString()}")
 
     wsClient.url(s"$s2graphUrl/graphs/getEdges").post(reqJs).map { resp =>
       resp.status match {
