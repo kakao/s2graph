@@ -119,6 +119,34 @@ class QuerySpec extends SpecCommon with PlaySpecification {
           ]
         }""")
 
+    def twoStepQueryWithSampling(id: Int, sample: Int) = Json.parse( s"""
+        { "srcVertices": [
+          { "serviceName": "${testServiceName}",
+            "columnName": "${testColumnName}",
+            "id": ${id}
+           }],
+          "steps": [
+            {
+              "sample": ${sample},
+              "step": [{
+                "label": "${testLabelName}",
+                "direction": "out",
+                "offset": 0,
+                "limit": 100
+                }]
+            },
+            {
+               "sample": ${sample},
+               "step": [{
+                 "label": "${testLabelName}",
+                 "direction": "out",
+                 "offset": 0,
+                 "limit": 100
+               }]
+            }
+          ]
+        }""")
+
     def getEdges(queryJson: JsValue): JsValue = {
       val ret = route(FakeRequest(POST, "/graphs/getEdges").withJsonBody(queryJson)).get
       contentAsJson(ret)
@@ -261,36 +289,38 @@ class QuerySpec extends SpecCommon with PlaySpecification {
       }
     }
 
-    "ancestor" in {
-      running(FakeApplication()) {
-        var result = getEdges(queryAncestor(Seq(-1), 1))
-        var expect = Seq(Set("2000", "3000"), Set("1000", "2000"), Set("1000"))
-        var ancestors = (result \\ "ancestor").map(_.as[Seq[String]]).map(_.toSet)
-        ancestors must equalTo(expect)
-
-        result = getEdges(queryAncestor(Seq(-1), 2))
-        expect = Seq(Set("12000"), Set("11000"), Set("10000"))
-        ancestors = (result \\ "ancestor").map(_.as[Seq[String]]).map(_.toSet)
-        ancestors must equalTo(expect)
-        true
-      }
-    }
+//    "ancestor" in {
+//      running(FakeApplication()) {
+//        var result = getEdges(queryAncestor(Seq(-1), 1))
+//        var expect = Seq(Set("2000", "3000"), Set("1000", "2000"), Set("1000"))
+//        var ancestors = (result \\ "ancestor").map(_.as[Seq[String]]).map(_.toSet)
+//        ancestors must equalTo(expect)
+//
+//        result = getEdges(queryAncestor(Seq(-1), 2))
+//        expect = Seq(Set("12000"), Set("11000"), Set("10000"))
+//        ancestors = (result \\ "ancestor").map(_.as[Seq[String]]).map(_.toSet)
+//        ancestors must equalTo(expect)
+//        true
+//      }
+//    }
 
     "query with sampling" in {
       running(FakeApplication()) {
-        val sampleSize = 5
-        val testId = 222
+        val sampleSize = 2
+        val testId = 22
         val bulkEdges = Seq(
-          edge"1442985659166 insert e $testId 100 $testLabelName",
-          edge"1442985659166 insert e $testId 200 $testLabelName",
-          edge"1442985659166 insert e $testId 300 $testLabelName",
-          edge"1442985659166 insert e $testId 400 $testLabelName",
-          edge"1442985659166 insert e $testId 500 $testLabelName",
-          edge"1442985659166 insert e $testId 600 $testLabelName",
-          edge"1442985659166 insert e $testId 700 $testLabelName",
-          edge"1442985659166 insert e $testId 800 $testLabelName",
-          edge"1442985659166 insert e $testId 900 $testLabelName",
-          edge"1442985659166 insert e $testId 1000 $testLabelName"
+          edge"1442985659166 insert e $testId 122 $testLabelName",
+          edge"1442985659166 insert e $testId 222 $testLabelName",
+          edge"1442985659166 insert e $testId 322 $testLabelName",
+          edge"1442985659166 insert e 122 1122 $testLabelName",
+          edge"1442985659166 insert e 122 1222 $testLabelName",
+          edge"1442985659166 insert e 122 1322 $testLabelName",
+          edge"1442985659166 insert e 222 2122 $testLabelName",
+          edge"1442985659166 insert e 222 2222 $testLabelName",
+          edge"1442985659166 insert e 222 2322 $testLabelName",
+          edge"1442985659166 insert e 322 3122 $testLabelName",
+          edge"1442985659166 insert e 322 3222 $testLabelName",
+          edge"1442985659166 insert e 322 3322 $testLabelName"
         )
 
         val req = FakeRequest(POST, "/graphs/edges/bulk").withBody(bulkEdges.mkString("\n"))
@@ -299,9 +329,13 @@ class QuerySpec extends SpecCommon with PlaySpecification {
         Thread.sleep(asyncFlushInterval)
 
 
-        val result = getEdges(queryWithSampling(testId, sampleSize))
-        println(Json.toJson(result))
-        (result \ "results").as[List[JsValue]].size must equalTo(scala.math.min(sampleSize, bulkEdges.size))
+        val result1 = getEdges(queryWithSampling(testId, sampleSize))
+        println(Json.toJson(result1))
+        (result1 \ "results").as[List[JsValue]].size must equalTo(scala.math.min(sampleSize, bulkEdges.size))
+
+        val result2 = getEdges(twoStepQueryWithSampling(testId, sampleSize))
+        println(Json.toJson(result2))
+        (result2 \ "results").as[List[JsValue]].size must equalTo(scala.math.min(sampleSize*sampleSize, bulkEdges.size*bulkEdges.size))
       }
     }
   }
