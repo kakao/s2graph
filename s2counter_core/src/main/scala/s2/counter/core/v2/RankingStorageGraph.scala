@@ -184,7 +184,8 @@ case class RankingStorageGraph(config: Config) extends RankingStorage {
     if (!existsLabel(policy)) {
       val graphLabel = rateActionOpt.getOrElse(action)
       val defaultLabel = Label(None, graphLabel, -1, "", "", -1, "s2counter_id", policy.itemType.toString.toLowerCase,
-        isDirected = true, service, -1, "weak", "", None, HBaseType.DEFAULT_VERSION, isAsync = false, "lz4")
+        isDirected = true, service, -1, "weak", policy.hbaseTable.getOrElse(""), Some(policy.ttl),
+        HBaseType.DEFAULT_VERSION, isAsync = false, "lz4")
       val label = Label.findByName(graphLabel, useCache = false)
         .getOrElse(defaultLabel)
 

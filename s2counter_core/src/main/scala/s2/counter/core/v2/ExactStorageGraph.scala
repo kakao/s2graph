@@ -293,7 +293,8 @@ case class ExactStorageGraph(config: Config) extends ExactStorage {
 
     if (!existsLabel(policy)) {
       val defaultLabel = Label(None, action, -1, "", "", -1, "s2counter_id", policy.itemType.toString.toLowerCase,
-        isDirected = true, service, -1, "weak", "", None, HBaseType.DEFAULT_VERSION, isAsync = false, "lz4")
+        isDirected = true, service, -1, "weak", policy.hbaseTable.getOrElse(""), Some(policy.ttl),
+        HBaseType.DEFAULT_VERSION, isAsync = false, "lz4")
       val label = Label.findByName(action, useCache = false)
         .getOrElse(defaultLabel)
 

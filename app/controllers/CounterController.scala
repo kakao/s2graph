@@ -48,7 +48,7 @@ object CounterController extends Controller {
     request.getQueryString(key).getOrElse(default)
   }
 
-  def createAction(service: String, action: String) = Action(parse.json) { implicit request =>
+  def createAction(service: String, action: String) = Action(s2parse.json) { implicit request =>
     counterModel.findByServiceAction(service, action, useCache = false) match {
       case None =>
         val body = request.body
@@ -91,7 +91,7 @@ object CounterController extends Controller {
         }
 
         val hbaseTable = {
-          Seq("s2counter", service, ttl) ++ dailyTtl mkString "_"
+          Seq("s2counter_v2", service, ttl) ++ dailyTtl mkString "_"
         }
 
         // find label
@@ -103,17 +103,28 @@ object CounterController extends Controller {
             ItemType.withName(strItemType.toUpperCase)
         }
         val policy = Counter(useFlag = true, version, service, action, itemType, autoComb = autoComb, dimension,
-          useProfile = useProfile, ttl, dailyTtl, Some(hbaseTable), intervalUnit, rateActionId, rateBaseId, rateThreshold)
+          useProfile = useProfile, useRank = useRank, ttl, dailyTtl, Some(hbaseTable), intervalUnit,
+          rateActionId, rateBaseId, rateThreshold)
 
         // prepare exact storage
         exactCounter(version).prepare(policy)
-        // prepare ranking storage
-        rankingCounter(version).prepare(policy, rateAction.flatMap(_.get("action")))
+        if (useRank) {
+          // prepare ranking storage
+          rankingCounter(version).prepare(policy, rateAction.flatMap(_.get("action")))
+        }
         counterModel.createServiceAction(policy)
         Ok(Json.toJson(Map("msg" -> s"created $service/$action")))
       case Some(policy) =>
         Ok(Json.toJson(Map("msg" -> s"already exist $service/$action")))
     }
+  }
+
+  def getAction(service: String, action: String) = Action { request =>
+    Ok()
+  }
+
+  def updateAction(service: String, action: String) = Action(s2parse.json) { request =>
+    Ok()
   }
 
   def deleteAction(service: String, action: String) = Action.apply {
@@ -207,7 +218,7 @@ object CounterController extends Controller {
     (service, action, itemIds, intervals, limit, from, to, dimensions, sum)
   }
 
-  def getExactCountAsyncMulti = Action.async(parse.json) { implicit request =>
+  def getExactCountAsyncMulti = Action.async(s2parse.json) { implicit request =>
     val jsValue = request.body
     try {
       val futures = {
@@ -563,7 +574,7 @@ object CounterController extends Controller {
 
   type Record = ProducerRecord[String, String]
 
-  def incrementCount(service: String, action: String, item: String) = Action.async(parse.json) { request =>
+  def incrementCount(service: String, action: String, item: String) = Action.async(s2parse.json) { request =>
     Future {
       /**
        * {

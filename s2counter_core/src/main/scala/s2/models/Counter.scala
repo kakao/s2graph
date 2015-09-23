@@ -9,7 +9,8 @@ import scalikejdbc._
  * Created by alec on 15. 1. 30..
  */
 case class Counter(id: Int, useFlag: Boolean, version: Byte, service: String, action: String,
-                   itemType: Counter.ItemType.ItemType, autoComb: Boolean, dimension: String, useProfile: Boolean,
+                   itemType: Counter.ItemType.ItemType, autoComb: Boolean, dimension: String,
+                   useProfile: Boolean, useRank: Boolean,
                    ttl: Int, dailyTtl: Option[Int], hbaseTable: Option[String], intervalUnit: Option[String],
                    rateActionId: Option[Int], rateBaseId: Option[Int], rateThreshold: Option[Int]) {
   val intervals: Array[String] = intervalUnit.map(s => s.split(',')).getOrElse(Array("t", "M", "d", "H"))
@@ -51,16 +52,16 @@ object Counter extends SQLSyntaxSupport[Counter] {
   def apply(r: ResultName[Counter])(rs: WrappedResultSet): Counter = {
     lazy val itemType = Counter.ItemType(rs.int(r.itemType))
     Counter(rs.int(r.id), rs.boolean(r.useFlag), rs.byte(r.version), rs.string(r.service), rs.string(r.action),
-      itemType, rs.boolean(r.autoComb), rs.string(r.dimension), rs.boolean(r.useProfile),
+      itemType, rs.boolean(r.autoComb), rs.string(r.dimension), rs.boolean(r.useProfile), rs.boolean(r.useRank),
       rs.int(r.ttl), rs.intOpt(r.dailyTtl), rs.stringOpt(r.hbaseTable), rs.stringOpt(r.intervalUnit),
       rs.intOpt(r.rateActionId), rs.intOpt(r.rateBaseId), rs.intOpt(r.rateThreshold))
   }
 
   def apply(useFlag: Boolean, version: Byte, service: String, action: String, itemType: Counter.ItemType.ItemType,
-            autoComb: Boolean, dimension: String, useProfile: Boolean, ttl: Int, dailyTtl: Option[Int],
+            autoComb: Boolean, dimension: String, useProfile: Boolean, useRank: Boolean, ttl: Int, dailyTtl: Option[Int],
             hbaseTable: Option[String], intervalUnit: Option[String],
             rateActionId: Option[Int], rateBaseId: Option[Int], rateThreshold: Option[Int]): Counter = {
-    Counter(-1, useFlag, version, service, action, itemType, autoComb, dimension, useProfile, ttl, dailyTtl, hbaseTable,
+    Counter(-1, useFlag, version, service, action, itemType, autoComb, dimension, useProfile, useRank, ttl, dailyTtl, hbaseTable,
       intervalUnit, rateActionId, rateBaseId, rateThreshold)
   }
 }
@@ -160,6 +161,7 @@ class CounterModel(config: Config) extends CachedDBModel[Counter] {
         c.autoComb -> policy.autoComb,
         c.dimension -> policy.dimension,
         c.useProfile -> policy.useProfile,
+        c.useRank -> policy.useRank,
         c.ttl -> policy.ttl,
         c.dailyTtl -> policy.dailyTtl,
         c.hbaseTable -> policy.hbaseTable,
