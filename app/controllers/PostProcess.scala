@@ -145,7 +145,7 @@ object PostProcess extends JSONParser {
           val grouped = edges.groupBy { jsVal =>
             for {
               column <- q.groupByColumns
-              value <- (jsVal \\ column).headOption
+              value <- (jsVal \ column).asOpt[JsValue].orElse((jsVal \ "props" \ column).asOpt[JsValue])
             } yield column -> value
           }
 
@@ -200,18 +200,17 @@ object PostProcess extends JSONParser {
     }
   }
 
-  private def edgeParent(parentEdges: Seq[EdgeWithScore], q: Query, queryParam: QueryParam, index: Int = 0): JsValue = {
-    if (q.steps.length == index+1 || parentEdges.isEmpty) {
-      Json.arr()
+  private def edgeParent(parentEdges: Seq[EdgeWithScore], q: Query, queryParam: QueryParam): JsValue = {
+    if (parentEdges.isEmpty) {
+      JsNull
     } else {
       val parents = for {
         parent <- parentEdges
         (parentEdge, parentScore) = (parent.edge, parent.score)
+        parentQueryParam = QueryParam(parentEdge.labelWithDir)
+        parents = edgeParent(parentEdge.parentEdges, q, parentQueryParam) if parents != JsNull
       } yield {
-          val parentQueryParam = QueryParam(parentEdge.labelWithDir)
-          val parents = edgeParent(parentEdge.parentEdges, q, parentQueryParam, index = index + 1)
           val edgeJson = edgeToJsonInner(parentEdge, parentScore, q, parentQueryParam).getOrElse(Map.empty[String, JsValue]) + ("parents" -> parents)
-
           Json.toJson(edgeJson)
         }
 
