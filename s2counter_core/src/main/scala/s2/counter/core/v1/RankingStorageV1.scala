@@ -165,4 +165,8 @@ class RankingStorageV1(config: Config) extends RankingStorage {
       }
     }
   }.seq
+
+  override def destroy(policy: Counter): Unit = {
+
+  }
 }

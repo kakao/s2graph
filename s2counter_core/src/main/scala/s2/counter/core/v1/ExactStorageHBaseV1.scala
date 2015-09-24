@@ -304,6 +304,10 @@ class ExactStorageHBaseV1(config: Config) extends ExactStorage {
       }
     }
   }
+
+  override def destroy(policy: Counter): Unit = {
+
+  }
 }
 
 object ExactStorageHBaseV1 {

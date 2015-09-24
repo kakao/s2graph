@@ -5,7 +5,7 @@ import com.daumkakao.s2graph.core.types.HBaseType
 import com.typesafe.config.Config
 import org.apache.http.HttpStatus
 import org.slf4j.LoggerFactory
-import play.api.libs.json.{JsNumber, JsString, JsValue, Json}
+import play.api.libs.json._
 import s2.config.S2CounterConfig
 import s2.counter.core.ExactCounter.ExactValueMap
 import s2.counter.core._
@@ -293,13 +293,12 @@ case class ExactStorageGraph(config: Config) extends ExactStorage {
 
     if (!existsLabel(policy)) {
       val defaultLabel = Label(None, action, -1, "", "", -1, "s2counter_id", policy.itemType.toString.toLowerCase,
-        isDirected = true, service, -1, "weak", policy.hbaseTable.getOrElse(""), Some(policy.ttl),
-        HBaseType.DEFAULT_VERSION, isAsync = false, "lz4")
+        isDirected = true, service, -1, "weak", "", None, HBaseType.DEFAULT_VERSION, isAsync = false, "lz4")
       val label = Label.findByName(action, useCache = false)
         .getOrElse(defaultLabel)
 
       val counterLabelName = action + labelPostfix
-      val json =
+      val defaultJson =
         s"""
            |{
            |  "label": "$counterLabelName",
@@ -315,15 +314,38 @@ case class ExactStorageGraph(config: Config) extends ExactStorage {
            |  "props": [
            |    {"name": "time_unit", "dataType": "string", "defaultValue": ""},
            |    {"name": "time_value", "dataType": "long", "defaultValue": 0}
-           |  ]
+           |  ],
+           |  "hTableName": "${policy.hbaseTable.get}"
            |}
-     """.stripMargin
+        """.stripMargin
+      val json = policy.dailyTtl.map(ttl => ttl * 24 * 60 * 60) match {
+        case Some(ttl) =>
+          Json.parse(defaultJson).as[JsObject] + ("hTableTTL" -> Json.toJson(ttl)) toString()
+        case None =>
+          defaultJson
+      }
+
       val response = Http(s"$s2graphUrl/graphs/createLabel")
         .postData(json)
         .header("content-type", "application/json").asString
 
       if (response.isError) {
         throw new RuntimeException(s"$json ${response.code} ${response.body}")
+      }
+    }
+  }
+
+  override def destroy(policy: Counter): Unit = {
+    val action = policy.action
+
+    if (existsLabel(policy)) {
+      val counterLabelName = action + labelPostfix
+
+//      curl -XPUT localhost:9000/graphs/deleteLabel/friends
+      val response = Http(s"$s2graphUrl/graphs/deleteLabel/$counterLabelName").method("PUT").asString
+
+      if (response.isError) {
+        throw new RuntimeException(s"${response.code} ${response.body}")
       }
     }
   }

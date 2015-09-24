@@ -231,6 +231,10 @@ class ExactCounter(config: Config, storage: ExactStorage) {
   def prepare(policy: Counter) = {
     storage.prepare(policy)
   }
+
+  def destroy(policy: Counter) = {
+    storage.destroy(policy)
+  }
 }
 
 object ExactCounter {

@@ -5,7 +5,7 @@ import com.daumkakao.s2graph.core.types.HBaseType
 import com.typesafe.config.Config
 import org.apache.http.HttpStatus
 import org.slf4j.LoggerFactory
-import play.api.libs.json.{JsString, JsValue, Json}
+import play.api.libs.json.{JsObject, JsString, JsValue, Json}
 import s2.config.S2CounterConfig
 import s2.counter.core.RankingCounter.RankingValueMap
 import s2.counter.core.{RankingKey, RankingResult, RankingStorage}
@@ -184,13 +184,12 @@ case class RankingStorageGraph(config: Config) extends RankingStorage {
     if (!existsLabel(policy)) {
       val graphLabel = rateActionOpt.getOrElse(action)
       val defaultLabel = Label(None, graphLabel, -1, "", "", -1, "s2counter_id", policy.itemType.toString.toLowerCase,
-        isDirected = true, service, -1, "weak", policy.hbaseTable.getOrElse(""), Some(policy.ttl),
-        HBaseType.DEFAULT_VERSION, isAsync = false, "lz4")
+        isDirected = true, service, -1, "weak", "", None, HBaseType.DEFAULT_VERSION, isAsync = false, "lz4")
       val label = Label.findByName(graphLabel, useCache = false)
         .getOrElse(defaultLabel)
 
       val counterLabelName = action + labelPostfix
-      val json =
+      val defaultJson =
         s"""
            |{
            |	"label": "$counterLabelName",
@@ -207,9 +206,17 @@ case class RankingStorageGraph(config: Config) extends RankingStorage {
            |		{"name": "time_unit", "dataType": "string", "defaultValue": ""},
            |		{"name": "time_value", "dataType": "long", "defaultValue": 0},
            |		{"name": "score", "dataType": "float", "defaultValue": 0.0}
-           |  ]
+           |  ],
+           |  "hTableName": "${policy.hbaseTable.get}"
            |}
      """.stripMargin
+      val json = policy.dailyTtl.map(ttl => ttl * 24 * 60 * 60) match {
+        case Some(ttl) =>
+          Json.parse(defaultJson).as[JsObject] + ("hTableTTL" -> Json.toJson(ttl)) toString()
+        case None =>
+          defaultJson
+      }
+
       val response = Http(s"$s2graphUrl/graphs/createLabel")
         .postData(json)
         .header("content-type", "application/json").asString
@@ -222,5 +229,20 @@ case class RankingStorageGraph(config: Config) extends RankingStorage {
 
   override def getTopK(keys: Seq[RankingKey], k: Int): Seq[(RankingKey, RankingResult)] = {
     Nil
+  }
+
+  override def destroy(policy: Counter): Unit = {
+    val action = policy.action
+
+    if (existsLabel(policy)) {
+      val counterLabelName = action + labelPostfix
+
+      //      curl -XPUT localhost:9000/graphs/deleteLabel/friends
+      val response = Http(s"$s2graphUrl/graphs/deleteLabel/$counterLabelName").method("PUT").asString
+
+      if (response.isError) {
+        throw new RuntimeException(s"${response.code} ${response.body}")
+      }
+    }
   }
 }

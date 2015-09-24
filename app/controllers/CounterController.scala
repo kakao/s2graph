@@ -133,6 +133,10 @@ object CounterController extends Controller {
         policy <- counterModel.findByServiceAction(service, action)
       } yield {
         Try {
+          exactCounter(policy.version).destroy(policy)
+          if (policy.useRank) {
+            rankingCounter(policy.version).destroy(policy)
+          }
           counterModel.deleteServiceAction(policy)
         } match {
           case Success(v) =>

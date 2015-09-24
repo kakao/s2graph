@@ -92,6 +92,10 @@ class RankingCounter(config: Config, storage: RankingStorage) {
   def prepare(policy: Counter, graphLabelOpt: Option[String]): Unit = {
     storage.prepare(policy, graphLabelOpt)
   }
+
+  def destroy(policy: Counter): Unit = {
+    storage.destroy(policy)
+  }
 }
 
 object RankingCounter {
