@@ -99,3 +99,6 @@ PUT   /graphs/loadCache                                                        c
 
 # Experiment API
 POST     /graphs/experiment/:accessToken/:experimentName/:uuid                    controllers.ExperimentController.experiment(accessToken, experimentName, uuid)
+
+# Scrape API
+GET     /scrape                                                                 controllers.ScrapeController.scrape(url: String)

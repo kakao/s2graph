@@ -10,4 +10,5 @@ trait GraphElement {
   def queuePartitionKey: String
   def buildPutsAll(): List[HBaseRpc]
   def toLogString(): String
+
 }

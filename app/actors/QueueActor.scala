@@ -2,49 +2,67 @@ package actors
 
 import java.util.concurrent.TimeUnit
 
-import actors.Protocol.FlushAll
+import actors.Protocol.{FlushAll}
+import akka.pattern.ask
 import akka.actor._
+import akka.routing.{SmallestMailboxRouter, RoundRobinRoutingLogic}
+import akka.util.Timeout
+import com.beachape.metascraper.Messages.{ScrapeUrl, ScrapedData}
+import com.beachape.metascraper.ScraperActor
 import com.daumkakao.s2graph.core.ExceptionHandler._
 import com.daumkakao.s2graph.core._
 import com.daumkakao.s2graph.logger
+
+//import com.daumkakao.s2graph.Logger
+import com.google.common.cache.CacheBuilder
 import config.Config
+import controllers.RequestParser
+import play.api.Logger
 import play.api.Play.current
 import play.api.libs.concurrent.Akka
+import play.api.libs.json.{JsObject, Json}
 
 import scala.collection.mutable
 import scala.concurrent.duration.Duration
+import scala.concurrent.duration._
+import scala.language.postfixOps
 
-/**
- * Created by shon on 9/2/15.
- */
 object Protocol {
 
   case object Flush
 
   case object FlushAll
 
+  case object Consume
+
+}
+object LikeUtil {
+  val serviceName = "kakao_test"
+  val srcColumnName = "ad_id"
+  val urlSelfLabelName = "kakao_shorten_url_test"
+  val allowedActionTypes = Set("like", "share", "click")
+  val userUrlLabels = Map("like" -> "kakao_like_test", "share" -> "kakao_share_test", "click" -> "kakao_click_test")
+  val userUrlLabelsRev = userUrlLabels.map(kv => kv._2 -> kv._1)
 }
 
 object QueueActor {
   /** we are throttling down here so fixed number of actor to constant */
   var router: ActorRef = _
 
-  //    Akka.system.actorOf(props(), name = "queueActor")
   def init() = {
-    router = Akka.system.actorOf(props())
+    router = Akka.system.actorOf(Props[QueueActor])
   }
 
   def shutdown() = {
     router ! FlushAll
+
     Akka.system.shutdown()
     Thread.sleep(Config.ASYNC_HBASE_CLIENT_FLUSH_INTERVAL * 2)
   }
-
-  def props(): Props = Props[QueueActor]
 }
 
 class QueueActor extends Actor with ActorLogging {
-
+  logger.error(s"$this")
   import Protocol._
 
   implicit val ec = context.system.dispatcher
@@ -80,7 +98,7 @@ class QueueActor extends Actor with ActorLogging {
       Graph.mutateElements(elementsToFlush)
 
       if (flushSize > 0) {
-        logger.info(s"flush: $flushSize, $queueSize")
+        logger.info(s"flush: $flushSize, $queueSize, $this")
       }
 
     case FlushAll =>

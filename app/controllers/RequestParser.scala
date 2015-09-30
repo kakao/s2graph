@@ -229,6 +229,7 @@ trait RequestParser extends JSONParser {
         case None => label.indexSeqsMap.get(scorings.map(kv => kv._1)).map(_.seq).getOrElse(LabelIndex.defaultSeq)
         case Some(indexName) => label.indexNameMap.get(indexName).map(_.seq).getOrElse(throw new RuntimeException("cannot find index"))
       }
+
       val where = extractWhere(label, labelGroup)
       val includeDegree = (labelGroup \ "includeDegree").asOpt[Boolean].getOrElse(true)
       val rpcTimeout = (labelGroup \ "rpcTimeout").asOpt[Int].getOrElse(Config.RPC_TIMEOUT)
@@ -255,13 +256,13 @@ trait RequestParser extends JSONParser {
       // FIXME: Order of command matter
       QueryParam(labelWithDir)
         .limit(offset, limit)
+        .labelOrderSeq(indexSeq)
         .rank(RankParam(label.id.get, scorings))
         .exclude(exclude)
         .include(include)
         .interval(interval)
         .duration(duration)
         .has(hasFilter)
-        .labelOrderSeq(indexSeq)
         .where(where)
         .duplicatePolicy(duplicate)
         .includeDegree(includeDegree)

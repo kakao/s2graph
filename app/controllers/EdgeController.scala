@@ -1,10 +1,11 @@
 package controllers
 
-import actors.QueueActor
+import actors.{LikeUtil, QueueActor}
 import com.daumkakao.s2graph.core._
 import com.daumkakao.s2graph.core.mysqls.Label
 import com.daumkakao.s2graph.logger
 import config.Config
+import org.apache.kafka.clients.producer.ProducerRecord
 import play.api.Logger
 import play.api.libs.json._
 import play.api.mvc.{Controller, Result}
@@ -26,6 +27,14 @@ object EdgeController extends Controller with RequestParser {
         logger.debug(s"$jsValue")
         val edges = toEdges(jsValue, operation)
         for {edge <- edges} {
+          //FIXME
+          val e = edge
+          LikeUtil.userUrlLabelsRev.get(e.label.label) match {
+            case None =>
+            case Some(_) =>
+              ExceptionHandler.enqueue(KafkaMessage(new ProducerRecord[String, String](Config.KAFKA_SCRAPE_TOPIC, null,
+                e.tgtVertex.innerId.toString)))
+          }
           if (edge.isAsync) {
             ExceptionHandler.enqueue(toKafkaMessage(Config.KAFKA_LOG_TOPIC_ASYNC, edge, None))
           } else {
@@ -38,10 +47,10 @@ object EdgeController extends Controller with RequestParser {
         val rets = for {
           element <- edgesToStore
         } yield {
-          QueueActor.router ! element
-          true
+            QueueActor.router ! element
+            true
 
-        }
+          }
         Future.successful(jsonResponse(Json.toJson(rets)))
       } catch {
         case e: KGraphExceptions.JsonParseException => Future.successful(BadRequest(s"$e"))
@@ -73,6 +82,12 @@ object EdgeController extends Controller with RequestParser {
           element match {
             case v: Vertex => vertexCnt += 1
             case e: Edge => edgeCnt += 1
+              LikeUtil.userUrlLabelsRev.get(e.label.label) match {
+                case None =>
+                case Some(_) =>
+                  ExceptionHandler.enqueue(KafkaMessage(new ProducerRecord[String, String](Config.KAFKA_SCRAPE_TOPIC, null,
+                    e.tgtVertex.innerId.toString)))
+              }
           }
           if (element.isAsync) {
             ExceptionHandler.enqueue(toKafkaMessage(Config.KAFKA_LOG_TOPIC_ASYNC, element, Some(str)))
