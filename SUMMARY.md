@@ -8,5 +8,6 @@
    * [Create a ServiceColumn](create_a_servicecolumn.md)
    * [Manage Edges](manage_edges.md)
    * [Manage Vertices](manage_vertices.md)
+   * Query
 * [Getting Started](getting_started.md)
 
