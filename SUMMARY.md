@@ -6,5 +6,6 @@
    * [Create a Service](create_a_service.md)
    * [Create a Label](create_a_label.md)
    * [Create a ServiceColumn](create_a_servicecolumn.md)
+   * Manage Edges
 * [Getting Started](getting_started.md)
 
