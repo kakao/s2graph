@@ -9,5 +9,6 @@
    * [Manage Edges](manage_edges.md)
    * [Manage Vertices](manage_vertices.md)
    * [Querying](querying.md)
+   * Migration
 * [Getting Started](getting_started.md)
 
