@@ -1,6 +1,5 @@
-# Summary
+# S2Graph Documentation
 
-* [Introduction](README.md)
 * [The Data Model](the_data_model.md)
 * [REST API Glossary](rest_api_glossary.md)
    * [Create a Service](create_a_service.md)
