@@ -10,5 +10,5 @@
    * [Manage Vertices](manage_vertices.md)
    * [Querying](querying.md)
 * [Getting Started](getting_started.md)
-* Migration
+* [Migration](migration.md)
 
