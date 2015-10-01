@@ -7,5 +7,6 @@
    * [Create a Label](create_a_label.md)
    * [Create a ServiceColumn](create_a_servicecolumn.md)
    * Manage Edges
+   * Manage Vertices
 * [Getting Started](getting_started.md)
 
