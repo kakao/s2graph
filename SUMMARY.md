@@ -5,5 +5,6 @@
 * [REST API Glossary](rest_api_glossary.md)
    * [Create a Service](create_a_service.md)
    * [Create a Label](create_a_label.md)
+   * Create a ServiceColumn
 * [Getting Started](getting_started.md)
 
