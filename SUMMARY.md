@@ -2,5 +2,6 @@
 
 * [The Data Model](the_data_model.md)
 * [REST API Glossary](rest_api_glossary.md)
+   * Create a Service
 * [Getting Started](getting_started.md)
 
