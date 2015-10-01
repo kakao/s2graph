@@ -12,5 +12,5 @@
 * [Getting Started](getting_started.md)
 * [Migration](migration.md)
 * [Benchmark](benchmark.md)
-* Resources
+* [Resources](resources.md)
 
