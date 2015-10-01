@@ -11,4 +11,5 @@
    * [Querying](querying.md)
 * [Getting Started](getting_started.md)
 * [Migration](migration.md)
+* Benchmark
 
