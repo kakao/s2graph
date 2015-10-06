@@ -8,7 +8,7 @@ object QueryResult {
   def fromVertices(query: Query, stepIdx: Int, queryParams: Seq[QueryParam], vertices: Seq[Vertex]): Seq[QueryResult] = {
     for {
       vertex <- vertices
-      queryParam <- queryParams
+      queryParam = queryParams.head
     } yield QueryResult(query, stepIdx, queryParam, Seq((Edge(vertex, vertex, queryParam.labelWithDir), Graph.defaultScore)))
   }
 }
