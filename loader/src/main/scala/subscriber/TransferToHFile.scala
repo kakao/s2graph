@@ -1,6 +1,6 @@
 package subscriber
 
-import com.daumkakao.s2graph.core.Graph
+import com.kakao.s2graph.core.Graph
 import org.apache.hadoop.hbase.client.{HTable, ConnectionFactory}
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable
 import org.apache.hadoop.hbase.mapreduce.{HFileOutputFormat2, TableOutputFormat}
@@ -107,7 +107,7 @@ object TransferToHFile extends SparkApp {
       job.setMapOutputValueClass(classOf[Cell])
       HFileOutputFormat2.configureIncrementalLoad(job, table)
 
-      cells.saveAsNewAPIHadoopFile(output, classOf[ImmutableBytesWritable], classOf[Cell], classOf[HFileOutputFormat2], hbaseConf)
+      cells.saveAsNewAPIHadoopFile(output, classOf[ImmutableBytesWritable], classOf[KeyValue], classOf[HFileOutputFormat2], job.getConfiguration())
     } finally {
       table.close()
       conn.close()

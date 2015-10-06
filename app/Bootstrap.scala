@@ -2,8 +2,8 @@
 import java.util.concurrent.Executors
 
 import actors.QueueActor
-import com.daumkakao.s2graph.core.{ExceptionHandler, Graph}
-import com.daumkakao.s2graph.logger
+import com.kakao.s2graph.core.{ExceptionHandler, Graph}
+import com.kakao.s2graph.logger
 import config.Config
 import controllers.{AdminController, ApplicationController}
 import play.api.Application
@@ -33,7 +33,7 @@ object Global extends WithFilters(new GzipFilter()) {
     logger.info(s"starts with num of thread: $numOfThread, ${threadPool.getClass.getSimpleName}")
 
     val defaultHealthOn = Config.conf.getBoolean("app.health.on").getOrElse(true)
-    ApplicationController.deployInfo = Try(Source.fromFile("./release_info").mkString("")).getOrElse("release info not found\n")
+    ApplicationController.deployInfo = Try(Source.fromFile("./release_info").mkString("")).recover { case _ => "release info not found\n" }.get
 
     AdminController.loadCacheInner()
     ApplicationController.isHealthy = defaultHealthOn
