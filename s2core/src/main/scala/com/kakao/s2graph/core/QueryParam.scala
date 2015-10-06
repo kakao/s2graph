@@ -14,6 +14,7 @@ import scala.util.{Success, Try}
 
 object Query {
   val initialScore = 1.0
+  val defaultLimit = 1000
   lazy val empty = Query()
 
   def toQuery(srcVertices: Seq[Vertex], queryParam: QueryParam) = Query(srcVertices, Vector(Step(List(queryParam))))
@@ -41,7 +42,8 @@ case class Query(vertices: Seq[Vertex] = Seq.empty[Vertex],
                  groupByColumns: Seq[String] = Seq.empty[String],
                  filterOutQuery: Option[Query] = None,
                  withScore: Boolean = true,
-                 returnTree: Boolean = false) {
+                 returnTree: Boolean = false,
+                 limit: Int = Query.defaultLimit) {
 
   lazy val selectColumnsSet = selectColumns.map { c =>
     if (c == "_from") "from"
