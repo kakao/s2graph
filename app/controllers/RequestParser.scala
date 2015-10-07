@@ -133,6 +133,7 @@ trait RequestParser extends JSONParser {
       val groupByColumns = (jsValue \ "groupBy").asOpt[List[String]].getOrElse(List.empty)
       val withScore = (jsValue \ "withScore").asOpt[Boolean].getOrElse(true)
       val returnTree = (jsValue \ "returnTree").asOpt[Boolean].getOrElse(false)
+      val limit = (jsValue \ "limit").asOpt[Int].getOrElse(Query.defaultLimit)
 
       // TODO: throw exception, when label dosn't exist
       val labelMap = (for {
@@ -195,7 +196,7 @@ trait RequestParser extends JSONParser {
 
       val ret = Query(vertices, querySteps, removeCycle = removeCycle,
         selectColumns = selectColumns, groupByColumns = groupByColumns, filterOutQuery = filterOutQuery, withScore = withScore,
-        returnTree = returnTree)
+        returnTree = returnTree, limit = limit)
       //      logger.debug(ret.toString)
       ret
     } catch {

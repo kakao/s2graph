@@ -31,7 +31,7 @@ object QueryController extends Controller with RequestParser {
     getEdgesExcludedInner(request.body)
   }
 
-  private def eachQuery(post: (Seq[QueryResult], Seq[QueryResult]) => JsValue)(q: Query): Future[JsValue] = {
+  private def eachQuery(post: (Seq[QueryResult], Seq[QueryResult], Int) => JsValue)(q: Query): Future[JsValue] = {
     val filterOutQueryResultsLs = q.filterOutQuery match {
       case Some(filterOutQuery) => Graph.getEdgesAsync(filterOutQuery)
       case None => Future.successful(Seq.empty)
@@ -41,7 +41,7 @@ object QueryController extends Controller with RequestParser {
       queryResultsLs <- Graph.getEdgesAsync(q)
       filterOutResultsLs <- filterOutQueryResultsLs
     } yield {
-      val json = post(queryResultsLs, filterOutResultsLs)
+      val json = post(queryResultsLs, filterOutResultsLs, q.limit)
       json
     }
   }
@@ -53,7 +53,7 @@ object QueryController extends Controller with RequestParser {
   }
 
   private def getEdgesAsync(jsonQuery: JsValue)
-                           (post: (Seq[QueryResult], Seq[QueryResult]) => JsValue): Future[Result] = {
+                           (post: (Seq[QueryResult], Seq[QueryResult], Int) => JsValue): Future[Result] = {
     if (!Config.IS_QUERY_SERVER) Unauthorized.as(applicationJsonHeader)
     val fetch = eachQuery(post) _
 
@@ -78,7 +78,7 @@ object QueryController extends Controller with RequestParser {
 
   @deprecated(message = "deprecated", since = "0.2")
   private def getEdgesExcludedAsync(jsonQuery: JsValue)
-                                   (post: (Seq[QueryResult], Seq[QueryResult]) => JsValue): Future[Result] = {
+                                   (post: (Seq[QueryResult], Seq[QueryResult], Int) => JsValue): Future[Result] = {
 
     if (!Config.IS_QUERY_SERVER) Unauthorized.as(applicationJsonHeader)
 
@@ -93,7 +93,7 @@ object QueryController extends Controller with RequestParser {
         queryResultLs <- fetchFuture
         exclude <- excludeFuture
       } yield {
-        val json = post(queryResultLs, exclude)
+        val json = post(queryResultLs, exclude, q.limit)
         jsonResponse(json, "result_size" -> calcSize(json).toString)
       }
     } recover {
