@@ -32,7 +32,7 @@ object ScrapeController extends Controller with RequestParser {
     val hashKey = MurmurHash3.stringHash(url)
     val oldVal = KafkaConsumerWithThrottle.filter.getIfPresent(hashKey)
 
-    val data = if (oldVal == null) {
+    val future = if (oldVal == null) {
       for {
         scrapedData <- scraper.fetch(ScrapeUrl(url))
         edge = toUrlSelfEdge(url, toShortenUrl(url), scrapedData)
@@ -42,14 +42,16 @@ object ScrapeController extends Controller with RequestParser {
         scrapedData
       }
     } else {
-      oldVal
+      Future.successful(oldVal)
+    }
+    future.map { data =>
+      val json = Json.obj("url" -> url, "data" -> toJsObject(data, serializeArray = false))
+      jsonResponse(json, "Access-Control-Allow-Origin" -> "*",
+        "Access-Control-Allow-Methods" -> "GET, POST, PUT, DELETE, OPTIONS",
+        "Access-Control-Allow-Headers" -> "Content-Type, X-Requested-With, Accept",
+        // cache access control response for one day
+        "Access-Control-Max-Age" -> (60 * 60 * 24).toString)
     }
 
-    val json = Json.obj("url" -> url, "data" -> toJsObject(data, serializeArray = false))
-    Future.successful(jsonResponse(json, "Access-Control-Allow-Origin" -> "*",
-      "Access-Control-Allow-Methods" -> "GET, POST, PUT, DELETE, OPTIONS",
-      "Access-Control-Allow-Headers" -> "Content-Type, X-Requested-With, Accept",
-      // cache access control response for one day
-      "Access-Control-Max-Age" -> (60 * 60 * 24).toString))
   }
 }
