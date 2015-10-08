@@ -21,7 +21,7 @@ import play.api.mvc.Controller
 import scala.concurrent.duration.Duration
 import scala.concurrent.duration.Duration._
 import scala.concurrent.{Await, ExecutionContext, Future}
-import scala.util.Try
+import scala.util.{Failure, Try}
 import scala.util.hashing.MurmurHash3
 import com.beachape.metascraper.Messages.{ScrapeUrl, ScrapedData}
 import com.beachape.metascraper.Scraper
@@ -40,6 +40,8 @@ object ScrapeController extends Controller with RequestParser {
   private val maxConnectionsPerHost: Int = 30
   private val connectionTimeoutInMs: Int = 10000
   private val requestTimeoutInMs: Int = 15000
+  private val maxRequestRetry: Int = 3
+  private val maximumNumberOfRedirects: Int = 5
   private val validSchemas = Seq("http", "https")
   // Http client config
   private val followRedirects = true
@@ -56,13 +58,17 @@ object ScrapeController extends Controller with RequestParser {
     .setConnectionTimeoutInMs(connectionTimeoutInMs)
     .setRequestTimeoutInMs(requestTimeoutInMs)
     .setCompressionEnabled(compressionEnabled)
+    .setMaxRequestRetry(maxRequestRetry)
+    .setMaximumNumberOfRedirects(maximumNumberOfRedirects)
+    .setStrict302Handling(true)
     .setFollowRedirects(followRedirects).build
+
   private val asyncHttpClient = new AsyncHttpClient(config)
   private val httpClient = new Http(asyncHttpClient)
 
-  val scraper = new Scraper(httpClient, Seq("http", "https"))
+  val scraper = new MyScraper(httpClient, validSchemas)
   val defaultSchemaFactories = Seq(HtmlSchemas(OpenGraph, NormalPage))
-  Await.result(scraper.fetch(ScrapeUrl("http://www.google.com")), Duration(10, TimeUnit.SECONDS))
+//  Await.result(scraper.fetch(ScrapeUrl("http://www.google.com")), Duration(10, TimeUnit.SECONDS))
   //
   case class MyScraper(httpClient: Http, urlSchemas: Seq[String])(implicit ex: ExecutionContext)
     extends Scraper(httpClient, urlSchemas)(ex) {
@@ -78,16 +84,34 @@ object ScrapeController extends Controller with RequestParser {
       } else {
         val host = new URL(messageUrl).getHost
         val requestHeaders = Map(
-          "Host" -> Seq(host),
-          "User-Agent" -> Seq(message.userAgent),
-          "Accept" -> Seq("*/*"))
+          "User-Agent" -> Seq(message.userAgent)
+         , "Accept" -> Seq("*/*")
+//          ,"Accept-Language" -> Seq(message.acceptLanguageCode)
+          )
         val request = url(messageUrl).setHeaders(requestHeaders)
         logger.error(s"${messageUrl}, ${requestHeaders}")
         val resp = httpClient(request)
-        resp map (s => extractData(s, messageUrl, message.schemaFactories, message.numberOfImages))
+        val future = resp map (s => extractData(s, messageUrl, message.schemaFactories, message.numberOfImages))
+        future recoverWith {
+          case ex: RedirectException =>
+            val location = ex.r.getHeader("Location")
+            val uri = new URL(messageUrl)
+            val requestHeaders = Map(
+              "User-Agent" -> Seq(message.userAgent)
+              , "Accept" -> Seq("*/*")
+              //          ,"Accept-Language" -> Seq(message.acceptLanguageCode)
+            )
+            val requestUri = s"${uri.getProtocol}://${uri.getHost}/$location"
+            val request = url(requestUri).setHeaders(requestHeaders)
+            logger.error(requestUri)
+            val resp = httpClient(request)
+            val future = resp map (s => extractData(s, messageUrl, message.schemaFactories, message.numberOfImages))
+            future
+        }
       }
     }
 
+  case class RedirectException(r: Response) extends RuntimeException
     override def extractData(resp: Response, url: String, schemaFactories: Seq[SchemaFactory], numberOfImages: Int): ScrapedData = {
       if (resp.getStatusCode / 100 == 2) {
         val schemas = schemaFactories.toStream.flatMap(f => Try(f.apply(resp)).getOrElse(Nil)) // Stream in case we have expensive factories
@@ -105,7 +129,7 @@ object ScrapeController extends Controller with RequestParser {
         )
       } else {
         logger.error(s"${resp.getStatusCode}, ${resp.getHeaders}")
-        throw StatusCode(resp.getStatusCode)
+        throw RedirectException(resp)
       }
     }
   }
