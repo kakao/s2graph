@@ -157,7 +157,6 @@ trait RequestParser extends JSONParser {
             case _ => -1
           }
           val shouldPropagate = (step \ "shouldPropagate").asOpt[Boolean].getOrElse(false)
-          val sample = (step \ "sample").asOpt[Int].getOrElse(-1)
 
           val queryParams =
             for {
@@ -181,8 +180,7 @@ trait RequestParser extends JSONParser {
             //            scoreThreshold = stepThreshold,
             nextStepScoreThreshold = nextStepScoreThreshold,
             nextStepLimit = nextStepLimit,
-            shouldPropagate = shouldPropagate,
-            sample = sample)
+            shouldPropagate = shouldPropagate)
         }
 
       val ret = Query(vertices, querySteps, removeCycle = removeCycle,
@@ -249,8 +247,10 @@ trait RequestParser extends JSONParser {
       val outputField = (labelGroup \ "outputField").asOpt[String].map(s => Json.arr(Json.arr(s)))
       val transformer = if (outputField.isDefined) outputField else (labelGroup \ "transform").asOpt[JsValue]
       val scorePropagateOp = (labelGroup \ "scorePropagateOp").asOpt[String].getOrElse("multiply")
+      val sample = (labelGroup \ "sample").asOpt[Int].getOrElse(-1)
 
       QueryParam(labelWithDir)
+        .sample(sample)
         .limit(offset, limit)
         .rank(RankParam(label.id.get, scorings))
         .exclude(exclude)

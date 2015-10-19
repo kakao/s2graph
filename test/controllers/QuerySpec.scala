@@ -108,13 +108,13 @@ class QuerySpec extends SpecCommon with PlaySpecification {
            }],
           "steps": [
             {
-              "sample": ${sample},
               "step": [{
                 "label": "${testLabelName}",
                 "direction": "out",
                 "offset": 0,
-                "limit": 100
-                }]
+                "limit": 100,
+                "sample": ${sample}
+              }]
             }
           ]
         }""")
@@ -127,25 +127,51 @@ class QuerySpec extends SpecCommon with PlaySpecification {
            }],
           "steps": [
             {
-              "sample": ${sample},
               "step": [{
                 "label": "${testLabelName}",
                 "direction": "out",
                 "offset": 0,
-                "limit": 100
+                "limit": 100,
+                "sample": ${sample}
                 }]
             },
             {
-               "sample": ${sample},
                "step": [{
                  "label": "${testLabelName}",
                  "direction": "out",
                  "offset": 0,
-                 "limit": 100
+                 "limit": 100,
+                 "sample": ${sample}
                }]
             }
           ]
         }""")
+
+    def twoQueryWithSampling(id: Int, sample: Int) = Json.parse( s"""
+        { "srcVertices": [
+          { "serviceName": "${testServiceName}",
+            "columnName": "${testColumnName}",
+            "id": ${id}
+           }],
+          "steps": [
+            {
+              "step": [{
+                "label": "${testLabelName}",
+                "direction": "out",
+                "offset": 0,
+                "limit": 50,
+                "sample": ${sample}
+              },
+              {
+                "label": "${testLabelName2}",
+                "direction": "out",
+                "offset": 0,
+                "limit": 50
+              }]
+            }
+          ]
+        }""")
+
 
     def getEdges(queryJson: JsValue): JsValue = {
       val ret = route(FakeRequest(POST, "/graphs/getEdges").withJsonBody(queryJson)).get
@@ -312,6 +338,11 @@ class QuerySpec extends SpecCommon with PlaySpecification {
           edge"1442985659166 insert e $testId 122 $testLabelName",
           edge"1442985659166 insert e $testId 222 $testLabelName",
           edge"1442985659166 insert e $testId 322 $testLabelName",
+
+          edge"1442985659166 insert e $testId 922 $testLabelName2",
+          edge"1442985659166 insert e $testId 222 $testLabelName2",
+          edge"1442985659166 insert e $testId 322 $testLabelName2",
+
           edge"1442985659166 insert e 122 1122 $testLabelName",
           edge"1442985659166 insert e 122 1222 $testLabelName",
           edge"1442985659166 insert e 122 1322 $testLabelName",
@@ -336,6 +367,10 @@ class QuerySpec extends SpecCommon with PlaySpecification {
         val result2 = getEdges(twoStepQueryWithSampling(testId, sampleSize))
         println(Json.toJson(result2))
         (result2 \ "results").as[List[JsValue]].size must equalTo(scala.math.min(sampleSize*sampleSize, bulkEdges.size*bulkEdges.size))
+
+        val result3 = getEdges(twoQueryWithSampling(testId, sampleSize))
+        println(Json.toJson(result3))
+        (result3 \ "results").as[List[JsValue]].size must equalTo(sampleSize + 3) // edges in testLabelName2 = 3
       }
     }
   }
