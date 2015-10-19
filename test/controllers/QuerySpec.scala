@@ -302,6 +302,30 @@ class QuerySpec extends SpecCommon with PlaySpecification {
       }
     }
 
+    "checkEdges" in {
+      running(FakeApplication()) {
+        val json = Json.parse(s"""
+         [{"from": 0, "to": 1, "label": "$testLabelName"},
+          {"from": 0, "to": 2, "label": "$testLabelName"}]
+        """)
+
+        def checkEdges(queryJson: JsValue): JsValue = {
+          val ret = route(FakeRequest(POST, "/graphs/checkEdges").withJsonBody(queryJson)).get
+          contentAsJson(ret)
+        }
+
+        val res = checkEdges(json)
+        val typeRes = res.isInstanceOf[JsArray]
+        typeRes must equalTo(true)
+
+        val fst = res.as[Seq[JsValue]].head \ "to"
+        fst.as[Int] must equalTo(1)
+
+        val snd = res.as[Seq[JsValue]].last \ "to"
+        snd.as[Int] must equalTo(2)
+      }
+    }
+
     "duration" in {
       running(FakeApplication()) {
         // get all
