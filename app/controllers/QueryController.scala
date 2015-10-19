@@ -1,11 +1,11 @@
 package controllers
 
 
-import com.daumkakao.s2graph.core.KGraphExceptions.BadQueryException
-import com.daumkakao.s2graph.core._
-import com.daumkakao.s2graph.core.mysqls._
-import com.daumkakao.s2graph.core.types.{LabelWithDirection, VertexId}
-import com.daumkakao.s2graph.logger
+import com.kakao.s2graph.core.GraphExceptions.BadQueryException
+import com.kakao.s2graph.core._
+import com.kakao.s2graph.core.mysqls._
+import com.kakao.s2graph.core.types.{LabelWithDirection, VertexId}
+import com.kakao.s2graph.logger
 import config.Config
 import play.api.libs.json.{JsArray, JsObject, JsValue, Json}
 import play.api.mvc.{Action, Controller, Result}
@@ -27,7 +27,7 @@ object QueryController extends Controller with RequestParser {
     getEdgesInner(request.body)
   }
 
-  def getEdgesExcluded() = withHeaderAsync(jsonParser) { request =>
+  def getEdgesExcluded = withHeaderAsync(jsonParser) { request =>
     getEdgesExcludedInner(request.body)
   }
 
@@ -59,7 +59,7 @@ object QueryController extends Controller with RequestParser {
 
     Try {
       val future = jsonQuery match {
-        case JsArray(arr) => Future.sequence(arr.map(toQuery(_)).map(fetch)).map(JsArray)
+        case JsArray(arr) => Future.traverse(arr.map(toQuery(_)))(fetch).map(JsArray)
         case obj@JsObject(_) => fetch(toQuery(obj))
         case _ => throw BadQueryException("Cannot support")
       }
@@ -84,20 +84,23 @@ object QueryController extends Controller with RequestParser {
 
     Try {
       val q = toQuery(jsonQuery)
-      val filterOutQuery = Query(q.vertices, List(q.steps.last))
+      val filterOutQuery = Query(q.vertices, Vector(q.steps.last))
+
+      val fetchFuture = Graph.getEdgesAsync(q)
+      val excludeFuture = Graph.getEdgesAsync(filterOutQuery)
 
       for {
-        exclude <- Graph.getEdgesAsync(filterOutQuery)
-        queryResultLs <- Graph.getEdgesAsync(q)
+        queryResultLs <- fetchFuture
+        exclude <- excludeFuture
       } yield {
         val json = post(queryResultLs, exclude)
         jsonResponse(json, "result_size" -> calcSize(json).toString)
       }
     } recover {
-      case e: KGraphExceptions.BadQueryException =>
+      case e: BadQueryException =>
         logger.error(s"$jsonQuery, $e", e)
         badQueryExceptionResults(e)
-      case e: Throwable =>
+      case e: Exception =>
         logger.error(s"$jsonQuery, $e", e)
         errorResults
     } get
@@ -147,20 +150,23 @@ object QueryController extends Controller with RequestParser {
 
     Try {
       val q = toQuery(jsonQuery)
-      val filterOutQuery = Query(q.vertices, List(q.steps.last))
+      val filterOutQuery = Query(q.vertices, Vector(q.steps.last))
+
+      val fetchFuture = Graph.getEdgesAsync(q)
+      val excludeFuture = Graph.getEdgesAsync(filterOutQuery)
 
       for {
-        exclude <- Graph.getEdgesAsync(filterOutQuery)
-        queryResultLs <- Graph.getEdgesAsync(q)
+        queryResultLs <- fetchFuture
+        exclude <- excludeFuture
       } yield {
         val json = PostProcess.summarizeWithListExclude(queryResultLs, exclude)
         jsonResponse(json, "result_size" -> calcSize(json).toString)
       }
     } recover {
-      case e: KGraphExceptions.BadQueryException =>
+      case e: BadQueryException =>
         logger.error(s"$jsonQuery, $e", e)
         badQueryExceptionResults(e)
-      case e: Throwable =>
+      case e: Exception =>
         logger.error(s"$jsonQuery, $e", e)
         errorResults
     } get
@@ -177,20 +183,23 @@ object QueryController extends Controller with RequestParser {
 
     Try {
       val q = toQuery(jsonQuery)
-      val filterOutQuery = Query(q.vertices, List(q.steps.last))
+      val filterOutQuery = Query(q.vertices, Vector(q.steps.last))
+
+      val fetchFuture = Graph.getEdgesAsync(q)
+      val excludeFuture = Graph.getEdgesAsync(filterOutQuery)
 
       for {
-        exclude <- Graph.getEdgesAsync(filterOutQuery)
-        queryResultLs <- Graph.getEdgesAsync(q)
+        queryResultLs <- fetchFuture
+        exclude <- excludeFuture
       } yield {
         val json = PostProcess.summarizeWithListExcludeFormatted(queryResultLs, exclude)
         jsonResponse(json, "result_size" -> calcSize(json).toString)
       }
     } recover {
-      case e: KGraphExceptions.BadQueryException =>
+      case e: BadQueryException =>
         logger.error(s"$jsonQuery, $e", e)
         badQueryExceptionResults(e)
-      case e: Throwable =>
+      case e: Exception =>
         logger.error(s"$jsonQuery, $e", e)
         errorResults
     } get
@@ -248,7 +257,7 @@ object QueryController extends Controller with RequestParser {
         jsonResponse(json, "result_size" -> edgeJsons.size.toString)
       }
     } catch {
-      case e: Throwable =>
+      case e: Exception =>
         logger.error(s"$jsValue, $e", e)
         errorResults
     }

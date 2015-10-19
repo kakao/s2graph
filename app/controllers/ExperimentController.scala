@@ -3,10 +3,10 @@ package controllers
 
 import java.net.URL
 
-import com.daumkakao.s2graph.core.mysqls._
-import com.daumkakao.s2graph.logger
+import com.kakao.s2graph.core.mysqls._
+import com.kakao.s2graph.logger
 import play.api.Play.current
-import play.api.libs.json.{JsObject, JsValue, Json}
+import play.api.libs.json.{JsObject, JsString, JsValue, Json}
 import play.api.libs.ws.WS
 import play.api.mvc._
 
@@ -19,7 +19,9 @@ import scala.concurrent.Future
 object ExperimentController extends Controller with RequestParser {
   val impressionKey = "S2-Impression-Id"
 
-  def experiment(accessToken: String, experimentName: String, uuid: String) = Action.async { request =>
+  import ApplicationController._
+
+  def experiment(accessToken: String, experimentName: String, uuid: String) = withHeaderAsync(parse.anyContent) { request =>
     val bucketOpt = for {
       service <- Service.findByAccessToken(accessToken)
       experiment <- Experiment.findBy(service.id.get, experimentName)
@@ -32,9 +34,9 @@ object ExperimentController extends Controller with RequestParser {
           if (bucket.isGraphQuery) buildRequestInner(request, bucket, uuid)
           else buildRequest(request, bucket, uuid)
         } catch {
-          case e: Throwable =>
+          case e: Exception =>
             logger.error(e.toString())
-            Future.successful(BadRequest("required template parameter missing"))
+            Future.successful(BadRequest(s"wrong or missing template parameter: ${e.getMessage}"))
         }
     }
   }
@@ -47,7 +49,11 @@ object ExperimentController extends Controller with RequestParser {
       jsObj <- requestKeyJson.asOpt[JsObject]
       (key, value) <- jsObj.fieldSet
     } {
-      body = body.replace(key, value.toString())
+      val replacement = value match {
+        case JsString(s) => s
+        case _ => value.toString
+      }
+      body = body.replace(key, replacement)
     }
 
     Json.parse(body)
