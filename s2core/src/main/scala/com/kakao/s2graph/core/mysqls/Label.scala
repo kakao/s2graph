@@ -164,13 +164,11 @@ object Label extends Model[Label] {
           val labelMetaMap = metaProps.map { case Prop(propName, defaultValue, dataType) =>
             val labelMeta = LabelMeta.findOrInsert(createdId, propName, defaultValue, dataType)
             (propName -> labelMeta.seq)
-          }.toMap ++ Map(LabelMeta.timestamp.name -> LabelMeta.timestamp.seq,
-            LabelMeta.to.name -> LabelMeta.to.seq,
-            LabelMeta.from.name -> LabelMeta.from.seq)
+          }.toMap ++ LabelMeta.reservedMetas.map (labelMeta => labelMeta.name -> labelMeta.seq).toMap
 
           if (indices.isEmpty) {
             // make default index with _PK, _timestamp, 0
-            LabelIndex.findOrInsert(createdId, LabelIndex.defaultName, LabelIndex.defaultMetaSeqs.toList, "none")
+            LabelIndex.findOrInsert(createdId, LabelIndex.DefaultName, LabelIndex.DefaultMetaSeqs.toList, "none")
           } else {
             indices.foreach { index =>
               val metaSeq = index.propNames.map { name => labelMetaMap(name) }
@@ -214,15 +212,26 @@ object Label extends Model[Label] {
 
   def updateName(oldName: String, newName: String)(implicit session: DBSession = AutoSession) = {
     logger.info(s"rename label: $oldName -> $newName")
-    sql"""update labels set label = ${newName} where label = ${oldName}""".execute.apply()
+    sql"""update labels set label = ${newName} where label = ${oldName}""".update.apply()
+  }
+
+  def updateHTableName(labelName: String, newHTableName: String)(implicit session: DBSession = AutoSession) = {
+    logger.info(s"update HTable of label $labelName to $newHTableName")
+    val cnt = sql"""update labels set hbase_table_name = $newHTableName where label = $labelName""".update().apply()
+    val label = Label.findByName(labelName, useCache = false).get
+
+    val cacheKeys = List(s"id=${label.id}", s"label=${label.label}")
+    cacheKeys.foreach(expireCache)
+    cnt
   }
 
   def delete(id: Int)(implicit session: DBSession = AutoSession) = {
     val label = findById(id)
     logger.info(s"delete label: $label")
-    sql"""delete from labels where id = ${label.id.get}""".execute.apply()
+    val cnt = sql"""delete from labels where id = ${label.id.get}""".update().apply()
     val cacheKeys = List(s"id=$id", s"label=${label.label}")
-    cacheKeys.foreach(expireCache(_))
+    cacheKeys.foreach(expireCache)
+    cnt
   }
 }
 
@@ -254,7 +263,7 @@ case class Label(id: Option[Int], label: String,
   lazy val tgtColumn = ServiceColumn.find(tgtServiceId, tgtColumnName).getOrElse(throw ModelNotFoundException("Target column not found"))
 
   lazy val direction = if (isDirected) "out" else "undirected"
-  lazy val defaultIndex = LabelIndex.findByLabelIdAndSeq(id.get, LabelIndex.defaultSeq)
+  lazy val defaultIndex = LabelIndex.findByLabelIdAndSeq(id.get, LabelIndex.DefaultSeq)
 
   //TODO: Make sure this is correct
   lazy val indices = LabelIndex.findByLabelIdAll(id.get, useCache = true)
@@ -270,10 +279,17 @@ case class Label(id: Option[Int], label: String,
     else if (m == LabelMeta.from) m.copy(dataType = srcColumnType)
     else m
   } ::: LabelMeta.findAllByLabelId(id.get, useCache = true)
+
   lazy val metaPropsMap = metaProps.map(x => (x.seq, x)).toMap
   lazy val metaPropsInvMap = metaProps.map(x => (x.name, x)).toMap
   lazy val metaPropNames = metaProps.map(x => x.name)
   lazy val metaPropNamesMap = metaProps.map(x => (x.seq, x.name)) toMap
+  /** this is used only by edgeToProps */
+  lazy val metaPropsDefaultMap = (for {
+    prop <- metaProps if LabelMeta.isValidSeq(prop.seq)
+    jsValue <- innerValToJsValue(toInnerVal(prop.defaultValue, prop.dataType, schemaVersion), prop.dataType)
+  } yield prop.name -> jsValue).toMap
+
 
   def srcColumnWithDir(dir: Int) = {
     if (dir == GraphUtil.directions("out")) srcColumn else tgtColumn
@@ -282,6 +298,17 @@ case class Label(id: Option[Int], label: String,
   def tgtColumnWithDir(dir: Int) = {
     if (dir == GraphUtil.directions("out")) tgtColumn else srcColumn
   }
+
+  def srcTgtColumn(dir: Int) =
+    if (isDirected) {
+      (srcColumnWithDir(dir), tgtColumnWithDir(dir))
+    } else {
+      if (dir == GraphUtil.directions("in")) {
+        (tgtColumn, srcColumn)
+      } else {
+        (srcColumn, tgtColumn)
+      }
+    }
 
   def init() = {
     metas
