@@ -35,8 +35,8 @@ class QuerySpec extends SpecCommon with PlaySpecification {
         edge"1 insert e 3000 12000 $testLabelName",
         edge"1 insert e 3000 13000 $testLabelName",
         edge"1 insert e 10000 100000 $testLabelName",
-        edge"2 insert e 11000 200000 $testLabelName",
-        edge"3 insert e 12000 300000 $testLabelName").mkString("\n")
+        edge"2 insert e 11000 200000 $testLabelName"
+      ).mkString("\n")
 
       val req = FakeRequest(POST, "/graphs/edges/bulk").withBody(bulkEdges)
       Await.result(route(req).get, HTTP_REQ_WAITING_TIME)
@@ -107,7 +107,7 @@ class QuerySpec extends SpecCommon with PlaySpecification {
             "id": ${id}
            }],
           "steps": [
-          [ {
+            [ {
               "label": "${testLabelName}",
               "direction": "out",
               "offset": 0,
@@ -117,6 +117,79 @@ class QuerySpec extends SpecCommon with PlaySpecification {
         }
         """)
 
+    def queryWithSampling(id: Int, sample: Int) = Json.parse( s"""
+        { "srcVertices": [
+          { "serviceName": "${testServiceName}",
+            "columnName": "${testColumnName}",
+            "id": ${id}
+           }],
+          "steps": [
+            {
+              "step": [{
+                "label": "${testLabelName}",
+                "direction": "out",
+                "offset": 0,
+                "limit": 100,
+                "sample": ${sample}
+                }]
+            }
+          ]
+        }""")
+
+
+
+    def twoStepQueryWithSampling(id: Int, sample: Int) = Json.parse( s"""
+        { "srcVertices": [
+          { "serviceName": "${testServiceName}",
+            "columnName": "${testColumnName}",
+            "id": ${id}
+           }],
+          "steps": [
+            {
+              "step": [{
+                "label": "${testLabelName}",
+                "direction": "out",
+                "offset": 0,
+                "limit": 100,
+                "sample": ${sample}
+                }]
+            },
+            {
+               "step": [{
+                 "label": "${testLabelName}",
+                 "direction": "out",
+                 "offset": 0,
+                 "limit": 100,
+                 "sample": ${sample}
+               }]
+            }
+          ]
+        }""")
+
+    def twoQueryWithSampling(id: Int, sample: Int) = Json.parse( s"""
+        { "srcVertices": [
+          { "serviceName": "${testServiceName}",
+            "columnName": "${testColumnName}",
+            "id": ${id}
+           }],
+          "steps": [
+            {
+              "step": [{
+                "label": "${testLabelName}",
+                "direction": "out",
+                "offset": 0,
+                "limit": 50,
+                "sample": ${sample}
+              },
+              {
+                "label": "${testLabelName2}",
+                "direction": "out",
+                "offset": 0,
+                "limit": 50
+              }]
+            }
+          ]
+        }""")
 
 
     def queryUnion(id: Int, size: Int) = JsArray(List.tabulate(size)(_ => querySingle(id)))
@@ -277,7 +350,7 @@ class QuerySpec extends SpecCommon with PlaySpecification {
         Await.result(route(req).get, HTTP_REQ_WAITING_TIME)
         Thread.sleep(asyncFlushInterval)
 
-        // duration test after udpate
+        // duration test after update
         // get all
         result = getEdges(queryDuration(Seq(0, 2), from = 0, to = 5000))
         (result \ "results").as[List[JsValue]].size must equalTo(4)
@@ -289,6 +362,65 @@ class QuerySpec extends SpecCommon with PlaySpecification {
         result = getEdges(queryDuration(Seq(0, 2), from = 1000, to = 2000))
         (result \ "results").as[List[JsValue]].size must equalTo(1)
         true
+      }
+    }
+
+//    "ancestor" in {
+//      running(FakeApplication()) {
+//        var result = getEdges(queryAncestor(Seq(-1), 1))
+//        var expect = Seq(Set("2000", "3000"), Set("1000", "2000"), Set("1000"))
+//        var ancestors = (result \\ "ancestor").map(_.as[Seq[String]]).map(_.toSet)
+//        ancestors must equalTo(expect)
+//
+//        result = getEdges(queryAncestor(Seq(-1), 2))
+//        expect = Seq(Set("12000"), Set("11000"), Set("10000"))
+//        ancestors = (result \\ "ancestor").map(_.as[Seq[String]]).map(_.toSet)
+//        ancestors must equalTo(expect)
+//        true
+//      }
+//    }
+
+    "query with sampling" in {
+      running(FakeApplication()) {
+        val sampleSize = 2
+        val testId = 22
+        val bulkEdges = Seq(
+          edge"1442985659166 insert e $testId 122 $testLabelName",
+          edge"1442985659166 insert e $testId 222 $testLabelName",
+          edge"1442985659166 insert e $testId 322 $testLabelName",
+
+          edge"1442985659166 insert e $testId 922 $testLabelName2",
+          edge"1442985659166 insert e $testId 222 $testLabelName2",
+          edge"1442985659166 insert e $testId 322 $testLabelName2",
+
+          edge"1442985659166 insert e 122 1122 $testLabelName",
+          edge"1442985659166 insert e 122 1222 $testLabelName",
+          edge"1442985659166 insert e 122 1322 $testLabelName",
+          edge"1442985659166 insert e 222 2122 $testLabelName",
+          edge"1442985659166 insert e 222 2222 $testLabelName",
+          edge"1442985659166 insert e 222 2322 $testLabelName",
+          edge"1442985659166 insert e 322 3122 $testLabelName",
+          edge"1442985659166 insert e 322 3222 $testLabelName",
+          edge"1442985659166 insert e 322 3322 $testLabelName"
+        )
+
+        val req = FakeRequest(POST, "/graphs/edges/bulk").withBody(bulkEdges.mkString("\n"))
+        Await.result(route(req).get, HTTP_REQ_WAITING_TIME)
+
+        Thread.sleep(asyncFlushInterval)
+
+
+        val result1 = getEdges(queryWithSampling(testId, sampleSize))
+        println(Json.toJson(result1))
+        (result1 \ "results").as[List[JsValue]].size must equalTo(scala.math.min(sampleSize, bulkEdges.size))
+
+        val result2 = getEdges(twoStepQueryWithSampling(testId, sampleSize))
+        println(Json.toJson(result2))
+        (result2 \ "results").as[List[JsValue]].size must equalTo(scala.math.min(sampleSize*sampleSize, bulkEdges.size*bulkEdges.size))
+
+        val result3 = getEdges(twoQueryWithSampling(testId, sampleSize))
+        println(Json.toJson(result3))
+        (result3 \ "results").as[List[JsValue]].size must equalTo(sampleSize + 3) // edges in testLabelName2 = 3
       }
     }
   }

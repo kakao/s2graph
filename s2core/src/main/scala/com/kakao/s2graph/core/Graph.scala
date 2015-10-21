@@ -346,11 +346,20 @@ object Graph {
 
       val successCallback = (kvs: util.ArrayList[KeyValue]) => {
         val edgeWithScores = Edge.toEdges(kvs, queryParam, prevScore, isInnerCall = false, parentEdges)
-        QueryResult(q, stepIdx, queryParam, edgeWithScores)
+        val sample = queryParam.sample
+        val sampledEdgesWithScores = if (sample >= 0 ) {
+          // sample only from non-degree edges
+          val (degreeEdges, edges) = edgeWithScores.partition { case (edge, _) => edge.propsWithTs.contains(LabelMeta.degreeSeq) }
+          val sampledEdges = Random.shuffle(edges).take(sample)
+          logger.debug(s"sampling ${sampledEdges} edges from ${edgeWithScores.size} edges of step #${stepIdx}")
+          // put degreeEdges back in
+          degreeEdges ++ sampledEdges
+        } else edgeWithScores
+
+        QueryResult(q, stepIdx, queryParam, sampledEdgesWithScores)
       }
 
       val fallback = QueryResult(q, stepIdx, queryParam)
-
       deferredCallbackWithFallback(client.get(getRequest))(successCallback, fallback)
 
     } recover {

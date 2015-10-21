@@ -153,8 +153,8 @@ case class Step(queryParams: List[QueryParam],
                 labelWeights: Map[Int, Double] = Map.empty,
                 //                scoreThreshold: Double = 0.0,
                 nextStepScoreThreshold: Double = 0.0,
-                nextStepLimit: Int = -1) {
-
+                nextStepLimit: Int = -1,
+                shouldPropagate: Boolean = false) {
   lazy val excludes = queryParams.filter(_.exclude)
   lazy val includes = queryParams.filterNot(_.exclude)
   lazy val excludeIds = excludes.map(x => x.labelWithDir.labelId -> true).toMap
@@ -266,6 +266,12 @@ case class QueryParam(labelWithDir: LabelWithDirection, timestamp: Long = System
 
   val srcColumnWithDir = label.srcColumnWithDir(labelWithDir.dir)
   val tgtColumnWithDir = label.tgtColumnWithDir(labelWithDir.dir)
+
+  var sample = -1
+  def sample(shuffle: Int): QueryParam = {
+    this.sample = shuffle
+    this
+  }
 
   def isRowKeyOnly(isRowKeyOnly: Boolean): QueryParam = {
     this.isRowKeyOnly = isRowKeyOnly
