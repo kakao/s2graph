@@ -7,6 +7,7 @@ import java.util.concurrent.{ConcurrentHashMap, Executors}
 import com.kakao.s2graph.core.mysqls._
 import com.kakao.s2graph.core.parsers.WhereParser
 import com.kakao.s2graph.core.types._
+import com.kakao.s2graph.core.types2.{AsyncHBaseStorageWritable}
 import com.kakao.s2graph.logger
 import com.google.common.cache.CacheBuilder
 import com.stumbleupon.async.{Callback, Deferred}
@@ -35,6 +36,8 @@ object Graph {
   private val connections = new java.util.concurrent.ConcurrentHashMap[String, Connection]()
   private val clients = new java.util.concurrent.ConcurrentHashMap[String, HBaseClient]()
 
+  val storageFactory = AsyncHBaseStorageWritable
+//    StorageFactory("asynchbase")
 
   var emptyKVs = new ArrayList[KeyValue]()
 
@@ -66,7 +69,7 @@ object Graph {
 
   lazy val cache = CacheBuilder.newBuilder()
     .maximumSize(this.config.getInt("cache.max.size"))
-    .build[java.lang.Integer, QueryResult]()
+    .build[java.lang.Integer, Seq[QueryResult]]()
 
   //TODO: Merge this into cache.
   lazy val vertexCache = CacheBuilder.newBuilder()
@@ -368,12 +371,17 @@ object Graph {
     }
   }
 
-  private def fetchEdgesWithCache(parentEdges: Seq[EdgeWithScore], getRequest: GetRequest, q: Query, stepIdx: Int, queryParam: QueryParam, prevScore: Double): Deferred[QueryResult] = {
-    val cacheKey = MurmurHash3.stringHash(getRequest.toString)
+  private def fetchEdgesWithCache(parentEdges: Seq[EdgeWithScore],
+                                  getRequest: GetRequest,
+                                  q: Query,
+                                  stepIdx: Int,
+                                  queryParam: QueryParam,
+                                  prevScore: Double): Deferred[QueryResult] = {
+    val cacheKey = queryParam.toCacheKey(getRequest)
     def queryResultCallback(cacheKey: Int) = new Callback[QueryResult, QueryResult] {
       def call(arg: QueryResult): QueryResult = {
         //        logger.debug(s"queryResultCachePut, $arg")
-        cache.put(cacheKey, arg)
+        cache.put(cacheKey, Seq(arg))
         arg
       }
     }
@@ -381,10 +389,10 @@ object Graph {
       val cacheTTL = queryParam.cacheTTLInMillis
       if (cache.asMap().containsKey(cacheKey)) {
         val cachedVal = cache.asMap().get(cacheKey)
-        if (cachedVal != null && queryParam.timestamp - cachedVal.timestamp < cacheTTL) {
+        if (cachedVal != null && cachedVal.nonEmpty && queryParam.timestamp - cachedVal.head.timestamp < cacheTTL) {
           // val elapsedTime = queryParam.timestamp - cachedVal.timestamp
           //          logger.debug(s"cacheHitAndValid: $cacheKey, $cacheTTL, $elapsedTime")
-          Deferred.fromResult(cachedVal)
+          Deferred.fromResult(cachedVal.head)
         }
         else {
           // cache.asMap().remove(cacheKey)
@@ -402,7 +410,12 @@ object Graph {
   }
 
   /** actual request to HBase */
-  private def fetchEdges(parentEdges: Seq[EdgeWithScore], getRequest: GetRequest, q: Query, stepIdx: Int, queryParam: QueryParam, prevScore: Double): Deferred[QueryResult] =
+  private def fetchEdges(parentEdges: Seq[EdgeWithScore],
+                         getRequest: GetRequest,
+                         q: Query,
+                         stepIdx: Int,
+                         queryParam: QueryParam,
+                         prevScore: Double): Deferred[QueryResult] =
     Try {
       val client = getClient(queryParam.label.hbaseZkAddr)
 
@@ -475,11 +488,34 @@ object Graph {
     val queryParams = currentStepRequestLss.flatMap { case (getsWithQueryParams, prevScore) =>
       getsWithQueryParams.map { case (vertexId, get, queryParam) => queryParam }
     }
-    val fallback = new util.ArrayList(queryParams.map(param => QueryResult(q, stepIdx, param)))
-    val deferred = fetchEdgesLs(prevStepTgtVertexIdEdges, currentStepRequestLss, q, stepIdx)
-    val grouped: Deferred[util.ArrayList[QueryResult]] = Deferred.group(deferred)
+    /** support step wise cache */
+    val getWithQueryParams = currentStepRequestLss.flatMap { case (getsWithQueryParams, prevScore) =>
+      getsWithQueryParams.map { case (vertexId, get, queryParam) => (get, queryParam) }
+    }
+    val cacheKey = step.toCacheKey(getWithQueryParams)
 
-    filterEdges(deferredToFuture(grouped)(fallback), q, stepIdx, alreadyVisited)
+    val fallback = new util.ArrayList(queryParams.map(param => QueryResult(q, stepIdx, param)))
+
+    if (step.cacheTTL > 0) {
+      val cacheVal = cache.getIfPresent(cacheKey)
+      if (cacheVal == null) {
+        val deferred = fetchEdgesLs(prevStepTgtVertexIdEdges, currentStepRequestLss, q, stepIdx)
+        val grouped: Deferred[util.ArrayList[QueryResult]] = Deferred.group(deferred)
+
+        filterEdges(deferredToFuture(grouped)(fallback), q, stepIdx, alreadyVisited).map { queryResultLs =>
+          cache.put(cacheKey, queryResultLs)
+          queryResultLs
+        }
+      } else {
+        Future.successful(cacheVal)
+      }
+    } else {
+      val deferred = fetchEdgesLs(prevStepTgtVertexIdEdges, currentStepRequestLss, q, stepIdx)
+      val grouped: Deferred[util.ArrayList[QueryResult]] = Deferred.group(deferred)
+
+      filterEdges(deferredToFuture(grouped)(fallback), q, stepIdx, alreadyVisited)
+    }
+
   }
 
   def getEdgesAsyncWithRank(queryResultLsFuture: Future[Seq[QueryResult]], q: Query, stepIdx: Int): Future[Seq[QueryResult]] = {
@@ -804,7 +840,7 @@ object Graph {
       val cacheVal = vertexCache.getIfPresent(cacheKey)
       if (cacheVal == null)
         deferredToFuture(client.get(get))(emptyKVs).map { kvs =>
-          Vertex(kvs, vertex.serviceColumn.schemaVersion)
+          Vertex(QueryParam.Empty, kvs, vertex.serviceColumn.schemaVersion)
         }
       else Future.successful(cacheVal)
     }
@@ -849,7 +885,7 @@ object Graph {
       // after: state without pending edges
       // before: state with pending edges
 
-      val after = snapshotEdge.toInvertedEdgeHashLike.withNoPendingEdge().buildPutAsync()
+      val after = snapshotEdge.toInvertedEdgeHashLike.withNoPendingEdge().buildPutAsync().head.asInstanceOf[PutRequest]
       val before = snapshotEdge.toInvertedEdgeHashLike.valueBytes
       val client = Graph.getClient(label.hbaseZkAddr)
 
@@ -876,9 +912,9 @@ object Graph {
     val client = Graph.getClient(label.hbaseZkAddr)
     if (edgeUpdate.newInvertedEdge.isEmpty) Future.successful(true)
     else {
-      val lock = edgeUpdate.newInvertedEdge.get.withPendingEdge(Option(edge)).buildPutAsync()
+      val lock = edgeUpdate.newInvertedEdge.get.withPendingEdge(Option(edge)).buildPutAsync().head.asInstanceOf[PutRequest]
       val before = snapshotEdgeOpt.map(old => old.toInvertedEdgeHashLike.valueBytes).getOrElse(Array.empty[Byte])
-      val after = edgeUpdate.newInvertedEdge.get.withNoPendingEdge().buildPutAsync()
+      val after = edgeUpdate.newInvertedEdge.get.withNoPendingEdge().buildPutAsync().head.asInstanceOf[PutRequest]
 
       def indexedEdgeMutationFuture(predicate: Boolean): Future[Boolean] = {
         if (!predicate) Future.successful(false)
@@ -1124,7 +1160,8 @@ object Graph {
                                  walTopic: String): Future[Boolean] = {
     implicit val ex = Graph.executionContext
     val queryParam = queryResult.queryParam
-    val size = queryResult.edgeWithScoreLs.size
+//    val size = queryResult.edgeWithScoreLs.size
+    val size = queryResult.sizeWithoutDegreeEdge()
     if (retryNum > MaxRetryNum) {
       queryResult.edgeWithScoreLs.foreach { case (edge, score) =>
         val copiedEdge = edge.copy(op = GraphUtil.operations("delete"), ts = requestTs, version = requestTs)
@@ -1155,7 +1192,7 @@ object Graph {
           } else Nil
 
           val snapshotEdgeDelete =
-            if (edge.ts < requestTs) Seq(duplicateEdge.toInvertedEdgeHashLike.buildDeleteAsync())
+            if (edge.ts < requestTs) duplicateEdge.toInvertedEdgeHashLike.buildDeleteAsync()
             else Nil
 
           val copyEdgeIndexedEdgesDeletes =
@@ -1291,7 +1328,7 @@ object Graph {
     implicit val ex = executionContext
     val client = getClient(vertex.hbaseZkAddr)
     deferredToFuture(client.get(vertex.buildGet))(emptyKVs).map { kvs =>
-      Vertex(kvs, vertex.serviceColumn.schemaVersion)
+      Vertex(QueryParam.Empty, kvs, vertex.serviceColumn.schemaVersion)
     }
   }
 
