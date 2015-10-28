@@ -99,7 +99,7 @@ object InnerVal extends HBaseDeserializableWithIsVertexId {
   }
 
   def withLong(l: Long): InnerVal = {
-    //      if (l < 0) throw new IllegalDataRangeException("value shoudl be >= 0")
+    //      if (l < 0) throw new IllegalDataRangeException("value should be >= 0")
     InnerVal(Some(l), None, None)
   }
 

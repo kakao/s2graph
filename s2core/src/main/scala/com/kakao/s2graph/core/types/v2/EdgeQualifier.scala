@@ -21,7 +21,7 @@ object EdgeQualifier extends HBaseDeserializable {
       val (props, endAt) = bytesToProps(bytes, pos, version)
       numOfBytesUsedTotal += endAt - offset
       //        val tgtVertexId = CompositeId(bytes, endAt, true, false)
-      /** check if target vertex Id is included indexProps or seperate field */
+      /** check if target vertex Id is included indexProps or separate field */
       val (tgtVertexId, numOfBytesUsed) = if (endAt == offset + len) {
         (defaultTgtVertexId, 0)
       } else {

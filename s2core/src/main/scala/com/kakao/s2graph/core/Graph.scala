@@ -892,10 +892,10 @@ object Graph {
 
       /**
        * step 1. acquire lock on snapshot edge.
-       * step 2. try mutate indexed Edge mutation. note that increment is seperated for retry cases.
+       * step 2. try mutate indexed Edge mutation. note that increment is separated for retry cases.
        * step 3. once all mutate on indexed edge success, then try release lock.
        * step 4. once lock is releaseed successfully, then mutate increment on this edgeUpdate.
-       * note thta step 4 never fail to avoid multiple increments.
+       * note that step 4 never fail to avoid multiple increments.
        */
       for {
         locked <- Graph.deferredToFutureWithoutFallback(client.compareAndSet(lock, before))
@@ -953,7 +953,7 @@ object Graph {
     }
   }
 
-  /** TODO: deleteAll is seperated from mutateEdge. */
+  /** TODO: deleteAll is separated from mutateEdge. */
   /**
    *
    * @param edge
