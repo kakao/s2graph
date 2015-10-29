@@ -1,4 +1,4 @@
-package com.kakao.s2graph
+package com.kakao.s2graph.core.utils
 
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -94,6 +94,4 @@ class SafeUpdateCache[T, M[_]](prefix: String, maxSize: Int, ttl: Int)(implicit 
     }
   }
 }
-
-
 

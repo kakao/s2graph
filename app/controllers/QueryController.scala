@@ -5,7 +5,7 @@ import com.kakao.s2graph.core.GraphExceptions.BadQueryException
 import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.mysqls._
 import com.kakao.s2graph.core.types.{LabelWithDirection, VertexId}
-import com.kakao.s2graph.logger
+import com.kakao.s2graph.core.utils.logger
 import config.Config
 import play.api.libs.json.{JsArray, JsObject, JsValue, Json}
 import play.api.mvc.{Action, Controller, Result}
@@ -33,12 +33,12 @@ object QueryController extends Controller with RequestParser {
 
   private def eachQuery(post: (Seq[QueryResult], Seq[QueryResult]) => JsValue)(q: Query): Future[JsValue] = {
     val filterOutQueryResultsLs = q.filterOutQuery match {
-      case Some(filterOutQuery) => Graph.getEdgesAsync(filterOutQuery)
+      case Some(filterOutQuery) => Graph.getEdges(filterOutQuery)
       case None => Future.successful(Seq.empty)
     }
 
     for {
-      queryResultsLs <- Graph.getEdgesAsync(q)
+      queryResultsLs <- Graph.getEdges(q)
       filterOutResultsLs <- filterOutQueryResultsLs
     } yield {
       val json = post(queryResultsLs, filterOutResultsLs)
@@ -86,8 +86,8 @@ object QueryController extends Controller with RequestParser {
       val q = toQuery(jsonQuery)
       val filterOutQuery = Query(q.vertices, Vector(q.steps.last))
 
-      val fetchFuture = Graph.getEdgesAsync(q)
-      val excludeFuture = Graph.getEdgesAsync(filterOutQuery)
+      val fetchFuture = Graph.getEdges(q)
+      val excludeFuture = Graph.getEdges(filterOutQuery)
 
       for {
         queryResultLs <- fetchFuture
@@ -152,8 +152,8 @@ object QueryController extends Controller with RequestParser {
       val q = toQuery(jsonQuery)
       val filterOutQuery = Query(q.vertices, Vector(q.steps.last))
 
-      val fetchFuture = Graph.getEdgesAsync(q)
-      val excludeFuture = Graph.getEdgesAsync(filterOutQuery)
+      val fetchFuture = Graph.getEdges(q)
+      val excludeFuture = Graph.getEdges(filterOutQuery)
 
       for {
         queryResultLs <- fetchFuture
@@ -185,8 +185,8 @@ object QueryController extends Controller with RequestParser {
       val q = toQuery(jsonQuery)
       val filterOutQuery = Query(q.vertices, Vector(q.steps.last))
 
-      val fetchFuture = Graph.getEdgesAsync(q)
-      val excludeFuture = Graph.getEdgesAsync(filterOutQuery)
+      val fetchFuture = Graph.getEdges(q)
+      val excludeFuture = Graph.getEdges(filterOutQuery)
 
       for {
         queryResultLs <- fetchFuture
@@ -242,10 +242,10 @@ object QueryController extends Controller with RequestParser {
           //          logger.debug(s"SrcVertex: $src")
           //          logger.debug(s"TgtVertex: $tgt")
           //          logger.debug(s"direction: $dir")
-          (src, tgt, label, dir.toInt)
+          (src, tgt, QueryParam(LabelWithDirection(label.id.get, dir)))
         }
 
-      Graph.checkEdges(quads, isInnerCall = false).map { case queryResultLs =>
+      Graph.checkEdges(quads).map { case queryResultLs =>
         val edgeJsons = for {
           queryResult <- queryResultLs
           (edge, score) <- queryResult.edgeWithScoreLs
@@ -270,14 +270,18 @@ object QueryController extends Controller with RequestParser {
   }
 
   def getVertices() = withHeaderAsync(jsonParser) { request =>
+    getVerticesInner(request.body)
+  }
+
+  def getVerticesInner(jsValue: JsValue) = {
     if (!Config.IS_QUERY_SERVER) Unauthorized.as(applicationJsonHeader)
 
-    val jsonQuery = request.body
+    val jsonQuery = jsValue
     val ts = System.currentTimeMillis()
     val props = "{}"
 
     Try {
-      val vertices = request.body.as[List[JsValue]].flatMap { js =>
+      val vertices = jsonQuery.as[List[JsValue]].flatMap { js =>
         val serviceName = (js \ "serviceName").as[String]
         val columnName = (js \ "columnName").as[String]
         for (id <- (js \ "ids").asOpt[List[JsValue]].getOrElse(List.empty[JsValue])) yield {
@@ -285,7 +289,7 @@ object QueryController extends Controller with RequestParser {
         }
       }
 
-      Graph.getVerticesAsync(vertices) map { vertices =>
+      Graph.getVertices(vertices) map { vertices =>
         val json = PostProcess.verticesToJson(vertices)
         jsonResponse(json, "result_size" -> calcSize(json).toString)
       }

@@ -1,11 +1,9 @@
 package test.controllers
 
-import com.kakao.s2graph.core.Graph
 import controllers.EdgeController
 import play.api.libs.json._
 import play.api.test.Helpers._
 import play.api.test.{FakeApplication, FakeRequest}
-import test.controllers.SpecCommon
 
 import scala.util.Random
 
@@ -171,14 +169,17 @@ class StrongLabelDeleteSpec extends SpecCommon {
         val jsResult = contentAsJson(EdgeController.mutateAndPublish(bulkEdge, withWait = true))
         Thread.sleep(asyncFlushInterval)
       }
-      Thread.sleep(asyncFlushInterval)
+      Thread.sleep(asyncFlushInterval * 10)
       val expectedDegree = lastOps.count(op => op != "delete" && op != "none")
       val queryJson = query(id = src)
       val result = getEdges(queryJson)
       val resultDegree = getDegree(result)
       println(lastOps.toList)
       println(result)
-      resultDegree == expectedDegree
+
+      val ret = resultDegree == expectedDegree
+      if (!ret) System.err.println(s"[Contention Failed]: $resultDegree, $expectedDegree")
+      ret
     }
 
     "update delete" in {
@@ -208,7 +209,7 @@ class StrongLabelDeleteSpec extends SpecCommon {
         val deleteAllRequest = Json.arr(Json.obj("label" -> labelName, "ids" -> Json.arr(src), "timestamp" -> deletedAt))
 
         val jsResult = contentAsString(EdgeController.deleteAllInner(deleteAllRequest))
-        Thread.sleep(asyncFlushInterval)
+        Thread.sleep(asyncFlushInterval * 10)
 
         val result = getEdges(query(id = src))
         println(result)

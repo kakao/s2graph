@@ -32,18 +32,9 @@ case class Vertex(id: VertexId,
 
   lazy val (hbaseZkAddr, hbaseTableName) = (service.cluster, service.hTableName)
 
-  def rowKey = VertexRowKey(id)(schemaVer)
-
   def defaultProps = Map(ColumnMeta.lastModifiedAtColumnSeq.toInt -> InnerVal.withLong(ts, schemaVer))
 
-
-  def qualifiersWithValues = {
-    val base = for ((k, v) <- props ++ defaultProps) yield (VertexQualifier(k)(schemaVer).bytes, v.bytes)
-    val belongsTo = belongLabelIds.map { labelId =>
-      (VertexQualifier(toPropKey(labelId))(schemaVer).bytes -> Array.empty[Byte])
-    }
-    base ++ belongsTo
-  }
+  lazy val kvs = Graph.client.vertexSerializer(this).toKeyValues
 
 
   /** TODO: make this as configurable */
@@ -60,54 +51,22 @@ case class Vertex(id: VertexId,
     meta <- ColumnMeta.findByIdAndSeq(id.colId, seq.toByte)
   } yield (meta.name -> v.toString)
 
+  /** only used by bulk loader */
   def buildPuts(): List[Put] = {
     //    logger.error(s"put: $this => $rowKey")
-    val put = new Put(rowKey.bytes)
-    for ((q, v) <- qualifiersWithValues) {
-      put.addColumn(vertexCf, q, ts, v)
+//    val put = new Put(rowKey.bytes)
+//    for ((q, v) <- qualifiersWithValues) {
+//      put.addColumn(vertexCf, q, ts, v)
+//    }
+//    List(put)
+    val kv = kvs.head
+    val put = new Put(kv.row)
+    kvs.map { kv =>
+      put.addColumn(kv.cf, kv.qualifier, kv.timestamp, kv.value)
     }
     List(put)
   }
 
-  def buildPutsAsync(): List[PutRequest] = {
-    val qualifiers = ListBuffer[Array[Byte]]()
-    val values = ListBuffer[Array[Byte]]()
-    for ((q, v) <- qualifiersWithValues) {
-      qualifiers += q
-      values += v
-      //        new PutRequest(hbaseTableName.getBytes, rowKey.bytes, vertexCf, qualifier.bytes, v.bytes, ts)
-    }
-    val put = new PutRequest(hbaseTableName.getBytes, rowKey.bytes, vertexCf, qualifiers.toArray, values.toArray, ts)
-    List(put)
-  }
-
-  //  def buildPutsAll(): List[Mutation] = {
-  //    op match {
-  //      case d: Byte if d == GraphUtil.operations("delete") => // delete
-  //        buildDelete()
-  //      case _ => // insert/update/increment
-  //        buildPuts()
-  //    }
-  //  }
-  def buildPutsAll(): List[HBaseRpc] = {
-    op match {
-      case d: Byte if d == GraphUtil.operations("delete") => buildDeleteAsync()
-      //      case dAll: Byte if dAll == GraphUtil.operations("deleteAll") => buildDeleteAllAsync()
-      case _ => buildPutsAsync()
-    }
-  }
-
-  def buildDelete(): List[Delete] = {
-    List(new Delete(rowKey.bytes, ts))
-  }
-
-  def buildDeleteAsync(): List[DeleteRequest] = {
-    List(new DeleteRequest(hbaseTableName.getBytes, rowKey.bytes, vertexCf, ts))
-  }
-
-  def buildGet() = {
-    new GetRequest(hbaseTableName.getBytes, rowKey.bytes, vertexCf)
-  }
 
   def toEdgeVertex() = Vertex(SourceVertexId(id.colId, innerId), ts, props, op)
 
@@ -154,42 +113,13 @@ object Vertex {
   //    System.currentTimeMillis())
   def fromString(s: String): Option[Vertex] = Graph.toVertex(s)
 
-  def apply(kvs: Seq[org.hbase.async.KeyValue], version: String): Option[Vertex] = {
+  def apply(queryParam: QueryParam,
+            kvs: Seq[org.hbase.async.KeyValue],
+            version: String): Option[Vertex] = {
     if (kvs.isEmpty) None
     else {
-
-      val head = kvs.head
-      val headBytes = head.key()
-      val (rowKey, _) = VertexRowKey.fromBytes(headBytes, 0, headBytes.length, version)
-
-      var maxTs = Long.MinValue
-      val propsMap = new collection.mutable.HashMap[Int, InnerValLike]
-      val belongLabelIds = new ListBuffer[Int]
-
-      /**
-       *
-       * TODO
-       * Make sure this does not violate any MVCC Version.
-       */
-
-      for {
-        kv <- kvs
-        kvQual = kv.qualifier()
-        (qualifier, _) = VertexQualifier.fromBytes(kvQual, 0, kvQual.length, version)
-      } {
-        val ts = kv.timestamp()
-        if (ts > maxTs) maxTs = ts
-
-        if (isLabelId(qualifier.propKey)) {
-          belongLabelIds += toLabelId(qualifier.propKey)
-        } else {
-          val v = kv.value()
-          val (value, _) = InnerVal.fromBytes(v, 0, v.length, version)
-          propsMap += (qualifier.propKey -> value)
-        }
-      }
-      assert(maxTs != Long.MinValue)
-      Some(Vertex(rowKey.id, maxTs, propsMap.toMap, belongLabelIds = belongLabelIds))
+      val newKVs = kvs.map(Graph.client.toGKeyValue(_))
+      Option(Graph.client.vertexDeserializer.fromKeyValues(queryParam, newKVs, version, None))
     }
   }
 }

@@ -2,8 +2,8 @@ package controllers
 
 
 import actors.QueueActor
-import com.kakao.s2graph.core.{Graph, ExceptionHandler, GraphExceptions}
-import com.kakao.s2graph.logger
+import com.kakao.s2graph.core.utils.logger
+import com.kakao.s2graph.core.{ExceptionHandler, Graph, GraphExceptions}
 import config.Config
 import play.api.libs.json.{JsValue, Json}
 import play.api.mvc.{Controller, Result}
@@ -15,7 +15,7 @@ object VertexController extends Controller with RequestParser  {
   import ExceptionHandler._
   import controllers.ApplicationController._
   import play.api.libs.concurrent.Execution.Implicits._
-  private def tryMutates(jsValue: JsValue, operation: String, serviceNameOpt: Option[String] = None, columnNameOpt: Option[String] = None, withWait: Boolean = false): Future[Result] = {
+  def tryMutates(jsValue: JsValue, operation: String, serviceNameOpt: Option[String] = None, columnNameOpt: Option[String] = None, withWait: Boolean = false): Future[Result] = {
     if (!Config.IS_WRITE_SERVER) Future.successful(Unauthorized)
     else {
       try {

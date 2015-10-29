@@ -2,7 +2,6 @@ package test.controllers
 
 import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.mysqls._
-import com.kakao.s2graph.logger
 import controllers.AdminController
 import org.specs2.mutable.Specification
 import play.api.libs.json._
@@ -230,7 +229,7 @@ trait SpecCommon extends Specification {
   val createVertex = s"""{
     "serviceName": "$testServiceName",
     "columnName": "$testColumnName",
-    "columnType": "long",
+    "columnType": "$testColumnType",
     "props": [
         {"name": "is_active", "dataType": "boolean", "defaultValue": true},
         {"name": "phone_number", "dataType": "string", "defaultValue": "-"},
@@ -344,15 +343,16 @@ trait SpecCommon extends Specification {
           case None =>
             AdminController.createLabelInner(Json.parse(create))
           case Some(label) =>
-            logger.error(s">> Label already exist: $create, $label")
+            println(s">> Label already exist: $create, $label")
         }
       }
-      println("[init end]: >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
 
       // 5. create vertex
-      // vertexPropsKeys.map { case (key, keyType) =>
-      //   Management.addVertexProp(testServiceName, testColumnName, key, keyType)
-      // }
+      vertexPropsKeys.map { case (key, keyType) =>
+        Management.addVertexProp(testServiceName, testColumnName, key, keyType)
+      }
+
+      println("[init end]: >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
 
       Thread.sleep(asyncFlushInterval)
     }

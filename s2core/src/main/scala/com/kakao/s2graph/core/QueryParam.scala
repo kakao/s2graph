@@ -4,7 +4,7 @@ import com.kakao.s2graph.core.Graph.edgeCf
 import com.kakao.s2graph.core.mysqls._
 import com.kakao.s2graph.core.parsers.{Where, WhereParser}
 import com.kakao.s2graph.core.types._
-import com.kakao.s2graph.logger
+import com.kakao.s2graph.core.utils.logger
 import org.apache.hadoop.hbase.util.Bytes
 import org.hbase.async.{ColumnRangeFilter, GetRequest}
 import play.api.libs.json.{JsNumber, JsValue, Json}
@@ -232,7 +232,7 @@ case class QueryParam(labelWithDir: LabelWithDirection, timestamp: Long = System
   import Query.DuplicatePolicy
   import Query.DuplicatePolicy._
 
-  val label = Label.findById(labelWithDir.labelId)
+  lazy val label = Label.findById(labelWithDir.labelId)
   val DefaultKey = LabelIndex.DefaultSeq
   val fullKey = DefaultKey
 
@@ -263,8 +263,8 @@ case class QueryParam(labelWithDir: LabelWithDirection, timestamp: Long = System
   var exclude = false
   var include = false
 
-  val srcColumnWithDir = label.srcColumnWithDir(labelWithDir.dir)
-  val tgtColumnWithDir = label.tgtColumnWithDir(labelWithDir.dir)
+  lazy val srcColumnWithDir = label.srcColumnWithDir(labelWithDir.dir)
+  lazy val tgtColumnWithDir = label.tgtColumnWithDir(labelWithDir.dir)
 
   /**
    * consider only I/O specific parameters.
@@ -448,12 +448,18 @@ case class QueryParam(labelWithDir: LabelWithDirection, timestamp: Long = System
 
     val get = if (tgtVertexInnerIdOpt.isDefined) {
       val snapshotEdge = edge.toInvertedEdgeHashLike
-      new GetRequest(label.hbaseTableName.getBytes, snapshotEdge.rowKey.bytes, edgeCf, snapshotEdge.qualifier.bytes)
+      val kv = snapshotEdge.kvs.head
+      new GetRequest(label.hbaseTableName.getBytes, kv.row, edgeCf, kv.qualifier)
     } else {
       val indexedEdgeOpt = edge.edgesWithIndex.find(e => e.labelIndexSeq == labelOrderSeq)
       assert(indexedEdgeOpt.isDefined)
       val indexedEdge = indexedEdgeOpt.get
-      new GetRequest(label.hbaseTableName.getBytes, indexedEdge.rowKey.bytes, edgeCf)
+      val kv = indexedEdge.kvs.head
+      val table = label.hbaseTableName.getBytes
+        //kv.table //
+      val rowKey = kv.row // indexedEdge.rowKey.bytes
+      val cf = edgeCf
+      new GetRequest(table, rowKey, cf)
     }
 
     val (minTs, maxTs) = duration.getOrElse((0L, Long.MaxValue))

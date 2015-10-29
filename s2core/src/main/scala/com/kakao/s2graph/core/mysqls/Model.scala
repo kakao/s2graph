@@ -3,7 +3,7 @@ package com.kakao.s2graph.core.mysqls
 import java.util.concurrent.{Executors, TimeUnit}
 import java.util.concurrent.atomic.AtomicBoolean
 
-import com.kakao.s2graph.{SafeUpdateCache, logger}
+import com.kakao.s2graph.core.utils.{logger, SafeUpdateCache}
 import com.google.common.cache.CacheBuilder
 import com.typesafe.config.Config
 import scalikejdbc._
