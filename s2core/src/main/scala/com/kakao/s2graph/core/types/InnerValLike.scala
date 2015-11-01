@@ -144,7 +144,7 @@ object InnerVal extends HBaseDeserializableWithIsVertexId {
 //    }
 //  }
 
-  /** nasty implementation for backward compatability */
+  /** nasty implementation for backward compatibility */
   def convertVersion(innerVal: InnerValLike, dataType: String, toVersion: String): InnerValLike = {
     val ret = toVersion match {
       case VERSION2 =>
