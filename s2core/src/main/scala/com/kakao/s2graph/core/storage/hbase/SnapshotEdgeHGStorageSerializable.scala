@@ -3,11 +3,11 @@ package com.kakao.s2graph.core.storage.hbase
 import com.kakao.s2graph.core.mysqls.LabelIndex
 import com.kakao.s2graph.core.storage.GraphSerializable
 import com.kakao.s2graph.core.types.VertexId
-import com.kakao.s2graph.core.{EdgeWithIndexInverted, JSONParser}
+import com.kakao.s2graph.core.{SnapshotEdge, JSONParser}
 import org.apache.hadoop.hbase.util.Bytes
 
 
-class SnapshotEdgeHGStorageSerializable(snapshotEdge: EdgeWithIndexInverted) extends HGStorageSerializable with JSONParser with GraphSerializable {
+class SnapshotEdgeHGStorageSerializable(snapshotEdge: SnapshotEdge) extends HGStorageSerializable with JSONParser with GraphSerializable {
 
   val label = snapshotEdge.label
   val table = label.hbaseTableName.getBytes()

@@ -10,7 +10,7 @@ import scala.collection.JavaConversions._
 import scala.util.hashing.MurmurHash3
 
 
-case class EdgeWithIndexInverted(srcVertex: Vertex,
+case class SnapshotEdge(srcVertex: Vertex,
                                  tgtVertex: Vertex,
                                  labelWithDir: LabelWithDirection,
                                  op: Byte,
@@ -43,7 +43,7 @@ case class EdgeWithIndexInverted(srcVertex: Vertex,
   def withPendingEdge(pendingEdgeOpt: Option[Edge]) = copy(pendingEdgeOpt = pendingEdgeOpt)
 }
 
-case class EdgeWithIndex(srcVertex: Vertex,
+case class IndexEdge(srcVertex: Vertex,
                          tgtVertex: Vertex,
                          labelWithDir: LabelWithDirection,
                          op: Byte,
@@ -166,24 +166,24 @@ case class Edge(srcVertex: Vertex,
   def propsPlusTsValid = propsPlusTs.filter(kv => kv._1 >= 0)
 
   def edgesWithIndex = for (labelOrder <- labelOrders) yield {
-    EdgeWithIndex(srcVertex, tgtVertex, labelWithDir, op, version, labelOrder.seq, propsPlusTs)
+    IndexEdge(srcVertex, tgtVertex, labelWithDir, op, version, labelOrder.seq, propsPlusTs)
   }
 
   def edgesWithIndexValid = for (labelOrder <- labelOrders) yield {
-    EdgeWithIndex(srcVertex, tgtVertex, labelWithDir, op, version, labelOrder.seq, propsPlusTsValid)
+    IndexEdge(srcVertex, tgtVertex, labelWithDir, op, version, labelOrder.seq, propsPlusTsValid)
   }
 
   def edgesWithIndexValid(newOp: Byte) = for (labelOrder <- labelOrders) yield {
-    EdgeWithIndex(srcVertex, tgtVertex, labelWithDir, newOp, version, labelOrder.seq, propsPlusTsValid)
+    IndexEdge(srcVertex, tgtVertex, labelWithDir, newOp, version, labelOrder.seq, propsPlusTsValid)
   }
 
   /** force direction as out on invertedEdge */
-  def toInvertedEdgeHashLike: EdgeWithIndexInverted = {
+  def toSnapshotEdge: SnapshotEdge = {
     val (smaller, larger) = (srcForVertex, tgtForVertex)
 
     val newLabelWithDir = LabelWithDirection(labelWithDir.labelId, GraphUtil.directions("out"))
 
-    val ret = EdgeWithIndexInverted(smaller, larger, newLabelWithDir, op, version, propsWithTs ++
+    val ret = SnapshotEdge(smaller, larger, newLabelWithDir, op, version, propsWithTs ++
       Map(LabelMeta.timeStampSeq -> InnerValLikeWithTs(InnerVal.withLong(ts, schemaVer), ts)), pendingEdgeOpt)
     ret
   }
@@ -278,9 +278,9 @@ case class EdgeWriter(edge: Edge) {
 
 }
 
-case class EdgeUpdate(edgesToDelete: List[EdgeWithIndex] = List.empty[EdgeWithIndex],
-                      edgesToInsert: List[EdgeWithIndex] = List.empty[EdgeWithIndex],
-                      newInvertedEdge: Option[EdgeWithIndexInverted] = None) {
+case class EdgeMutate(edgesToDelete: List[IndexEdge] = List.empty[IndexEdge],
+                      edgesToInsert: List[IndexEdge] = List.empty[IndexEdge],
+                      newInvertedEdge: Option[SnapshotEdge] = None) {
 
   def toLogString: String = {
     val deletes = s"deletes: ${edgesToDelete.map(e => e.toString).mkString("\n")}"
@@ -316,43 +316,43 @@ object Edge extends JSONParser {
   }
 
 
-  def buildUpsert(invertedEdge: Option[Edge], requestEdges: Edge): (Edge, EdgeUpdate) = {
+  def buildUpsert(invertedEdge: Option[Edge], requestEdges: Edge): (Edge, EdgeMutate) = {
 //    assert(requestEdge.op == GraphUtil.operations("insert"))
     buildOperation(invertedEdge, Seq(requestEdges))
   }
 
-  def buildUpdate(invertedEdge: Option[Edge], requestEdges: Edge):  (Edge, EdgeUpdate) = {
+  def buildUpdate(invertedEdge: Option[Edge], requestEdges: Edge):  (Edge, EdgeMutate) = {
 //    assert(requestEdge.op == GraphUtil.operations("update"))
     buildOperation(invertedEdge, Seq(requestEdges))
   }
 
-  def buildDelete(invertedEdge: Option[Edge], requestEdges: Edge):  (Edge, EdgeUpdate) = {
+  def buildDelete(invertedEdge: Option[Edge], requestEdges: Edge):  (Edge, EdgeMutate) = {
 //    assert(requestEdge.op == GraphUtil.operations("delete"))
     buildOperation(invertedEdge, Seq(requestEdges))
   }
 
-  def buildIncrement(invertedEdge: Option[Edge], requestEdges: Edge):  (Edge, EdgeUpdate) = {
+  def buildIncrement(invertedEdge: Option[Edge], requestEdges: Edge):  (Edge, EdgeMutate) = {
 //    assert(requestEdge.op == GraphUtil.operations("increment"))
     buildOperation(invertedEdge, Seq(requestEdges))
   }
 
-  def buildInsertBulk(invertedEdge: Option[Edge], requestEdges: Edge):  (Edge, EdgeUpdate) = {
+  def buildInsertBulk(invertedEdge: Option[Edge], requestEdges: Edge):  (Edge, EdgeMutate) = {
 //    assert(invertedEdge.isEmpty)
 //    assert(requestEdge.op == GraphUtil.operations("insertBulk") || requestEdge.op == GraphUtil.operations("insert"))
     buildOperation(None, Seq(requestEdges))
   }
 
-  def buildDeleteBulk(invertedEdge: Option[Edge], requestEdge: Edge):  (Edge, EdgeUpdate) = {
+  def buildDeleteBulk(invertedEdge: Option[Edge], requestEdge: Edge):  (Edge, EdgeMutate) = {
 //    assert(invertedEdge.isEmpty)
 //    assert(requestEdge.op == GraphUtil.operations("delete"))
 //
     val edgesToDelete = requestEdge.relatedEdges.flatMap { relEdge => relEdge.edgesWithIndexValid }
-    val edgeInverted = Option(requestEdge.toInvertedEdgeHashLike)
+    val edgeInverted = Option(requestEdge.toSnapshotEdge)
 
-    (requestEdge, EdgeUpdate(edgesToDelete, edgesToInsert = Nil, edgeInverted))
+    (requestEdge, EdgeMutate(edgesToDelete, edgesToInsert = Nil, edgeInverted))
   }
 
-  def buildOperation(invertedEdge: Option[Edge], requestEdges: Seq[Edge]): (Edge, EdgeUpdate) = {
+  def buildOperation(invertedEdge: Option[Edge], requestEdges: Seq[Edge]): (Edge, EdgeMutate) = {
     //            logger.debug(s"oldEdge: ${invertedEdge.map(_.toStringRaw)}")
     //            logger.debug(s"requestEdge: ${requestEdge.toStringRaw}")
     val oldPropsWithTs = if (invertedEdge.isEmpty) Map.empty[Byte, InnerValLikeWithTs] else invertedEdge.get.propsWithTs
@@ -369,7 +369,7 @@ object Edge extends JSONParser {
 
     if (requestWithFuncs.isEmpty) {
       logger.info(s"all requests have duplicated timestamp with snapshotEdge.")
-      (requestEdges.head, EdgeUpdate())
+      (requestEdges.head, EdgeMutate())
     } else {
       var shouldReplaceCnt = 0
       var prevPropsWithTs = oldPropsWithTs
@@ -396,7 +396,7 @@ object Edge extends JSONParser {
 
       if (shouldReplaceCnt <= 0) {
         logger.info(s"drop all requests because all request should replaces are false.")
-        (requestEdges.head, EdgeUpdate())
+        (requestEdges.head, EdgeMutate())
       }  else {
 
         val maxTsInNewProps = prevPropsWithTs.map(kv => kv._2.ts).max
@@ -426,7 +426,7 @@ object Edge extends JSONParser {
    * insert requestEdge.edgesWithIndex
    * update requestEdge.edgesWithIndexInverted
    */
-  def buildReplace(invertedEdge: Option[Edge], requestEdge: Edge, newPropsWithTs: Map[Byte, InnerValLikeWithTs]): EdgeUpdate = {
+  def buildReplace(invertedEdge: Option[Edge], requestEdge: Edge, newPropsWithTs: Map[Byte, InnerValLikeWithTs]): EdgeMutate = {
 
     val edgesToDelete = invertedEdge match {
 //      case Some(e) if e.op != GraphUtil.operations("delete") =>
@@ -435,15 +435,15 @@ object Edge extends JSONParser {
       //      case Some(e) => e.edgesWithIndexValid
       case _ =>
         // nothing to remove on indexed.
-        List.empty[EdgeWithIndex]
+        List.empty[IndexEdge]
     }
 
     val edgesToInsert = {
-      if (newPropsWithTs.isEmpty) List.empty[EdgeWithIndex]
+      if (newPropsWithTs.isEmpty) List.empty[IndexEdge]
       else {
         if (allPropsDeleted(newPropsWithTs)) {
           // all props is older than lastDeletedAt so nothing to insert on indexed.
-          List.empty[EdgeWithIndex]
+          List.empty[IndexEdge]
         } else {
           /** force operation on edge as insert */
           requestEdge.relatedEdges.flatMap { relEdge =>
@@ -453,8 +453,8 @@ object Edge extends JSONParser {
       }
     }
 
-    val edgeInverted = if (newPropsWithTs.isEmpty) None else Some(requestEdge.toInvertedEdgeHashLike)
-    val update = EdgeUpdate(edgesToDelete, edgesToInsert, edgeInverted)
+    val edgeInverted = if (newPropsWithTs.isEmpty) None else Some(requestEdge.toSnapshotEdge)
+    val update = EdgeMutate(edgesToDelete, edgesToInsert, edgeInverted)
     update
   }
 

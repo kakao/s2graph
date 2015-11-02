@@ -9,7 +9,7 @@ import org.apache.hadoop.hbase.util.Bytes
 /**
  * Created by shon on 10/29/15.
  */
-trait IndexedEdgeHGStorageDeserializable extends HGStorageDeserializable[EdgeWithIndex] with GraphDeserializable {
+trait IndexedEdgeHGStorageDeserializable extends HGStorageDeserializable[IndexEdge] with GraphDeserializable {
   type QualifierRaw = (Array[(Byte, InnerValLike)], VertexId, Byte, Boolean, Int)
   type ValueRaw = (Array[(Byte, InnerValLike)], Int)
 
@@ -54,14 +54,14 @@ trait IndexedEdgeHGStorageDeserializable extends HGStorageDeserializable[EdgeWit
     (Array.empty[(Byte, InnerValLike)], 0)
   }
 
-  def toEdge(edgeOpt: EdgeWithIndex): Edge = {
+  def toEdge(edgeOpt: IndexEdge): Edge = {
     val e = edgeOpt
     Edge(e.srcVertex, e.tgtVertex, e.labelWithDir, e.op, e.ts, e.ts, e.propsWithTs)
     //    edgeOpt.map { e => Edge(e.srcVertex, e.tgtVertex, e.labelWithDir, e.op, e.ts, e.ts, e.propsWithTs) }
   }
 
   /** version 1 and version 2 is same logic */
-  override def fromKeyValues(queryParam: QueryParam, kvs: Seq[HKeyValue], version: String, cacheElementOpt: Option[EdgeWithIndex] = None): EdgeWithIndex = {
+  override def fromKeyValues(queryParam: QueryParam, kvs: Seq[HKeyValue], version: String, cacheElementOpt: Option[IndexEdge] = None): IndexEdge = {
     assert(kvs.size == 1)
     val kv = kvs.head
     val (srcVertexId, labelWithDir, labelIdxSeq, _, _) = cacheElementOpt.map { e =>
@@ -99,7 +99,7 @@ trait IndexedEdgeHGStorageDeserializable extends HGStorageDeserializable[EdgeWit
     val mergedProps = (idxProps ++ props).toMap
     val ts = mergedProps.get(LabelMeta.timeStampSeq).map(v => v.toString().toLong).getOrElse(kv.timestamp)
 
-    EdgeWithIndex(Vertex(srcVertexId, ts), Vertex(tgtVertexId, ts), labelWithDir, op, ts, labelIdxSeq, mergedProps)
+    IndexEdge(Vertex(srcVertexId, ts), Vertex(tgtVertexId, ts), labelWithDir, op, ts, labelIdxSeq, mergedProps)
   }
 }
 

@@ -3,13 +3,13 @@ package com.kakao.s2graph.core.storage.hbase
 import com.kakao.s2graph.core.mysqls.LabelMeta
 import com.kakao.s2graph.core.storage.GraphSerializable
 import com.kakao.s2graph.core.types.VertexId
-import com.kakao.s2graph.core.{EdgeWithIndex, GraphUtil, JSONParser}
+import com.kakao.s2graph.core.{IndexEdge, GraphUtil, JSONParser}
 import org.apache.hadoop.hbase.util.Bytes
 
 /**
  * Created by shon on 10/29/15.
  */
-case class IndexedEdgeHGStorageSerializable(indexedEdge: EdgeWithIndex) extends HGStorageSerializable with JSONParser with GraphSerializable {
+case class IndexedEdgeHGStorageSerializable(indexedEdge: IndexEdge) extends HGStorageSerializable with JSONParser with GraphSerializable {
 
   val label = indexedEdge.label
   val table = label.hbaseTableName.getBytes()

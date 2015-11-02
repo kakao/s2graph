@@ -69,9 +69,9 @@ class AsynchbaseStorage(config: Config,
   private val clientFlushInterval = this.config.getInt("hbase.rpcs.buffered_flush_interval").toString().toShort
   private val MaxRetryNum = this.config.getInt("max.retry.number")
 
-  private def snapshotEdgeSerializer(snapshotEdge: EdgeWithIndexInverted) = new SnapshotEdgeHGStorageSerializable(snapshotEdge)
+  private def snapshotEdgeSerializer(snapshotEdge: SnapshotEdge) = new SnapshotEdgeHGStorageSerializable(snapshotEdge)
 
-  private def indexedEdgeSerializer(indexedEdge: EdgeWithIndex) = new IndexedEdgeHGStorageSerializable(indexedEdge)
+  private def indexedEdgeSerializer(indexedEdge: IndexEdge) = new IndexedEdgeHGStorageSerializable(indexedEdge)
 
   private def vertexSerializer(vertex: Vertex) = new VertexHGStorageSerializable(vertex)
 
@@ -283,7 +283,7 @@ class AsynchbaseStorage(config: Config,
     val edge = Edge(srcV, tgtV, labelWithDir)
 
     val get = if (tgtVertexOpt.isDefined) {
-      val snapshotEdge = edge.toInvertedEdgeHashLike
+      val snapshotEdge = edge.toSnapshotEdge
       val kv = snapshotEdgeSerializer(snapshotEdge).toKeyValues.head
       new GetRequest(label.hbaseTableName.getBytes, kv.row, edgeCf, kv.qualifier)
     } else {
@@ -377,7 +377,7 @@ class AsynchbaseStorage(config: Config,
   }
 
   def toSnapshotEdge(kv: KeyValue, param: QueryParam,
-                     cacheElementOpt: Option[EdgeWithIndexInverted] = None,
+                     cacheElementOpt: Option[SnapshotEdge] = None,
                      isInnerCall: Boolean,
                      parentEdges: Seq[EdgeWithScore]): Option[Edge] = {
     //    logger.debug(s"$param -> $kv")
@@ -409,7 +409,7 @@ class AsynchbaseStorage(config: Config,
   }
 
   def toEdge(kv: KeyValue, param: QueryParam,
-             cacheElementOpt: Option[EdgeWithIndex] = None,
+             cacheElementOpt: Option[IndexEdge] = None,
              parentEdges: Seq[EdgeWithScore]): Option[Edge] = {
     //    logger.debug(s"$param -> $kv")
     val kvs = Seq(HKeyValue(kv))
@@ -504,17 +504,17 @@ class AsynchbaseStorage(config: Config,
   }
 
   /** edge Update **/
-  def indexedEdgeMutations(edgeUpdate: EdgeUpdate): List[HBaseRpc] = {
+  def indexedEdgeMutations(edgeUpdate: EdgeMutate): List[HBaseRpc] = {
     val deleteMutations = edgeUpdate.edgesToDelete.flatMap(edge => buildDeletesAsync(edge))
     val insertMutations = edgeUpdate.edgesToInsert.flatMap(edge => buildPutsAsync(edge))
     deleteMutations ++ insertMutations
   }
 
-  def invertedEdgeMutations(edgeUpdate: EdgeUpdate): List[HBaseRpc] = {
+  def invertedEdgeMutations(edgeUpdate: EdgeMutate): List[HBaseRpc] = {
     edgeUpdate.newInvertedEdge.map(e => buildDeleteAsync(e)).getOrElse(Nil)
   }
 
-  def increments(edgeUpdate: EdgeUpdate): List[HBaseRpc] = {
+  def increments(edgeUpdate: EdgeMutate): List[HBaseRpc] = {
     (edgeUpdate.edgesToDelete.isEmpty, edgeUpdate.edgesToInsert.isEmpty) match {
       case (true, true) =>
 
@@ -536,7 +536,7 @@ class AsynchbaseStorage(config: Config,
   }
 
   /** EdgeWithIndex */
-  def buildIncrementsAsync(indexedEdge: EdgeWithIndex, amount: Long = 1L): List[HBaseRpc] = {
+  def buildIncrementsAsync(indexedEdge: IndexEdge, amount: Long = 1L): List[HBaseRpc] = {
     indexedEdgeSerializer(indexedEdge).toKeyValues.headOption match {
       case None => Nil
       case Some(kv) =>
@@ -545,7 +545,7 @@ class AsynchbaseStorage(config: Config,
     }
   }
 
-  def buildIncrementsCountAsync(indexedEdge: EdgeWithIndex, amount: Long = 1L): List[HBaseRpc] = {
+  def buildIncrementsCountAsync(indexedEdge: IndexEdge, amount: Long = 1L): List[HBaseRpc] = {
     indexedEdgeSerializer(indexedEdge).toKeyValues.headOption match {
       case None => Nil
       case Some(kv) =>
@@ -554,20 +554,20 @@ class AsynchbaseStorage(config: Config,
     }
   }
 
-  def buildDeletesAsync(indexedEdge: EdgeWithIndex): List[HBaseRpc] = {
+  def buildDeletesAsync(indexedEdge: IndexEdge): List[HBaseRpc] = {
     delete(indexedEdgeSerializer(indexedEdge).toKeyValues).toList
   }
 
-  def buildPutsAsync(indexedEdge: EdgeWithIndex): List[HBaseRpc] = {
+  def buildPutsAsync(indexedEdge: IndexEdge): List[HBaseRpc] = {
     put(indexedEdgeSerializer(indexedEdge).toKeyValues).toList
   }
 
   /** EdgeWithIndexInverted  */
-  def buildPutAsync(snapshotEdge: EdgeWithIndexInverted): List[HBaseRpc] = {
+  def buildPutAsync(snapshotEdge: SnapshotEdge): List[HBaseRpc] = {
     put(snapshotEdgeSerializer(snapshotEdge).toKeyValues).toList
   }
 
-  def buildDeleteAsync(snapshotEdge: EdgeWithIndexInverted): List[HBaseRpc] = {
+  def buildDeleteAsync(snapshotEdge: SnapshotEdge): List[HBaseRpc] = {
     delete(snapshotEdgeSerializer(snapshotEdge).toKeyValues).toList
   }
 
@@ -609,7 +609,7 @@ class AsynchbaseStorage(config: Config,
 
   def insertBulkForLoaderAsync(edge: Edge, createRelEdges: Boolean = true) = {
     val relEdges = if (createRelEdges) edge.relatedEdges else List(edge)
-    buildPutAsync(edge.toInvertedEdgeHashLike) ++ relEdges.flatMap { relEdge =>
+    buildPutAsync(edge.toSnapshotEdge) ++ relEdges.flatMap { relEdge =>
       relEdge.edgesWithIndex.flatMap(e => buildPutsAsync(e))
     }
   }
@@ -776,8 +776,8 @@ class AsynchbaseStorage(config: Config,
       // after: state without pending edges
       // before: state with pending edges
 
-      val after = buildPutAsync(snapshotEdge.toInvertedEdgeHashLike.withNoPendingEdge()).head.asInstanceOf[PutRequest]
-      val before = snapshotEdgeSerializer(snapshotEdge.toInvertedEdgeHashLike).toKeyValues.head.value
+      val after = buildPutAsync(snapshotEdge.toSnapshotEdge.withNoPendingEdge()).head.asInstanceOf[PutRequest]
+      val before = snapshotEdgeSerializer(snapshotEdge.toSnapshotEdge).toKeyValues.head.value
       for {
         pendingEdgesLock <- mutateEdges(pendingEdges, withWait = true)
         ret <- if (pendingEdgesLock.forall(identity)) deferredToFutureWithoutFallback(client.compareAndSet(after, before)).map(_.booleanValue())
@@ -787,14 +787,14 @@ class AsynchbaseStorage(config: Config,
   }
 
 
-  private def commitUpdate(edgeWriter: EdgeWriter)(snapshotEdgeOpt: Option[Edge], edgeUpdate: EdgeUpdate, retryNum: Int): Future[Boolean] = {
+  private def commitUpdate(edgeWriter: EdgeWriter)(snapshotEdgeOpt: Option[Edge], edgeUpdate: EdgeMutate, retryNum: Int): Future[Boolean] = {
     val edge = edgeWriter.edge
     val label = edgeWriter.label
 
     if (edgeUpdate.newInvertedEdge.isEmpty) Future.successful(true)
     else {
       val lock = buildPutAsync(edgeUpdate.newInvertedEdge.get.withPendingEdge(Option(edge))).head.asInstanceOf[PutRequest]
-      val before = snapshotEdgeOpt.map(old => snapshotEdgeSerializer(old.toInvertedEdgeHashLike).toKeyValues.head.value).getOrElse(Array.empty[Byte])
+      val before = snapshotEdgeOpt.map(old => snapshotEdgeSerializer(old.toSnapshotEdge).toKeyValues.head.value).getOrElse(Array.empty[Byte])
       val after = buildPutAsync(edgeUpdate.newInvertedEdge.get.withNoPendingEdge()).head.asInstanceOf[PutRequest]
 
       def indexedEdgeMutationFuture(predicate: Boolean): Future[Boolean] = {
@@ -832,7 +832,7 @@ class AsynchbaseStorage(config: Config,
 
   private def mutateEdgesInner(edges: Seq[Edge],
                                checkConsistency: Boolean,
-                               withWait: Boolean)(f: (Option[Edge], Seq[Edge]) => (Edge, EdgeUpdate), tryNum: Int = 0): Future[Boolean] = {
+                               withWait: Boolean)(f: (Option[Edge], Seq[Edge]) => (Edge, EdgeMutate), tryNum: Int = 0): Future[Boolean] = {
 
     if (!checkConsistency) {
       val zkQuorum = edges.head.label.hbaseZkAddr
@@ -882,7 +882,7 @@ class AsynchbaseStorage(config: Config,
   private def mutateEdgeInner(edgeWriter: EdgeWriter,
                               checkConsistency: Boolean,
                               withWait: Boolean)
-                             (f: (Option[Edge], Edge) => (Edge, EdgeUpdate), tryNum: Int = 0): Future[Boolean] = {
+                             (f: (Option[Edge], Edge) => (Edge, EdgeMutate), tryNum: Int = 0): Future[Boolean] = {
 
     val edge = edgeWriter.edge
     val zkQuorum = edge.label.hbaseZkAddr
@@ -1032,7 +1032,7 @@ class AsynchbaseStorage(config: Config,
           } else Nil
 
           val snapshotEdgeDelete =
-            if (edge.ts < requestTs) buildDeleteAsync(duplicateEdge.toInvertedEdgeHashLike)
+            if (edge.ts < requestTs) buildDeleteAsync(duplicateEdge.toSnapshotEdge)
             else Nil
 
           val copyEdgeIndexedEdgesDeletes =

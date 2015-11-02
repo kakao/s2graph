@@ -3,14 +3,14 @@ package com.kakao.s2graph.core.storage.hbase
 import com.kakao.s2graph.core.mysqls.{LabelIndex, LabelMeta}
 import com.kakao.s2graph.core.storage.{GraphDeserializable, GraphSerializable}
 import com.kakao.s2graph.core.types.TargetVertexId
-import com.kakao.s2graph.core.{Edge, EdgeWithIndexInverted, QueryParam, Vertex}
+import com.kakao.s2graph.core.{Edge, SnapshotEdge, QueryParam, Vertex}
 import org.apache.hadoop.hbase.util.Bytes
 
 /**
  * Created by shon on 10/29/15.
  */
-trait SnapshotEdgeHGStorageDeserializable extends HGStorageDeserializable[EdgeWithIndexInverted] with GraphDeserializable with GraphSerializable {
-  override def fromKeyValues(queryParam: QueryParam, kvs: Seq[HKeyValue], version: String, cacheElementOpt: Option[EdgeWithIndexInverted]): EdgeWithIndexInverted = {
+trait SnapshotEdgeHGStorageDeserializable extends HGStorageDeserializable[SnapshotEdge] with GraphDeserializable with GraphSerializable {
+  override def fromKeyValues(queryParam: QueryParam, kvs: Seq[HKeyValue], version: String, cacheElementOpt: Option[SnapshotEdge]): SnapshotEdge = {
     assert(kvs.size == 1)
     val kv = kvs.head
     val schemaVer = queryParam.label.schemaVersion
@@ -47,10 +47,10 @@ trait SnapshotEdgeHGStorageDeserializable extends HGStorageDeserializable[EdgeWi
       (tgtVertexId, kvsMap, op, ts, pendingEdgeOpt)
     }
 
-    EdgeWithIndexInverted(Vertex(srcVertexId, ts), Vertex(tgtVertexId, ts), labelWithDir, op, kv.timestamp, props, pendingEdgeOpt)
+    SnapshotEdge(Vertex(srcVertexId, ts), Vertex(tgtVertexId, ts), labelWithDir, op, kv.timestamp, props, pendingEdgeOpt)
   }
 
-  def toEdge(edgeOpt: EdgeWithIndexInverted): Edge = {
+  def toEdge(edgeOpt: SnapshotEdge): Edge = {
     val e = edgeOpt
     val ts = e.props.get(LabelMeta.timeStampSeq).map(v => v.ts).getOrElse(e.version)
     Edge(e.srcVertex, e.tgtVertex, e.labelWithDir, e.op, ts, e.version, e.props, e.pendingEdgeOpt)
