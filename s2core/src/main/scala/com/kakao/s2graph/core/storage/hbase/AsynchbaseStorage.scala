@@ -64,7 +64,9 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
    * Serializer/Deserializer
    */
   def snapshotEdgeSerializer(snapshotEdge: SnapshotEdge) = new SnapshotEdgeSerializable(snapshotEdge)
+
   def indexEdgeSerializer(indexedEdge: IndexEdge) = new IndexEdgeSerializable(indexedEdge)
+
   def vertexSerializer(vertex: Vertex) = new VertexSerializable(vertex)
 
   val snapshotEdgeDeserializer = new SnapshotEdgeDeserializable
@@ -125,7 +127,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
 
       if (kvs.isEmpty) None
       else {
-        val newKVs = kvs.map(SKeyValue(_))
+        val newKVs = kvs
         Option(vertexDeserializer.fromKeyValues(queryParam, newKVs, version, None))
       }
     }
@@ -345,7 +347,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
     if (kvs.isEmpty) Seq.empty
     else {
       val first = kvs.head
-      val kv = SKeyValue(first)
+      val kv = first
       val cacheElementOpt =
         if (queryParam.isSnapshotEdge) None
         else Option(indexEdgeDeserializer.fromKeyValues(queryParam, Seq(kv), queryParam.label.schemaVersion))
@@ -371,7 +373,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
                              cacheElementOpt: Option[SnapshotEdge] = None,
                              isInnerCall: Boolean,
                              parentEdges: Seq[EdgeWithScore]): Option[Edge] = {
-    val kvs = Seq(SKeyValue(kv))
+    val kvs = Seq(kv)
     val snapshotEdge = snapshotEdgeDeserializer.fromKeyValues(param, kvs, param.label.schemaVersion, cacheElementOpt)
 
     if (isInnerCall) {
@@ -402,7 +404,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
                      cacheElementOpt: Option[IndexEdge] = None,
                      parentEdges: Seq[EdgeWithScore]): Option[Edge] = {
 
-    val kvs = Seq(SKeyValue(kv))
+    val kvs = Seq(kv)
     val edgeWithIndex = indexEdgeDeserializer.fromKeyValues(param, kvs, param.label.schemaVersion, cacheElementOpt)
     Option(indexEdgeDeserializer.toEdge(edgeWithIndex))
   }

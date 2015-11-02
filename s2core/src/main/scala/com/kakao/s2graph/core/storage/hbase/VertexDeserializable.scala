@@ -1,17 +1,19 @@
 package com.kakao.s2graph.core.storage.hbase
 
-import com.kakao.s2graph.core.storage.SKeyValue
+import com.kakao.s2graph.core.storage.CanSKeyValue
 import com.kakao.s2graph.core.types.{InnerVal, InnerValLike, VertexId}
-import com.kakao.s2graph.core.{Vertex, QueryParam}
+import com.kakao.s2graph.core.{QueryParam, Vertex}
 import org.apache.hadoop.hbase.util.Bytes
 
 import scala.collection.mutable.ListBuffer
 
 class VertexDeserializable extends HDeserializable[Vertex] {
-  def fromKeyValues(queryParam: QueryParam,
-                    kvs: Seq[SKeyValue],
-                    version: String,
-                    cacheElementOpt: Option[Vertex]): Vertex = {
+  def fromKeyValues[T: CanSKeyValue](queryParam: QueryParam,
+                                     _kvs: Seq[T],
+                                     version: String,
+                                     cacheElementOpt: Option[Vertex]): Vertex = {
+
+    val kvs = _kvs.map { kv => implicitly[CanSKeyValue[T]].toSKeyValue(kv) }
 
     val kv = kvs.head
     val (vertexId, _) = VertexId.fromBytes(kv.row, 0, kv.row.length, version)

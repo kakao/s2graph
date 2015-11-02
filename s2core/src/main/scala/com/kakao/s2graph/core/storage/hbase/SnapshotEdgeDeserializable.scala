@@ -1,18 +1,20 @@
 package com.kakao.s2graph.core.storage.hbase
 
 import com.kakao.s2graph.core.mysqls.{LabelIndex, LabelMeta}
-import com.kakao.s2graph.core.storage.{StorageDeserializable, StorageSerializable, SKeyValue}
+import com.kakao.s2graph.core.storage.{CanSKeyValue, StorageDeserializable, StorageSerializable}
 import com.kakao.s2graph.core.types.TargetVertexId
 import com.kakao.s2graph.core.{Edge, QueryParam, SnapshotEdge, Vertex}
 import org.apache.hadoop.hbase.util.Bytes
 
 class SnapshotEdgeDeserializable extends HDeserializable[SnapshotEdge] {
 
-  import StorageSerializable._
   import StorageDeserializable._
+  import StorageSerializable._
 
-  override def fromKeyValues(queryParam: QueryParam, kvs: Seq[SKeyValue], version: String, cacheElementOpt: Option[SnapshotEdge]): SnapshotEdge = {
+  override def fromKeyValues[T: CanSKeyValue](queryParam: QueryParam, _kvs: Seq[T], version: String, cacheElementOpt: Option[SnapshotEdge]): SnapshotEdge = {
+    val kvs = _kvs.map { kv => implicitly[CanSKeyValue[T]].toSKeyValue(kv) }
     assert(kvs.size == 1)
+
     val kv = kvs.head
     val schemaVer = queryParam.label.schemaVersion
     val (srcVertexId, labelWithDir, _, _, _) = cacheElementOpt.map { e =>

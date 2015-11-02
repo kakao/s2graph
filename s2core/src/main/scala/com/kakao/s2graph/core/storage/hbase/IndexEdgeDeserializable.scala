@@ -2,11 +2,12 @@ package com.kakao.s2graph.core.storage.hbase
 
 import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.mysqls.LabelMeta
-import com.kakao.s2graph.core.storage.{StorageDeserializable, SKeyValue}
+import com.kakao.s2graph.core.storage.{CanSKeyValue, StorageDeserializable, SKeyValue}
 import com.kakao.s2graph.core.types._
 import org.apache.hadoop.hbase.util.Bytes
 
 class IndexEdgeDeserializable extends HDeserializable[IndexEdge] {
+
   import StorageDeserializable._
 
   type QualifierRaw = (Array[(Byte, InnerValLike)], VertexId, Byte, Boolean, Int)
@@ -60,8 +61,11 @@ class IndexEdgeDeserializable extends HDeserializable[IndexEdge] {
   }
 
   /** version 1 and version 2 is same logic */
-  override def fromKeyValues(queryParam: QueryParam, kvs: Seq[SKeyValue], version: String, cacheElementOpt: Option[IndexEdge] = None): IndexEdge = {
-    assert(kvs.size == 1)
+  override def fromKeyValues[T: CanSKeyValue](queryParam: QueryParam, _kvs: Seq[T], version: String, cacheElementOpt: Option[IndexEdge] = None): IndexEdge = {
+    assert(_kvs.size == 1)
+
+    val kvs = _kvs.map { kv => implicitly[CanSKeyValue[T]].toSKeyValue(kv) }
+
     val kv = kvs.head
     val (srcVertexId, labelWithDir, labelIdxSeq, _, _) = cacheElementOpt.map { e =>
       (e.srcVertex.id, e.labelWithDir, e.labelIndexSeq, false, 0)
