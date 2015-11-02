@@ -5,7 +5,7 @@ import com.kakao.s2graph.core.types.{LabelWithDirection, SourceVertexId, VertexI
 import org.apache.hadoop.hbase.util.Bytes
 
 
-trait HStorageDeserializable[E] extends StorageDeserializable[E] {
+trait HDeserializable[E] extends StorageDeserializable[E] {
   import StorageDeserializable._
 
   type RowKeyRaw = (VertexId, LabelWithDirection, Byte, Boolean, Int)
@@ -22,5 +22,4 @@ trait HStorageDeserializable[E] extends StorageDeserializable[E] {
     val rowLen = srcIdLen + 4 + 1
     (srcVertexId, labelWithDir, labelIdxSeq, isInverted, rowLen)
   }
-
 }

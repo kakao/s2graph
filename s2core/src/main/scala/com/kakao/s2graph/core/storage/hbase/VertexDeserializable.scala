@@ -7,7 +7,7 @@ import org.apache.hadoop.hbase.util.Bytes
 
 import scala.collection.mutable.ListBuffer
 
-trait VertexDeserializable extends HStorageDeserializable[Vertex] {
+class VertexDeserializable extends HDeserializable[Vertex] {
   def fromKeyValues(queryParam: QueryParam,
                     kvs: Seq[SKeyValue],
                     version: String,
@@ -43,4 +43,3 @@ trait VertexDeserializable extends HStorageDeserializable[Vertex] {
   }
 }
 
-object VertexDeserializable extends VertexDeserializable

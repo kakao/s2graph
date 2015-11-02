@@ -6,7 +6,7 @@ import com.kakao.s2graph.core.types.TargetVertexId
 import com.kakao.s2graph.core.{Edge, QueryParam, SnapshotEdge, Vertex}
 import org.apache.hadoop.hbase.util.Bytes
 
-trait SnapshotEdgeDeserializable extends HStorageDeserializable[SnapshotEdge] {
+class SnapshotEdgeDeserializable extends HDeserializable[SnapshotEdge] {
 
   import StorageSerializable._
   import StorageDeserializable._
@@ -54,10 +54,8 @@ trait SnapshotEdgeDeserializable extends HStorageDeserializable[SnapshotEdge] {
   def toEdge(edgeOpt: SnapshotEdge): Edge = {
     val e = edgeOpt
     val ts = e.props.get(LabelMeta.timeStampSeq).map(v => v.ts).getOrElse(e.version)
+
     Edge(e.srcVertex, e.tgtVertex, e.labelWithDir, e.op, ts, e.version, e.props, e.pendingEdgeOpt)
   }
 }
-
-object SnapshotEdgeDeserializable extends SnapshotEdgeDeserializable
-
 

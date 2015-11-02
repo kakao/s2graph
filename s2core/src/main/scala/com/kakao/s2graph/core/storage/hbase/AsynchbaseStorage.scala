@@ -25,8 +25,8 @@ import scala.util.{Failure, Random, Success, Try}
 
 
 object AsynchbaseStorage {
-  val vertexCf = HStorageSerializable.vertexCf
-  val edgeCf = HStorageSerializable.edgeCf
+  val vertexCf = HSerializable.vertexCf
+  val edgeCf = HSerializable.edgeCf
   val emptyKVs = new util.ArrayList[KeyValue]()
   private val maxValidEdgeListSize = 10000
   private val MaxBackOff = 10
@@ -57,15 +57,19 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
   private val clientWithFlush = AsynchbaseStorage.makeClient(config, "hbase.rpcs.buffered_flush_interval" -> "0")
   private val clients = Seq(client, clientWithFlush)
 
-  private val clientFlushInterval = this.config.getInt("hbase.rpcs.buffered_flush_interval").toString().toShort
-  private val MaxRetryNum = this.config.getInt("max.retry.number")
+  private val clientFlushInterval = config.getInt("hbase.rpcs.buffered_flush_interval").toString().toShort
+  private val MaxRetryNum = config.getInt("max.retry.number")
 
-  private def snapshotEdgeSerializer(snapshotEdge: SnapshotEdge) = new SnapshotEdgeHGStorageSerializable(snapshotEdge)
-  private def indexEdgeSerializer(indexedEdge: IndexEdge) = new IndexEdgeSerializable(indexedEdge)
-  private def vertexSerializer(vertex: Vertex) = new VertexHGStorageSerializable(vertex)
-  private val snapshotEdgeDeserializer = SnapshotEdgeDeserializable
-  private val indexedEdgeDeserializer = IndexEdgeDeserializable
-  private val vertexDeserializer = VertexDeserializable
+  /**
+   * Serializer/Deserializer
+   */
+  def snapshotEdgeSerializer(snapshotEdge: SnapshotEdge) = new SnapshotEdgeSerializable(snapshotEdge)
+  def indexEdgeSerializer(indexedEdge: IndexEdge) = new IndexEdgeSerializable(indexedEdge)
+  def vertexSerializer(vertex: Vertex) = new VertexSerializable(vertex)
+
+  val snapshotEdgeDeserializer = new SnapshotEdgeDeserializable
+  val indexEdgeDeserializer = new IndexEdgeDeserializable
+  val vertexDeserializer = new VertexDeserializable
 
   private def fetchStepFuture(queryResultLsFuture: Future[Seq[QueryResult]], q: Query, stepIdx: Int): Future[Seq[QueryResult]] = {
     for {
@@ -169,13 +173,12 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
   }
 
   def mutateElements(elements: Seq[GraphElement], withWait: Boolean = false): Future[Seq[Boolean]] = {
-    val futures = elements.map { element =>
-      element match {
-        case edge: Edge => mutateEdge(edge, withWait)
-        case vertex: Vertex => mutateVertex(vertex, withWait)
-        case _ => throw new RuntimeException(s"$element is not edge/vertex")
-      }
+    val futures = elements.map {
+      case edge: Edge => mutateEdge(edge, withWait)
+      case vertex: Vertex => mutateVertex(vertex, withWait)
+      case element => throw new RuntimeException(s"$element is not edge/vertex")
     }
+
     Future.sequence(futures)
   }
 
@@ -345,7 +348,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
       val kv = SKeyValue(first)
       val cacheElementOpt =
         if (queryParam.isSnapshotEdge) None
-        else Option(indexedEdgeDeserializer.fromKeyValues(queryParam, Seq(kv), queryParam.label.schemaVersion))
+        else Option(indexEdgeDeserializer.fromKeyValues(queryParam, Seq(kv), queryParam.label.schemaVersion))
 
       for {
         kv <- kvs
@@ -400,8 +403,8 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
                      parentEdges: Seq[EdgeWithScore]): Option[Edge] = {
 
     val kvs = Seq(SKeyValue(kv))
-    val edgeWithIndex = indexedEdgeDeserializer.fromKeyValues(param, kvs, param.label.schemaVersion, cacheElementOpt)
-    Option(indexedEdgeDeserializer.toEdge(edgeWithIndex))
+    val edgeWithIndex = indexEdgeDeserializer.fromKeyValues(param, kvs, param.label.schemaVersion, cacheElementOpt)
+    Option(indexEdgeDeserializer.toEdge(edgeWithIndex))
   }
 
   private def fetchQueryParam(queryRequest: QueryRequest): Deferred[QueryResult] = {
@@ -1087,4 +1090,5 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
     val timeout = Duration((clientFlushInterval + 10) * 20, duration.MILLISECONDS)
     Await.result(deferredToFutureWithoutFallback(client.flush()), timeout)
   }
+
 }

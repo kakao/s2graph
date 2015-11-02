@@ -6,6 +6,21 @@ import com.kakao.s2graph.core.mysqls.Label
 import scala.concurrent.Future
 
 trait Storage {
+
+  // Serializer/Deserializer
+  def snapshotEdgeSerializer(snapshotEdge: SnapshotEdge): StorageSerializable[SnapshotEdge]
+
+  def indexEdgeSerializer(indexedEdge: IndexEdge): StorageSerializable[IndexEdge]
+
+  def vertexSerializer(vertex: Vertex): StorageSerializable[Vertex]
+
+  def snapshotEdgeDeserializer: StorageDeserializable[SnapshotEdge]
+
+  def indexEdgeDeserializer: StorageDeserializable[IndexEdge]
+
+  def vertexDeserializer: StorageDeserializable[Vertex]
+
+  // Interface
   def getEdges(q: Query): Future[Seq[QueryResult]]
 
   def checkEdges(params: Seq[(Vertex, Vertex, QueryParam)]): Future[Seq[QueryResult]]

@@ -6,7 +6,7 @@ import com.kakao.s2graph.core.storage.{StorageDeserializable, SKeyValue}
 import com.kakao.s2graph.core.types._
 import org.apache.hadoop.hbase.util.Bytes
 
-trait IndexEdgeDeserializable extends HStorageDeserializable[IndexEdge] {
+class IndexEdgeDeserializable extends HDeserializable[IndexEdge] {
   import StorageDeserializable._
 
   type QualifierRaw = (Array[(Byte, InnerValLike)], VertexId, Byte, Boolean, Int)
@@ -102,4 +102,3 @@ trait IndexEdgeDeserializable extends HStorageDeserializable[IndexEdge] {
   }
 }
 
-object IndexEdgeDeserializable extends IndexEdgeDeserializable

@@ -6,27 +6,28 @@ import com.kakao.s2graph.core.types.VertexId
 import com.kakao.s2graph.core.{GraphUtil, IndexEdge}
 import org.apache.hadoop.hbase.util.Bytes
 
-case class IndexEdgeSerializable(indexedEdge: IndexEdge) extends HStorageSerializable {
+case class IndexEdgeSerializable(indexEdge: IndexEdge) extends HSerializable[IndexEdge] {
+
   import StorageSerializable._
 
-  val label = indexedEdge.label
+  val label = indexEdge.label
   val table = label.hbaseTableName.getBytes()
-  val cf = HStorageSerializable.edgeCf
+  val cf = HSerializable.edgeCf
 
-  val idxPropsMap = indexedEdge.orders.toMap
-  val idxPropsBytes = propsToBytes(indexedEdge.orders)
+  val idxPropsMap = indexEdge.orders.toMap
+  val idxPropsBytes = propsToBytes(indexEdge.orders)
 
   /** version 1 and version 2 share same code for serialize row key part */
   override def toKeyValues: Seq[SKeyValue] = {
-    val srcIdBytes = VertexId.toSourceVertexId(indexedEdge.srcVertex.id).bytes
-    val labelWithDirBytes = indexedEdge.labelWithDir.bytes
-    val labelIndexSeqWithIsInvertedBytes = labelOrderSeqWithIsInverted(indexedEdge.labelIndexSeq, isInverted = false)
+    val srcIdBytes = VertexId.toSourceVertexId(indexEdge.srcVertex.id).bytes
+    val labelWithDirBytes = indexEdge.labelWithDir.bytes
+    val labelIndexSeqWithIsInvertedBytes = labelOrderSeqWithIsInverted(indexEdge.labelIndexSeq, isInverted = false)
     val row = Bytes.add(srcIdBytes, labelWithDirBytes, labelIndexSeqWithIsInvertedBytes)
 
-    val tgtIdBytes = VertexId.toTargetVertexId(indexedEdge.tgtVertex.id).bytes
+    val tgtIdBytes = VertexId.toTargetVertexId(indexEdge.tgtVertex.id).bytes
     val qualifier =
-      if (indexedEdge.op == GraphUtil.operations("incrementCount")) {
-        Bytes.add(idxPropsBytes, tgtIdBytes, Array.fill(1)(indexedEdge.op))
+      if (indexEdge.op == GraphUtil.operations("incrementCount")) {
+        Bytes.add(idxPropsBytes, tgtIdBytes, Array.fill(1)(indexEdge.op))
       } else {
         idxPropsMap.get(LabelMeta.toSeq) match {
           case None => Bytes.add(idxPropsBytes, tgtIdBytes)
@@ -34,8 +35,8 @@ case class IndexEdgeSerializable(indexedEdge: IndexEdge) extends HStorageSeriali
         }
       }
 
-    val value = propsToKeyValues(indexedEdge.metas.toSeq)
-    val kv = SKeyValue(table, row, cf, qualifier, value, indexedEdge.ts)
+    val value = propsToKeyValues(indexEdge.metas.toSeq)
+    val kv = SKeyValue(table, row, cf, qualifier, value, indexEdge.ts)
 
     Seq(kv)
   }

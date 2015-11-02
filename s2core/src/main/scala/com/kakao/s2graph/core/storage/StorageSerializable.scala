@@ -36,6 +36,6 @@ object StorageSerializable {
   }
 }
 
-trait StorageSerializable {
+trait StorageSerializable[E] {
   def toKeyValues: Seq[SKeyValue]
 }

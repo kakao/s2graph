@@ -6,12 +6,12 @@ import com.kakao.s2graph.core.storage.{StorageSerializable, SKeyValue}
 import com.kakao.s2graph.core.types.VertexId
 import org.apache.hadoop.hbase.util.Bytes
 
-class SnapshotEdgeHGStorageSerializable(snapshotEdge: SnapshotEdge) extends HStorageSerializable {
+class SnapshotEdgeSerializable(snapshotEdge: SnapshotEdge) extends HSerializable[SnapshotEdge] {
   import StorageSerializable._
 
   val label = snapshotEdge.label
   val table = label.hbaseTableName.getBytes()
-  val cf = HStorageSerializable.edgeCf
+  val cf = HSerializable.edgeCf
 
   def valueBytes() = Bytes.add(Array.fill(1)(snapshotEdge.op), propsToKeyValuesWithTs(snapshotEdge.props.toList))
 
