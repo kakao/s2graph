@@ -6,7 +6,7 @@ import java.util.ArrayList
 import com.google.common.cache.Cache
 import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.mysqls.{Label, LabelMeta}
-import com.kakao.s2graph.core.storage.Storage
+import com.kakao.s2graph.core.storage.{SKeyValue, Storage}
 import com.kakao.s2graph.core.types._
 import com.kakao.s2graph.core.utils.DeferOp._
 import com.kakao.s2graph.core.utils.logger
@@ -25,8 +25,8 @@ import scala.util.{Failure, Random, Success, Try}
 
 
 object AsynchbaseStorage {
-  val vertexCf = HGStorageSerializable.vertexCf
-  val edgeCf = HGStorageSerializable.edgeCf
+  val vertexCf = HStorageSerializable.vertexCf
+  val edgeCf = HStorageSerializable.edgeCf
   val emptyKVs = new util.ArrayList[KeyValue]()
   private val maxValidEdgeListSize = 10000
   private val MaxBackOff = 10
@@ -61,11 +61,11 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
   private val MaxRetryNum = this.config.getInt("max.retry.number")
 
   private def snapshotEdgeSerializer(snapshotEdge: SnapshotEdge) = new SnapshotEdgeHGStorageSerializable(snapshotEdge)
-  private def indexEdgeSerializer(indexedEdge: IndexEdge) = new IndexedEdgeHGStorageSerializable(indexedEdge)
+  private def indexEdgeSerializer(indexedEdge: IndexEdge) = new IndexEdgeSerializable(indexedEdge)
   private def vertexSerializer(vertex: Vertex) = new VertexHGStorageSerializable(vertex)
-  private val snapshotEdgeDeserializer = SnapshotEdgeHGStorageDeserializable
-  private val indexedEdgeDeserializer = IndexedEdgeHGStorageDeserializable
-  private val vertexDeserializer = VertexHGStorageDeserializable
+  private val snapshotEdgeDeserializer = SnapshotEdgeDeserializable
+  private val indexedEdgeDeserializer = IndexEdgeDeserializable
+  private val vertexDeserializer = VertexDeserializable
 
   private def fetchStepFuture(queryResultLsFuture: Future[Seq[QueryResult]], q: Query, stepIdx: Int): Future[Seq[QueryResult]] = {
     for {
@@ -76,13 +76,13 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
     }
   }
 
-  private def put(kvs: Seq[HKeyValue]): Seq[HBaseRpc] =
+  private def put(kvs: Seq[SKeyValue]): Seq[HBaseRpc] =
     kvs.map { kv => new PutRequest(kv.table, kv.row, kv.cf, kv.qualifier, kv.value, kv.timestamp) }
 
-  private def increment(kvs: Seq[HKeyValue]): Seq[HBaseRpc] =
+  private def increment(kvs: Seq[SKeyValue]): Seq[HBaseRpc] =
     kvs.map { kv => new AtomicIncrementRequest(kv.table, kv.row, kv.cf, kv.qualifier, Bytes.toLong(kv.value)) }
 
-  private def delete(kvs: Seq[HKeyValue]): Seq[HBaseRpc] =
+  private def delete(kvs: Seq[SKeyValue]): Seq[HBaseRpc] =
     kvs.map { kv =>
       if (kv.qualifier == null) new DeleteRequest(kv.table, kv.row, kv.cf, kv.timestamp)
       else new DeleteRequest(kv.table, kv.row, kv.cf, kv.qualifier, kv.timestamp)
@@ -121,7 +121,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
 
       if (kvs.isEmpty) None
       else {
-        val newKVs = kvs.map(HKeyValue(_))
+        val newKVs = kvs.map(SKeyValue(_))
         Option(vertexDeserializer.fromKeyValues(queryParam, newKVs, version, None))
       }
     }
@@ -342,7 +342,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
     if (kvs.isEmpty) Seq.empty
     else {
       val first = kvs.head
-      val kv = HKeyValue(first)
+      val kv = SKeyValue(first)
       val cacheElementOpt =
         if (queryParam.isSnapshotEdge) None
         else Option(indexedEdgeDeserializer.fromKeyValues(queryParam, Seq(kv), queryParam.label.schemaVersion))
@@ -368,7 +368,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
                              cacheElementOpt: Option[SnapshotEdge] = None,
                              isInnerCall: Boolean,
                              parentEdges: Seq[EdgeWithScore]): Option[Edge] = {
-    val kvs = Seq(HKeyValue(kv))
+    val kvs = Seq(SKeyValue(kv))
     val snapshotEdge = snapshotEdgeDeserializer.fromKeyValues(param, kvs, param.label.schemaVersion, cacheElementOpt)
 
     if (isInnerCall) {
@@ -399,7 +399,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
                      cacheElementOpt: Option[IndexEdge] = None,
                      parentEdges: Seq[EdgeWithScore]): Option[Edge] = {
 
-    val kvs = Seq(HKeyValue(kv))
+    val kvs = Seq(SKeyValue(kv))
     val edgeWithIndex = indexedEdgeDeserializer.fromKeyValues(param, kvs, param.label.schemaVersion, cacheElementOpt)
     Option(indexedEdgeDeserializer.toEdge(edgeWithIndex))
   }

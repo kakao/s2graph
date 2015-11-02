@@ -1,16 +1,17 @@
 package com.kakao.s2graph.core.storage.hbase
 
 import com.kakao.s2graph.core.mysqls.{LabelIndex, LabelMeta}
-import com.kakao.s2graph.core.storage.{GraphDeserializable, GraphSerializable}
+import com.kakao.s2graph.core.storage.{StorageDeserializable, StorageSerializable, SKeyValue}
 import com.kakao.s2graph.core.types.TargetVertexId
-import com.kakao.s2graph.core.{Edge, SnapshotEdge, QueryParam, Vertex}
+import com.kakao.s2graph.core.{Edge, QueryParam, SnapshotEdge, Vertex}
 import org.apache.hadoop.hbase.util.Bytes
 
-/**
- * Created by shon on 10/29/15.
- */
-trait SnapshotEdgeHGStorageDeserializable extends HGStorageDeserializable[SnapshotEdge] with GraphDeserializable with GraphSerializable {
-  override def fromKeyValues(queryParam: QueryParam, kvs: Seq[HKeyValue], version: String, cacheElementOpt: Option[SnapshotEdge]): SnapshotEdge = {
+trait SnapshotEdgeDeserializable extends HStorageDeserializable[SnapshotEdge] {
+
+  import StorageSerializable._
+  import StorageDeserializable._
+
+  override def fromKeyValues(queryParam: QueryParam, kvs: Seq[SKeyValue], version: String, cacheElementOpt: Option[SnapshotEdge]): SnapshotEdge = {
     assert(kvs.size == 1)
     val kv = kvs.head
     val schemaVer = queryParam.label.schemaVersion
@@ -57,6 +58,6 @@ trait SnapshotEdgeHGStorageDeserializable extends HGStorageDeserializable[Snapsh
   }
 }
 
-object SnapshotEdgeHGStorageDeserializable extends SnapshotEdgeHGStorageDeserializable
+object SnapshotEdgeDeserializable extends SnapshotEdgeDeserializable
 
 

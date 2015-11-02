@@ -1,17 +1,15 @@
 package com.kakao.s2graph.core.storage.hbase
 
+import com.kakao.s2graph.core.storage.SKeyValue
 import com.kakao.s2graph.core.types.{InnerVal, InnerValLike, VertexId}
 import com.kakao.s2graph.core.{Vertex, QueryParam}
 import org.apache.hadoop.hbase.util.Bytes
 
 import scala.collection.mutable.ListBuffer
 
-/**
- * Created by shon on 10/29/15.
- */
-trait VertexHGStorageDeserializable extends HGStorageDeserializable[Vertex] {
+trait VertexDeserializable extends HStorageDeserializable[Vertex] {
   def fromKeyValues(queryParam: QueryParam,
-                    kvs: Seq[HKeyValue],
+                    kvs: Seq[SKeyValue],
                     version: String,
                     cacheElementOpt: Option[Vertex]): Vertex = {
 
@@ -45,5 +43,4 @@ trait VertexHGStorageDeserializable extends HGStorageDeserializable[Vertex] {
   }
 }
 
-
-object VertexHGStorageDeserializable extends VertexHGStorageDeserializable
+object VertexDeserializable extends VertexDeserializable

@@ -2,18 +2,17 @@ package com.kakao.s2graph.core.storage.hbase
 
 import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.mysqls.LabelMeta
-import com.kakao.s2graph.core.storage.{GraphDeserializable}
+import com.kakao.s2graph.core.storage.{StorageDeserializable, SKeyValue}
 import com.kakao.s2graph.core.types._
 import org.apache.hadoop.hbase.util.Bytes
 
-/**
- * Created by shon on 10/29/15.
- */
-trait IndexedEdgeHGStorageDeserializable extends HGStorageDeserializable[IndexEdge] with GraphDeserializable {
+trait IndexEdgeDeserializable extends HStorageDeserializable[IndexEdge] {
+  import StorageDeserializable._
+
   type QualifierRaw = (Array[(Byte, InnerValLike)], VertexId, Byte, Boolean, Int)
   type ValueRaw = (Array[(Byte, InnerValLike)], Int)
 
-  private def parseDegreeQualifier(kv: HKeyValue, version: String): QualifierRaw = {
+  private def parseDegreeQualifier(kv: SKeyValue, version: String): QualifierRaw = {
     val degree = Bytes.toLong(kv.value)
     val ts = kv.timestamp
     val idxPropsRaw = Array(LabelMeta.degreeSeq -> InnerVal.withLong(degree, version))
@@ -21,7 +20,7 @@ trait IndexedEdgeHGStorageDeserializable extends HGStorageDeserializable[IndexEd
     (idxPropsRaw, tgtVertexIdRaw, GraphUtil.operations("insert"), false, 0)
   }
 
-  private def parseQualifier(kv: HKeyValue, version: String): QualifierRaw = {
+  private def parseQualifier(kv: SKeyValue, version: String): QualifierRaw = {
     var qualifierLen = 0
     var pos = 0
     val (idxPropsRaw, idxPropsLen, tgtVertexIdRaw, tgtVertexIdLen) = {
@@ -45,12 +44,12 @@ trait IndexedEdgeHGStorageDeserializable extends HGStorageDeserializable[IndexEd
     (idxPropsRaw, tgtVertexIdRaw, op, tgtVertexIdLen != 0, qualifierLen)
   }
 
-  private def parseValue(kv: HKeyValue, version: String): ValueRaw = {
+  private def parseValue(kv: SKeyValue, version: String): ValueRaw = {
     val (props, endAt) = bytesToKeyValues(kv.value, 0, kv.value.length, version)
     (props, endAt)
   }
 
-  private def parseDegreeValue(kv: HKeyValue, version: String): ValueRaw = {
+  private def parseDegreeValue(kv: SKeyValue, version: String): ValueRaw = {
     (Array.empty[(Byte, InnerValLike)], 0)
   }
 
@@ -61,7 +60,7 @@ trait IndexedEdgeHGStorageDeserializable extends HGStorageDeserializable[IndexEd
   }
 
   /** version 1 and version 2 is same logic */
-  override def fromKeyValues(queryParam: QueryParam, kvs: Seq[HKeyValue], version: String, cacheElementOpt: Option[IndexEdge] = None): IndexEdge = {
+  override def fromKeyValues(queryParam: QueryParam, kvs: Seq[SKeyValue], version: String, cacheElementOpt: Option[IndexEdge] = None): IndexEdge = {
     assert(kvs.size == 1)
     val kv = kvs.head
     val (srcVertexId, labelWithDir, labelIdxSeq, _, _) = cacheElementOpt.map { e =>
@@ -103,4 +102,4 @@ trait IndexedEdgeHGStorageDeserializable extends HGStorageDeserializable[IndexEd
   }
 }
 
-object IndexedEdgeHGStorageDeserializable extends IndexedEdgeHGStorageDeserializable
+object IndexEdgeDeserializable extends IndexEdgeDeserializable
