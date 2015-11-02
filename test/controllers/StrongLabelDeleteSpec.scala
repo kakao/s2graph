@@ -171,7 +171,7 @@ class StrongLabelDeleteSpec extends SpecCommon {
         EdgeController.mutateAndPublish(bulkEdge, withWait = true)
       }
 
-      Await.result(Future.sequence(futures), Duration(2, TimeUnit.MINUTES))
+      Await.result(Future.sequence(futures), Duration(20, TimeUnit.MINUTES))
 
 
       val expectedDegree = lastOps.count(op => op != "delete" && op != "none")
@@ -228,9 +228,10 @@ class StrongLabelDeleteSpec extends SpecCommon {
         val futures = allRequests.grouped(numOfConcurrentBatch).map { requests =>
           EdgeController.mutateAndPublish(requests.mkString("\n"), withWait = true)
         }
-        Await.result(Future.sequence(futures), Duration(10, TimeUnit.MINUTES))
+        Await.result(Future.sequence(futures), Duration(20, TimeUnit.MINUTES))
 
         Thread.sleep(asyncFlushInterval * 10)
+
         val expectedDegree = insertRequests.size - deleteRequests.size
         val queryJson = query(id = src)
         val result = getEdges(queryJson)

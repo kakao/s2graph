@@ -184,7 +184,6 @@ object Graph {
         val shouldBeExcluded = excludeLabelWithDirSet.contains(includeExcludeKey)
         val shouldBeIncluded = includeLabelWithDirSet.contains(includeExcludeKey)
 
-
         queryResultWithFilter(queryResult).foreach { case (edge, score) =>
           if (queryResult.queryParam.transformer.isDefault) {
             val convertedEdge = edge
@@ -309,7 +308,7 @@ class Graph(_config: Config)(implicit ex: ExecutionContext) {
   Model(config)
 
   // TODO: Make storage client by config param
-  val client: Storage = new AsynchbaseStorage(config, cache, vertexCache)(ex)
+  val storage: Storage = new AsynchbaseStorage(config, cache, vertexCache)(ex)
 
   for {
     entry <- config.entrySet() if DefaultConfigs.contains(entry.getKey)
@@ -317,24 +316,24 @@ class Graph(_config: Config)(implicit ex: ExecutionContext) {
   } logger.info(s"[Initialized]: $k, ${this.config.getAnyRef(k)}")
 
   /** select */
-  def getEdges(q: Query): Future[Seq[QueryResult]] = client.getEdges(q)
+  def checkEdges(params: Seq[(Vertex, Vertex, QueryParam)]): Future[Seq[QueryResult]] = storage.checkEdges(params)
 
-  def checkEdges(params: Seq[(Vertex, Vertex, QueryParam)]): Future[Seq[QueryResult]] = client.checkEdges(params)
+  def getEdges(q: Query): Future[Seq[QueryResult]] = storage.getEdges(q)
 
-  def getVertices(vertices: Seq[Vertex]): Future[Seq[Vertex]] = client.getVertices(vertices)
+  def getVertices(vertices: Seq[Vertex]): Future[Seq[Vertex]] = storage.getVertices(vertices)
 
   /** write */
   def deleteAllAdjacentEdges(srcVertices: List[Vertex], labels: Seq[Label], dir: Int, ts: Option[Long] = None, walTopic: String): Future[Boolean] =
-    client.deleteAllAdjacentEdges(srcVertices, labels, dir, ts, walTopic)
+    storage.deleteAllAdjacentEdges(srcVertices, labels, dir, ts, walTopic)
 
   def mutateElements(elements: Seq[GraphElement], withWait: Boolean = false): Future[Seq[Boolean]] =
-    client.mutateElements(elements, withWait)
+    storage.mutateElements(elements, withWait)
 
-  def mutateEdges(edges: Seq[Edge], withWait: Boolean = false): Future[Seq[Boolean]] = client.mutateEdges(edges, withWait)
+  def mutateEdges(edges: Seq[Edge], withWait: Boolean = false): Future[Seq[Boolean]] = storage.mutateEdges(edges, withWait)
 
-  def mutateVertices(vertices: Seq[Vertex], withWait: Boolean = false): Future[Seq[Boolean]] = client.mutateVertices(vertices, withWait)
+  def mutateVertices(vertices: Seq[Vertex], withWait: Boolean = false): Future[Seq[Boolean]] = storage.mutateVertices(vertices, withWait)
 
-  def incrementCounts(edges: Seq[Edge]): Future[Seq[(Boolean, Long)]] = client.incrementCounts(edges)
+  def incrementCounts(edges: Seq[Edge]): Future[Seq[(Boolean, Long)]] = storage.incrementCounts(edges)
 
-  def shutdown(): Unit = client.flush()
+  def shutdown(): Unit = storage.flush()
 }

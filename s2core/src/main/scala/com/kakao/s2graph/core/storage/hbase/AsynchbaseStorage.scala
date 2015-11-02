@@ -23,26 +23,14 @@ import scala.concurrent.{Await, ExecutionContext, Future, duration}
 import scala.util.hashing.MurmurHash3
 import scala.util.{Failure, Random, Success, Try}
 
-class AsynchbaseStorage(config: Config,
-                        cache: Cache[Integer, Seq[QueryResult]],
-                        vertexCache: Cache[Integer, Option[Vertex]])
+class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]], vertexCache: Cache[Integer, Option[Vertex]])
                        (implicit ec: ExecutionContext) extends Storage {
 
   private val emptyKVs = new util.ArrayList[KeyValue]()
+
   val vertexCf = HGStorageSerializable.vertexCf
   val edgeCf = HGStorageSerializable.edgeCf
 
-  private def put(kvs: Seq[HKeyValue]): Seq[HBaseRpc] =
-    kvs.map { kv => new PutRequest(kv.table, kv.row, kv.cf, kv.qualifier, kv.value, kv.timestamp) }
-
-  private def increment(kvs: Seq[HKeyValue]): Seq[HBaseRpc] =
-    kvs.map { kv => new AtomicIncrementRequest(kv.table, kv.row, kv.cf, kv.qualifier, Bytes.toLong(kv.value)) }
-
-  private def delete(kvs: Seq[HKeyValue]): Seq[HBaseRpc] =
-    kvs.map { kv =>
-      if (kv.qualifier == null) new DeleteRequest(kv.table, kv.row, kv.cf, kv.timestamp)
-      else new DeleteRequest(kv.table, kv.row, kv.cf, kv.qualifier, kv.timestamp)
-    }
 
   private def makeClient(overrideKv: (String, String)*) = {
     val asyncConfig: org.hbase.async.Config = new org.hbase.async.Config()
@@ -62,7 +50,9 @@ class AsynchbaseStorage(config: Config,
   logger.info(s"Asynchbase: ${client.getConfig.dumpConfiguration()}")
 
   private val clientWithFlush = makeClient("hbase.rpcs.buffered_flush_interval" -> "0")
-  logger.info(s"AsynchbaseFlush: ${client.getConfig.dumpConfiguration()}")
+  logger.info(s"AsynchbaseFlush: ${clientWithFlush.getConfig.dumpConfiguration()}")
+
+  private val clients = Seq(client, clientWithFlush)
 
   private val maxValidEdgeListSize = 10000
   private val MaxBackOff = 10
@@ -72,16 +62,13 @@ class AsynchbaseStorage(config: Config,
 
   private def snapshotEdgeSerializer(snapshotEdge: SnapshotEdge) = new SnapshotEdgeHGStorageSerializable(snapshotEdge)
 
-  private def indexedEdgeSerializer(indexedEdge: IndexEdge) = new IndexedEdgeHGStorageSerializable(indexedEdge)
+  private def indexEdgeSerializer(indexedEdge: IndexEdge) = new IndexedEdgeHGStorageSerializable(indexedEdge)
 
   private def vertexSerializer(vertex: Vertex) = new VertexHGStorageSerializable(vertex)
 
   private val snapshotEdgeDeserializer = SnapshotEdgeHGStorageDeserializable
   private val indexedEdgeDeserializer = IndexedEdgeHGStorageDeserializable
   private val vertexDeserializer = VertexHGStorageDeserializable
-
-  def flush: Unit =
-    Await.result(deferredToFutureWithoutFallback(client.flush), Duration((clientFlushInterval + 10) * 20, duration.MILLISECONDS))
 
   /** public methods */
   private def fetchStepFuture(queryResultLsFuture: Future[Seq[QueryResult]], q: Query, stepIdx: Int): Future[Seq[QueryResult]] = {
@@ -92,6 +79,17 @@ class AsynchbaseStorage(config: Config,
       ret
     }
   }
+  private def put(kvs: Seq[HKeyValue]): Seq[HBaseRpc] =
+    kvs.map { kv => new PutRequest(kv.table, kv.row, kv.cf, kv.qualifier, kv.value, kv.timestamp) }
+
+  private def increment(kvs: Seq[HKeyValue]): Seq[HBaseRpc] =
+    kvs.map { kv => new AtomicIncrementRequest(kv.table, kv.row, kv.cf, kv.qualifier, Bytes.toLong(kv.value)) }
+
+  private def delete(kvs: Seq[HKeyValue]): Seq[HBaseRpc] =
+    kvs.map { kv =>
+      if (kv.qualifier == null) new DeleteRequest(kv.table, kv.row, kv.cf, kv.timestamp)
+      else new DeleteRequest(kv.table, kv.row, kv.cf, kv.qualifier, kv.timestamp)
+    }
 
   def getEdges(q: Query): Future[Seq[QueryResult]] = {
     Try {
@@ -290,7 +288,7 @@ class AsynchbaseStorage(config: Config,
       val indexedEdgeOpt = edge.edgesWithIndex.find(e => e.labelIndexSeq == queryParam.labelOrderSeq)
       assert(indexedEdgeOpt.isDefined)
       val indexedEdge = indexedEdgeOpt.get
-      val kv = indexedEdgeSerializer(indexedEdge).toKeyValues.head
+      val kv = indexEdgeSerializer(indexedEdge).toKeyValues.head
       val table = label.hbaseTableName.getBytes
       //kv.table //
       val rowKey = kv.row // indexedEdge.rowKey.bytes
@@ -307,11 +305,11 @@ class AsynchbaseStorage(config: Config,
     get.setMinTimestamp(minTs)
     get.setMaxTimestamp(maxTs)
     get.setTimeout(queryParam.rpcTimeoutInMillis)
+
     if (queryParam.columnRangeFilter != null) get.setFilter(queryParam.columnRangeFilter)
 
     get
   }
-
 
   private def fetchhQueryParamWithCache(queryRequest: QueryRequest): Deferred[QueryResult] = {
     val queryParam = queryRequest.queryParam
@@ -537,7 +535,7 @@ class AsynchbaseStorage(config: Config,
 
   /** EdgeWithIndex */
   private def buildIncrementsAsync(indexedEdge: IndexEdge, amount: Long = 1L): List[HBaseRpc] = {
-    indexedEdgeSerializer(indexedEdge).toKeyValues.headOption match {
+    indexEdgeSerializer(indexedEdge).toKeyValues.headOption match {
       case None => Nil
       case Some(kv) =>
         val copiedKV = kv.copy(qualifier = Array.empty[Byte], value = Bytes.toBytes(amount))
@@ -546,7 +544,7 @@ class AsynchbaseStorage(config: Config,
   }
 
   private def buildIncrementsCountAsync(indexedEdge: IndexEdge, amount: Long = 1L): List[HBaseRpc] = {
-    indexedEdgeSerializer(indexedEdge).toKeyValues.headOption match {
+    indexEdgeSerializer(indexedEdge).toKeyValues.headOption match {
       case None => Nil
       case Some(kv) =>
         val copiedKV = kv.copy(value = Bytes.toBytes(amount))
@@ -555,11 +553,11 @@ class AsynchbaseStorage(config: Config,
   }
 
   private def buildDeletesAsync(indexedEdge: IndexEdge): List[HBaseRpc] = {
-    delete(indexedEdgeSerializer(indexedEdge).toKeyValues).toList
+    delete(indexEdgeSerializer(indexedEdge).toKeyValues).toList
   }
 
   private def buildPutsAsync(indexedEdge: IndexEdge): List[HBaseRpc] = {
-    put(indexedEdgeSerializer(indexedEdge).toKeyValues).toList
+    put(indexEdgeSerializer(indexedEdge).toKeyValues).toList
   }
 
   /** EdgeWithIndexInverted  */
@@ -1103,5 +1101,10 @@ class AsynchbaseStorage(config: Config,
         else Future.successful(allSuccess)
       }
     }
+  }
+
+  def flush(): Unit = clients.foreach { client =>
+    val timeout = Duration((clientFlushInterval + 10) * 20, duration.MILLISECONDS)
+    Await.result(deferredToFutureWithoutFallback(client.flush()), timeout)
   }
 }

@@ -1,4 +1,4 @@
-name := "s2graph"
+name := "s2graph-rest"
 
 lazy val commonSettings = Seq(
   organization := "com.kakao.s2graph",
