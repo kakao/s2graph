@@ -23,16 +23,15 @@ import scala.concurrent.{Await, ExecutionContext, Future, duration}
 import scala.util.hashing.MurmurHash3
 import scala.util.{Failure, Random, Success, Try}
 
-class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]], vertexCache: Cache[Integer, Option[Vertex]])
-                       (implicit ec: ExecutionContext) extends Storage {
 
-  private val emptyKVs = new util.ArrayList[KeyValue]()
-
+object AsynchbaseStorage {
   val vertexCf = HGStorageSerializable.vertexCf
   val edgeCf = HGStorageSerializable.edgeCf
+  val emptyKVs = new util.ArrayList[KeyValue]()
+  private val maxValidEdgeListSize = 10000
+  private val MaxBackOff = 10
 
-
-  private def makeClient(overrideKv: (String, String)*) = {
+  def makeClient(config: Config, overrideKv: (String, String)*) = {
     val asyncConfig: org.hbase.async.Config = new org.hbase.async.Config()
 
     for (entry <- config.entrySet() if entry.getKey.contains("hbase")) {
@@ -43,34 +42,31 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
       asyncConfig.overrideConfig(k, v)
     }
 
-    new HBaseClient(asyncConfig)
+    val client = new HBaseClient(asyncConfig)
+    logger.info(s"Asynchbase: ${client.getConfig.dumpConfiguration()}")
+    client
   }
+}
 
-  private val client = makeClient()
-  logger.info(s"Asynchbase: ${client.getConfig.dumpConfiguration()}")
+class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]], vertexCache: Cache[Integer, Option[Vertex]])
+                       (implicit ec: ExecutionContext) extends Storage {
 
-  private val clientWithFlush = makeClient("hbase.rpcs.buffered_flush_interval" -> "0")
-  logger.info(s"AsynchbaseFlush: ${clientWithFlush.getConfig.dumpConfiguration()}")
+  import AsynchbaseStorage._
 
+  private val client = AsynchbaseStorage.makeClient(config)
+  private val clientWithFlush = AsynchbaseStorage.makeClient(config, "hbase.rpcs.buffered_flush_interval" -> "0")
   private val clients = Seq(client, clientWithFlush)
-
-  private val maxValidEdgeListSize = 10000
-  private val MaxBackOff = 10
 
   private val clientFlushInterval = this.config.getInt("hbase.rpcs.buffered_flush_interval").toString().toShort
   private val MaxRetryNum = this.config.getInt("max.retry.number")
 
   private def snapshotEdgeSerializer(snapshotEdge: SnapshotEdge) = new SnapshotEdgeHGStorageSerializable(snapshotEdge)
-
   private def indexEdgeSerializer(indexedEdge: IndexEdge) = new IndexedEdgeHGStorageSerializable(indexedEdge)
-
   private def vertexSerializer(vertex: Vertex) = new VertexHGStorageSerializable(vertex)
-
   private val snapshotEdgeDeserializer = SnapshotEdgeHGStorageDeserializable
   private val indexedEdgeDeserializer = IndexedEdgeHGStorageDeserializable
   private val vertexDeserializer = VertexHGStorageDeserializable
 
-  /** public methods */
   private def fetchStepFuture(queryResultLsFuture: Future[Seq[QueryResult]], q: Query, stepIdx: Int): Future[Seq[QueryResult]] = {
     for {
       queryResultLs <- queryResultLsFuture
@@ -79,6 +75,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
       ret
     }
   }
+
   private def put(kvs: Seq[HKeyValue]): Seq[HBaseRpc] =
     kvs.map { kv => new PutRequest(kv.table, kv.row, kv.cf, kv.qualifier, kv.value, kv.timestamp) }
 
@@ -250,7 +247,6 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
   private def getEdge(srcVertex: Vertex, tgtVertex: Vertex, queryParam: QueryParam, isInnerCall: Boolean): Future[QueryResult] = {
     //TODO:
     val _queryParam = queryParam.tgtVertexInnerIdOpt(Option(tgtVertex.innerId))
-    //    val invertedEdge = Edge(srcVertex, tgtVertex, _queryParam.labelWithDir).toInvertedEdgeHashLike
     val q = Query.toQuery(Seq(srcVertex), _queryParam)
     val queryRequest = QueryRequest(q, 0, srcVertex, _queryParam, 1.0, Option(tgtVertex), isInnerCall = true)
     val fallback = QueryResult(q, 0, queryParam)
@@ -287,11 +283,11 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
     } else {
       val indexedEdgeOpt = edge.edgesWithIndex.find(e => e.labelIndexSeq == queryParam.labelOrderSeq)
       assert(indexedEdgeOpt.isDefined)
+
       val indexedEdge = indexedEdgeOpt.get
       val kv = indexEdgeSerializer(indexedEdge).toKeyValues.head
       val table = label.hbaseTableName.getBytes
-      //kv.table //
-      val rowKey = kv.row // indexedEdge.rowKey.bytes
+      val rowKey = kv.row
       val cf = edgeCf
       new GetRequest(table, rowKey, cf)
     }
@@ -326,21 +322,15 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
       if (cache.asMap().containsKey(cacheKey)) {
         val cachedVal = cache.asMap().get(cacheKey)
         if (cachedVal != null && cachedVal.nonEmpty && queryParam.timestamp - cachedVal.head.timestamp < cacheTTL) {
-          // val elapsedTime = queryParam.timestamp - cachedVal.timestamp
-          //          logger.debug(s"cacheHitAndValid: $cacheKey, $cacheTTL, $elapsedTime")
           Deferred.fromResult(cachedVal.head)
         }
         else {
-          // cache.asMap().remove(cacheKey)
-          //          logger.debug(s"cacheHitInvalid(invalidated): $cacheKey, $cacheTTL")
           fetchQueryParam(queryRequest).addBoth(queryResultCallback(cacheKey))
         }
       } else {
-        //        logger.debug(s"cacheMiss: $cacheKey")
         fetchQueryParam(queryRequest).addBoth(queryResultCallback(cacheKey))
       }
     } else {
-      //      logger.debug(s"cacheMiss(no cacheTTL in QueryParam): $cacheKey")
       fetchQueryParam(queryRequest).addBoth(queryResultCallback(cacheKey))
     }
   }
@@ -378,7 +368,6 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
                              cacheElementOpt: Option[SnapshotEdge] = None,
                              isInnerCall: Boolean,
                              parentEdges: Seq[EdgeWithScore]): Option[Edge] = {
-    //    logger.debug(s"$param -> $kv")
     val kvs = Seq(HKeyValue(kv))
     val snapshotEdge = snapshotEdgeDeserializer.fromKeyValues(param, kvs, param.label.schemaVersion, cacheElementOpt)
 
@@ -409,11 +398,10 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
   private def toEdge(kv: KeyValue, param: QueryParam,
                      cacheElementOpt: Option[IndexEdge] = None,
                      parentEdges: Seq[EdgeWithScore]): Option[Edge] = {
-    //    logger.debug(s"$param -> $kv")
+
     val kvs = Seq(HKeyValue(kv))
     val edgeWithIndex = indexedEdgeDeserializer.fromKeyValues(param, kvs, param.label.schemaVersion, cacheElementOpt)
     Option(indexedEdgeDeserializer.toEdge(edgeWithIndex))
-    //    None
   }
 
   private def fetchQueryParam(queryRequest: QueryRequest): Deferred[QueryResult] = {
@@ -444,12 +432,6 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
     Deferred.group(defers)
   }
 
-  /** end of public methods */
-
-
-  /** private methods */
-
-
   private def fetchStepWithFilter(queryResultsLs: Seq[QueryResult],
                                   q: Query,
                                   stepIdx: Int): Future[Seq[QueryResult]] = {
@@ -465,11 +447,9 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
     //TODO:
     val groupedBy = queryResultsLs.flatMap { queryResult =>
       queryResult.edgeWithScoreLs.map { case (edge, score) =>
-        edge.tgtVertex ->(edge, score)
+        edge.tgtVertex -> (edge -> score)
       }
-    }.groupBy { case (vertex, (edge, score)) =>
-      vertex
-    }
+    }.groupBy { case (vertex, (edge, score)) => vertex }
 
     //    logger.debug(s"groupedBy: $groupedBy")
     val groupedByFiltered = for {
@@ -1071,7 +1051,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
           }.getOrElse(Nil)
           writeAsyncWithWaitRetry(queryParam.label.hbaseZkAddr, Seq(incrs), 0).map { rets =>
             if (!rets.forall(identity)) logger.error(s"decrement for deleteAll failed. $incrs")
-            else logger.debug(s"decrement for deleteAll successs. $incrs")
+            else logger.debug(s"decrement for deleteAll success. $incrs")
             rets
           }
         }

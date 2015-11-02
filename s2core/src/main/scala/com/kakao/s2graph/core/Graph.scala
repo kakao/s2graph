@@ -1,7 +1,6 @@
 package com.kakao.s2graph.core
 
 import java.util
-import java.util.ArrayList
 import java.util.concurrent.ConcurrentHashMap
 
 import com.google.common.cache.CacheBuilder
@@ -147,7 +146,7 @@ object Graph {
     else queryResult.edgeWithScoreLs.withFilter(edgeWithScore => whereFilter.filter(edgeWithScore._1))
   }
 
-  def filterEdges(queryResultLsFuture: Future[ArrayList[QueryResult]],
+  def filterEdges(queryResultLsFuture: Future[util.ArrayList[QueryResult]],
                   q: Query,
                   stepIdx: Int,
                   alreadyVisited: Map[(LabelWithDirection, Vertex), Boolean] = Map.empty[(LabelWithDirection, Vertex), Boolean])
@@ -297,10 +296,7 @@ object Graph {
 }
 
 class Graph(_config: Config)(implicit ex: ExecutionContext) {
-
-  import Graph._
-
-  val config = _config.withFallback(DefaultConfig)
+  val config = _config.withFallback(Graph.DefaultConfig)
   val cacheSize = config.getInt("cache.max.size")
   val cache = CacheBuilder.newBuilder().maximumSize(cacheSize).build[java.lang.Integer, Seq[QueryResult]]()
   val vertexCache = CacheBuilder.newBuilder().maximumSize(cacheSize).build[java.lang.Integer, Option[Vertex]]()
@@ -311,7 +307,7 @@ class Graph(_config: Config)(implicit ex: ExecutionContext) {
   val storage: Storage = new AsynchbaseStorage(config, cache, vertexCache)(ex)
 
   for {
-    entry <- config.entrySet() if DefaultConfigs.contains(entry.getKey)
+    entry <- config.entrySet() if Graph.DefaultConfigs.contains(entry.getKey)
     (k, v) = (entry.getKey, entry.getValue)
   } logger.info(s"[Initialized]: $k, ${this.config.getAnyRef(k)}")
 
