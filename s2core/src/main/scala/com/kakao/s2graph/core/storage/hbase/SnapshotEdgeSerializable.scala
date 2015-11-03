@@ -1,10 +1,14 @@
 package com.kakao.s2graph.core.storage.hbase
 
+import java.util.UUID
+
 import com.kakao.s2graph.core.SnapshotEdge
 import com.kakao.s2graph.core.mysqls.LabelIndex
 import com.kakao.s2graph.core.storage.{StorageSerializable, SKeyValue}
 import com.kakao.s2graph.core.types.VertexId
 import org.apache.hadoop.hbase.util.Bytes
+
+import scala.util.Random
 
 class SnapshotEdgeSerializable(snapshotEdge: SnapshotEdge) extends HSerializable[SnapshotEdge] {
   import StorageSerializable._
@@ -31,7 +35,8 @@ class SnapshotEdgeSerializable(snapshotEdge: SnapshotEdge) extends HSerializable
         val opBytes = Array.fill(1)(snapshotEdge.op)
         val versionBytes = Bytes.toBytes(snapshotEdge.version)
         val propsBytes = propsToKeyValuesWithTs(pendingEdge.propsWithTs.toSeq)
-        val dummyBytes = Bytes.toBytes(System.nanoTime())
+        val dummyBytes = Bytes.toBytes(Random.nextLong())
+//          Bytes.toBytes(System.nanoTime())
         val pendingEdgeValueBytes = valueBytes()
 
         Bytes.add(Bytes.add(pendingEdgeValueBytes, opBytes, versionBytes),

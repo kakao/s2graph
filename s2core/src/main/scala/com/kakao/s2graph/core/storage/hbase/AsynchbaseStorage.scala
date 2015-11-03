@@ -261,16 +261,18 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
 
   private def buildRequest(queryRequest: QueryRequest): GetRequest = {
     val srcVertex = queryRequest.vertex
-    val tgtVertexOpt = queryRequest.tgtVertexOpt
+//    val tgtVertexOpt = queryRequest.tgtVertexOpt
+
     val queryParam = queryRequest.queryParam
+    val tgtVertexIdOpt = queryParam.tgtVertexInnerIdOpt
     val label = queryParam.label
     val labelWithDir = queryParam.labelWithDir
     val (srcColumn, tgtColumn) = label.srcTgtColumn(labelWithDir.dir)
-    val (srcInnerId, tgtInnerId) = tgtVertexOpt match {
-      case Some(tgtVertex) => // _to is given.
+    val (srcInnerId, tgtInnerId) = tgtVertexIdOpt match {
+      case Some(tgtVertexId) => // _to is given.
         /** we use toInvertedEdgeHashLike so dont need to swap src, tgt */
         val src = InnerVal.convertVersion(srcVertex.innerId, srcColumn.columnType, label.schemaVersion)
-        val tgt = InnerVal.convertVersion(tgtVertex.innerId, tgtColumn.columnType, label.schemaVersion)
+        val tgt = InnerVal.convertVersion(tgtVertexId, tgtColumn.columnType, label.schemaVersion)
         (src, tgt)
       case None =>
         val src = InnerVal.convertVersion(srcVertex.innerId, srcColumn.columnType, label.schemaVersion)
@@ -281,7 +283,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
     val (srcV, tgtV) = (Vertex(srcVId), Vertex(tgtVId))
     val edge = Edge(srcV, tgtV, labelWithDir)
 
-    val get = if (tgtVertexOpt.isDefined) {
+    val get = if (tgtVertexIdOpt.isDefined) {
       val snapshotEdge = edge.toSnapshotEdge
       val kv = snapshotEdgeSerializer(snapshotEdge).toKeyValues.head
       new GetRequest(label.hbaseTableName.getBytes, kv.row, edgeCf, kv.qualifier)
