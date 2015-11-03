@@ -121,6 +121,24 @@ class QuerySpec extends SpecCommon with PlaySpecification {
           ]]
         }""")
 
+    def querySingleWithTo(id: Int, offset: Int = 0, limit: Int = 100, to: Int) = Json.parse( s"""
+        { "srcVertices": [
+          { "serviceName": "${testServiceName}",
+            "columnName": "${testColumnName}",
+            "id": ${id}
+           }],
+          "steps": [
+          [ {
+              "label": "${testLabelName}",
+              "direction": "out",
+              "offset": $offset,
+              "limit": $limit,
+              "_to": $to
+            }
+          ]]
+        }
+        """)
+
     def querySingle(id: Int, offset: Int = 0, limit: Int = 100) = Json.parse( s"""
         { "srcVertices": [
           { "serviceName": "${testServiceName}",
@@ -358,12 +376,10 @@ class QuerySpec extends SpecCommon with PlaySpecification {
         val parents = (result \ "results").as[Seq[JsValue]]
         val ret = parents.forall { edge => (edge \ "parents").as[Seq[JsValue]].size == 1 }
         ret must equalTo(true)
-
-        true
       }
     }
 
-    "pagination" in {
+    "pagination and _to" in {
       running(FakeApplication()) {
         val src = System.currentTimeMillis().toInt
         val labelName = testLabelName
@@ -391,7 +407,10 @@ class QuerySpec extends SpecCommon with PlaySpecification {
         (edges(0) \ "to").as[Long] must beEqualTo(3)
         (edges(1) \ "to").as[Long] must beEqualTo(2)
 
-        true
+        result = getEdges(querySingleWithTo(src, offset = 0, limit = -1, to = 1))
+        println(result)
+        edges = (result \ "results").as[List[JsValue]]
+        edges.size must equalTo(1)
       }
     }
   }
