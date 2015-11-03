@@ -406,7 +406,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
 
     val kvs = Seq(kv)
     val edgeWithIndex = indexEdgeDeserializer.fromKeyValues(param, kvs, param.label.schemaVersion, cacheElementOpt)
-    Option(indexEdgeDeserializer.toEdge(edgeWithIndex))
+    Option(indexEdgeDeserializer.toEdge(edgeWithIndex).copy(parentEdges = parentEdges))
   }
 
   private def fetchQueryParam(queryRequest: QueryRequest): Deferred[QueryResult] = {
