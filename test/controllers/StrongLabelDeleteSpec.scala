@@ -159,7 +159,7 @@ class StrongLabelDeleteSpec extends SpecCommon {
         ith <- (0 until numOfBatch)
         jth <- (0 until batchSize)
       } yield {
-          val currentTs = System.currentTimeMillis() + ith + jth
+          val currentTs = System.currentTimeMillis() + ith * batchSize + jth
           val tgt = Random.nextInt(maxTgtId)
           val op = if (Random.nextDouble() < 0.5) "delete" else "update"
           lastOps(tgt) = op

@@ -35,7 +35,8 @@ class SnapshotEdgeSerializable(snapshotEdge: SnapshotEdge) extends HSerializable
         val opBytes = Array.fill(1)(snapshotEdge.op)
         val versionBytes = Bytes.toBytes(snapshotEdge.version)
         val propsBytes = propsToKeyValuesWithTs(pendingEdge.propsWithTs.toSeq)
-        val dummyBytes = Bytes.toBytes(Random.nextLong())
+        val dummyBytes =
+          Bytes.toBytes(Random.nextLong())
 //          Bytes.toBytes(System.nanoTime())
         val pendingEdgeValueBytes = valueBytes()
 
