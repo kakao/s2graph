@@ -1,6 +1,5 @@
 package controllers
 
-import com.kakao.s2graph.core.utils.logger
 import play.api.libs.json._
 import play.api.test.{FakeApplication, FakeRequest, PlaySpecification}
 import play.api.{Application => PlayApplication}
