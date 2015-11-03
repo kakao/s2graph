@@ -344,6 +344,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
                       prevScore: Double = 1.0,
                       isInnerCall: Boolean,
                       parentEdges: Seq[EdgeWithScore]): Seq[(Edge, Double)] = {
+
     if (kvs.isEmpty) Seq.empty
     else {
       val first = kvs.head
@@ -406,7 +407,8 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
 
     val kvs = Seq(kv)
     val edgeWithIndex = indexEdgeDeserializer.fromKeyValues(param, kvs, param.label.schemaVersion, cacheElementOpt)
-    Option(indexEdgeDeserializer.toEdge(edgeWithIndex))
+
+    Option(indexEdgeDeserializer.toEdge(edgeWithIndex).copy(parentEdges = parentEdges))
   }
 
   private def fetchQueryParam(queryRequest: QueryRequest): Deferred[QueryResult] = {
@@ -483,6 +485,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
 
     val fallback = queryRequests.map(request => QueryResult(q, stepIdx, request.queryParam))
     val groupedDefer = fetchStep(queryRequests, prevStepTgtVertexIdEdges)
+
     Graph.filterEdges(deferredToFuture(groupedDefer)(new ArrayList(fallback)), q, stepIdx, alreadyVisited)(ec)
   }
 
@@ -490,6 +493,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
   private def indexedEdgeMutations(edgeUpdate: EdgeMutate): List[HBaseRpc] = {
     val deleteMutations = edgeUpdate.edgesToDelete.flatMap(edge => buildDeletesAsync(edge))
     val insertMutations = edgeUpdate.edgesToInsert.flatMap(edge => buildPutsAsync(edge))
+
     deleteMutations ++ insertMutations
   }
 

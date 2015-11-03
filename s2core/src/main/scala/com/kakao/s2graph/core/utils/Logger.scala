@@ -30,7 +30,11 @@ package object logger {
     implicit val jsonLoggable = new Loggable[JsValue] {
       def toLogMessage(msg: JsValue) = msg.toString()
     }
-  }
+
+    implicit val booleanLoggable = new Loggable[Boolean] {
+      def toLogMessage(msg: Boolean) = msg.toString()
+    }
+ }
 
   private val logger = Logger("application")
   private val errorLogger = Logger("error")

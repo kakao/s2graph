@@ -1,5 +1,6 @@
 package controllers
 
+import com.kakao.s2graph.core.utils.logger
 import play.api.libs.json._
 import play.api.test.{FakeApplication, FakeRequest, PlaySpecification}
 import play.api.{Application => PlayApplication}
@@ -40,6 +41,30 @@ class QuerySpec extends SpecCommon with PlaySpecification {
 
       Thread.sleep(asyncFlushInterval)
     }
+
+    def queryParents(id: Long) = Json.parse(s"""
+        {
+          "returnTree": true,
+          "srcVertices": [
+          { "serviceName": "${testServiceName}",
+            "columnName": "${testColumnName}",
+            "id": ${id}
+           }],
+          "steps": [
+          [ {
+              "label": "${testLabelName}",
+              "direction": "out",
+              "offset": 0,
+              "limit": 2
+            }
+          ],[{
+              "label": "${testLabelName}",
+              "direction": "in",
+              "offset": 0,
+              "limit": -1
+            }
+          ]]
+        }""".stripMargin)
 
     def queryExclude(id: Int) = Json.parse( s"""
         { "srcVertices": [
@@ -312,6 +337,29 @@ class QuerySpec extends SpecCommon with PlaySpecification {
 
         result = getEdges(queryDuration(Seq(0, 2), from = 1000, to = 2000))
         (result \ "results").as[List[JsValue]].size must equalTo(1)
+        true
+      }
+    }
+
+    "returnTree" in {
+      running(FakeApplication()) {
+        val src = 100
+        val tgt = 200
+        val labelName = testLabelName
+
+        val bulkEdges: String = Seq(
+          edge"1001 insert e $src $tgt $labelName"
+        ).mkString("\n")
+
+        val jsResult = contentAsJson(EdgeController.mutateAndPublish(bulkEdges, withWait = true))
+        Thread.sleep(asyncFlushInterval)
+
+        val result = getEdges(queryParents(src))
+
+        val parents = (result \ "results").as[Seq[JsValue]]
+        val ret = parents.forall { edge => (edge \ "parents").as[Seq[JsValue]].size == 1 }
+        ret must equalTo(true)
+
         true
       }
     }
