@@ -155,9 +155,8 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
   def deleteAllAdjacentEdges(srcVertices: List[Vertex],
                              labels: Seq[Label],
                              dir: Int,
-                             ts: Option[Long] = None,
-                             walTopic: String): Future[Boolean] = {
-    val requestTs = ts.getOrElse(System.currentTimeMillis())
+                             ts: Long): Future[Boolean] = {
+    val requestTs = ts
     val queryParams = for {
       label <- labels
     } yield {
@@ -170,7 +169,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
 
     for {
       queryResultLs <- getEdges(q)
-      ret <- deleteAllFetchedEdgesLs(queryResultLs, requestTs, 0, walTopic)
+      ret <- deleteAllFetchedEdgesLs(queryResultLs, requestTs, 0)
     } yield ret
   }
 
@@ -985,8 +984,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
 
   private def deleteAllFetchedEdgesAsync(queryResult: QueryResult,
                                          requestTs: Long,
-                                         retryNum: Int = 0,
-                                         walTopic: String): Future[Boolean] = {
+                                         retryNum: Int = 0): Future[Boolean] = {
     val queryParam = queryResult.queryParam
     val queryResultToDelete = queryResult.edgeWithScoreLs.filter { case (edge, score) =>
       (edge.ts < requestTs) && !edge.propsWithTs.containsKey(LabelMeta.degreeSeq)
@@ -1011,9 +1009,6 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
             copiedEdge = edge.copy(op = GraphUtil.operations("delete"), ts = requestTs, version = version)
             hbaseZkAddr = queryResult.queryParam.label.hbaseZkAddr
           } yield {
-            if (retryNum == 0)
-              ExceptionHandler.enqueue(ExceptionHandler.toKafkaMessage(topic = walTopic, element = copiedEdge))
-
             logger.debug(s"FetchedEdge: $edge")
             logger.debug(s"DeleteEdge: $duplicateEdge")
             /** reverted direction */
@@ -1070,7 +1065,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
           if (edgesToRetry.isEmpty) {
             Future.successful(true)
           } else {
-            deleteAllFetchedEdgesAsync(queryResultToRetry, requestTs, retryNum + 1, walTopic)
+            deleteAllFetchedEdgesAsync(queryResultToRetry, requestTs, retryNum + 1)
           }
         }
       }
@@ -1078,7 +1073,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
   }
 
   private def deleteAllFetchedEdgesLs(queryResultLs: Seq[QueryResult], requestTs: Long,
-                                      retryNum: Int = 0, walTopic: String): Future[Boolean] = {
+                                      retryNum: Int = 0): Future[Boolean] = {
     if (retryNum > MaxRetryNum) {
       logger.error(s"deleteDuplicateEdgesLs failed. ${queryResultLs}")
       Future.successful(false)
@@ -1086,11 +1081,11 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
       val futures = for {
         queryResult <- queryResultLs
       } yield {
-          deleteAllFetchedEdgesAsync(queryResult, requestTs, 0, walTopic)
+          deleteAllFetchedEdgesAsync(queryResult, requestTs, 0)
         }
       Future.sequence(futures).flatMap { rets =>
         val allSuccess = rets.forall(identity)
-        if (!allSuccess) deleteAllFetchedEdgesLs(queryResultLs, requestTs, retryNum + 1, walTopic)
+        if (!allSuccess) deleteAllFetchedEdgesLs(queryResultLs, requestTs, retryNum + 1)
         else Future.successful(allSuccess)
       }
     }

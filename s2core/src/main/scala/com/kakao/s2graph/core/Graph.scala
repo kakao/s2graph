@@ -319,8 +319,8 @@ class Graph(_config: Config)(implicit ex: ExecutionContext) {
   def getVertices(vertices: Seq[Vertex]): Future[Seq[Vertex]] = storage.getVertices(vertices)
 
   /** write */
-  def deleteAllAdjacentEdges(srcVertices: List[Vertex], labels: Seq[Label], dir: Int, ts: Option[Long] = None, walTopic: String): Future[Boolean] =
-    storage.deleteAllAdjacentEdges(srcVertices, labels, dir, ts, walTopic)
+  def deleteAllAdjacentEdges(srcVertices: List[Vertex], labels: Seq[Label], dir: Int, ts: Long): Future[Boolean] =
+    storage.deleteAllAdjacentEdges(srcVertices, labels, dir, ts)
 
   def mutateElements(elements: Seq[GraphElement], withWait: Boolean = false): Future[Seq[Boolean]] =
     storage.mutateElements(elements, withWait)
