@@ -75,9 +75,15 @@ class IndexEdgeDeserializable extends HDeserializable[IndexEdge] {
       if (kv.qualifier.isEmpty) parseDegreeQualifier(kv, version)
       else parseQualifier(kv, version)
 
-    val (props, _) =
-      if (kv.qualifier.isEmpty) parseDegreeValue(kv, version)
-      else parseValue(kv, version)
+    val (props, _) = if (op == GraphUtil.operations("incrementCount")) {
+      val countVal = Bytes.toLong(kv.value)
+      val dummyProps = Array(LabelMeta.countSeq -> InnerVal.withLong(countVal, version))
+      (dummyProps, 8)
+    } else if (kv.qualifier.isEmpty) {
+      parseDegreeValue(kv, version)
+    } else {
+      parseValue(kv, version)
+    }
 
     val index = queryParam.label.indicesMap.getOrElse(labelIdxSeq, throw new RuntimeException("invalid index seq"))
 
