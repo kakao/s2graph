@@ -4,7 +4,7 @@ package com.kakao.s2graph.core
 import com.kakao.s2graph.core.mysqls._
 import com.kakao.s2graph.core.types._
 import com.kakao.s2graph.core.utils.logger
-import play.api.libs.json.Json
+import play.api.libs.json.{Writes, Json}
 
 import scala.collection.JavaConversions._
 import scala.util.hashing.MurmurHash3
@@ -242,6 +242,7 @@ case class Edge(srcVertex: Vertex,
     }
 
   def toLogString: String = {
+    import Writes._
     val ret =
       if (propsWithName.nonEmpty)
         List(ts, GraphUtil.fromOp(op), "e", srcVertex.innerId, tgtVertex.innerId, label.label, Json.toJson(propsWithName))
