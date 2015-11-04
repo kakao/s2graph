@@ -10,8 +10,7 @@ import com.kakao.s2graph.core.mysqls.{Label, LabelMeta}
 import com.kakao.s2graph.core.storage.{SKeyValue, Storage}
 import com.kakao.s2graph.core.types._
 import com.kakao.s2graph.core.utils.DeferOp._
-import com.kakao.s2graph.core.utils.FutureOps._
-import com.kakao.s2graph.core.utils.logger
+import com.kakao.s2graph.core.utils.{Extensions, logger}
 import com.stumbleupon.async.{Callback, Deferred}
 import com.typesafe.config.Config
 import org.apache.hadoop.hbase.util.Bytes
@@ -54,6 +53,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
                        (implicit ec: ExecutionContext) extends Storage {
 
   import AsynchbaseStorage._
+  import Extensions.FutureOps
 
   private val client = AsynchbaseStorage.makeClient(config)
   private val clientWithFlush = AsynchbaseStorage.makeClient(config, "hbase.rpcs.buffered_flush_interval" -> "0")
@@ -408,7 +408,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
                      cacheElementOpt: Option[IndexEdge] = None,
                      parentEdges: Seq[EdgeWithScore]): Option[Edge] = {
 
-    logger.error(s"kv: => $kv")
+    // logger.error(s"kv: => $kv")
 
     val kvs = Seq(kv)
     val edgeWithIndex = indexEdgeDeserializer.fromKeyValues(param, kvs, param.label.schemaVersion, cacheElementOpt)
@@ -605,20 +605,19 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
     }
   }
 
-  private def writeAsyncWithWaitRetry(zkQuorum: String, elementRpcs: Seq[Seq[HBaseRpc]], retryNum: Int): Future[Seq[Boolean]] = retry(MaxRetryNum) {
+
+  private def writeAsyncWithWaitRetry(zkQuorum: String, elementRpcs: Seq[Seq[HBaseRpc]], retryNum: Int): Future[Seq[Boolean]] =
     writeAsyncWithWait(zkQuorum, elementRpcs).flatMap { rets =>
       val allSuccess = rets.forall(identity)
       if (allSuccess) Future.successful(elementRpcs.map(_ => true))
       else throw FetchTimeoutException("writeAsyncWithWaitRetry")
-    }
-  }
+    } retry MaxRetryNum
 
-  private def writeAsyncWithWaitRetrySimple(zkQuorum: String, elementRpcs: Seq[HBaseRpc], retryNum: Int): Future[Boolean] = retry(MaxRetryNum) {
+  private def writeAsyncWithWaitRetrySimple(zkQuorum: String, elementRpcs: Seq[HBaseRpc], retryNum: Int): Future[Boolean] =
     writeAsyncWithWaitSimple(zkQuorum, elementRpcs).flatMap { ret =>
       if (ret) Future.successful(ret)
       else throw FetchTimeoutException("writeAsyncWithWaitRetrySimple")
-    }
-  }
+    } retry MaxRetryNum
 
   private def writeAsyncWithWait(zkQuorum: String, elementRpcs: Seq[Seq[HBaseRpc]]): Future[Seq[Boolean]] = {
     val client = clientWithFlush
@@ -656,7 +655,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
       Future.successful(true)
     } else {
       val defers = elementRpcs.map { rpc =>
-        logger.error(rpc.toString)
+//        logger.error(rpc.toString)
         val deferred = rpc match {
           case d: DeleteRequest => client.delete(d).addErrback(errorBack(ex => logger.error(s"delete request failed. $d, $ex", ex)))
           case p: PutRequest => client.put(p).addErrback(errorBack(ex => logger.error(s"put request failed. $p, $ex", ex)))
