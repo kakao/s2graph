@@ -610,13 +610,19 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
       val allSuccess = rets.forall(identity)
       if (allSuccess) Future.successful(elementRpcs.map(_ => true))
       else throw FetchTimeoutException("writeAsyncWithWaitRetry")
-    }.retryFallback(MaxRetryNum)(elementRpcs.map(_ => false))
+    }.retryFallback(retryNum) {
+      logger.error(s"writeAsyncWithWaitRetry: $elementRpcs")
+      elementRpcs.map(_ => false)
+    }
 
   private def writeAsyncWithWaitRetrySimple(zkQuorum: String, elementRpcs: Seq[HBaseRpc], retryNum: Int): Future[Boolean] =
     writeAsyncWithWaitSimple(zkQuorum, elementRpcs).flatMap { ret =>
       if (ret) Future.successful(ret)
       else throw FetchTimeoutException("writeAsyncWithWaitRetrySimple")
-    }.retryFallback(MaxRetryNum)(false)
+    }.retryFallback(retryNum) {
+      logger.error(s"writeAsyncWithWaitRetrySimple: $elementRpcs")
+      false
+    }
 
   private def writeAsyncWithWait(zkQuorum: String, elementRpcs: Seq[Seq[HBaseRpc]]): Future[Seq[Boolean]] = {
     val client = clientWithFlush
@@ -778,7 +784,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
       }
       def indexedEdgeIncrementFuture(predicate: Boolean): Future[Boolean] = {
         if (!predicate) Future.successful(false)
-        else writeAsyncWithWaitRetrySimple(label.hbaseZkAddr, increments(edgeUpdate), 0).map { allSuccess =>
+        else writeAsyncWithWaitRetrySimple(label.hbaseZkAddr, increments(edgeUpdate), MaxRetryNum).map { allSuccess =>
           //          if (!allSuccess) logger.error(s"indexedEdgeIncrement failed: $edgeUpdate")
           //          else logger.debug(s"indexedEdgeIncrement success: $edgeUpdate")
           allSuccess
@@ -1042,7 +1048,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
             val (edge, score) = queryResultToDelete.head
             val incrs = edge.edgesWithIndex.flatMap { indexedEdge => buildIncrementsAsync(indexedEdge, -1 * deletedEdgesNum) }
 
-            writeAsyncWithWaitRetry(queryParam.label.hbaseZkAddr, Seq(incrs), 0).map { rets =>
+            writeAsyncWithWaitRetry(queryParam.label.hbaseZkAddr, Seq(incrs), MaxRetryNum).map { rets =>
               if (!rets.forall(identity)) logger.error(s"decrement for deleteAll failed. $incrs")
               else logger.debug(s"decrement for deleteAll success. $incrs")
               rets
