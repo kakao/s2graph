@@ -4,11 +4,13 @@ import java.util
 import java.util.ArrayList
 
 import com.google.common.cache.Cache
+import com.kakao.s2graph.core.GraphExceptions.FetchTimeoutException
 import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.mysqls.{Label, LabelMeta}
 import com.kakao.s2graph.core.storage.{SKeyValue, Storage}
 import com.kakao.s2graph.core.types._
 import com.kakao.s2graph.core.utils.DeferOp._
+import com.kakao.s2graph.core.utils.FutureOps._
 import com.kakao.s2graph.core.utils.logger
 import com.stumbleupon.async.{Callback, Deferred}
 import com.typesafe.config.Config
@@ -260,7 +262,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
 
   private def buildRequest(queryRequest: QueryRequest): GetRequest = {
     val srcVertex = queryRequest.vertex
-//    val tgtVertexOpt = queryRequest.tgtVertexOpt
+    //    val tgtVertexOpt = queryRequest.tgtVertexOpt
 
     val queryParam = queryRequest.queryParam
     val tgtVertexIdOpt = queryParam.tgtVertexInnerIdOpt
@@ -405,6 +407,8 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
   private def toEdge(kv: KeyValue, param: QueryParam,
                      cacheElementOpt: Option[IndexEdge] = None,
                      parentEdges: Seq[EdgeWithScore]): Option[Edge] = {
+
+    logger.error(s"kv: => $kv")
 
     val kvs = Seq(kv)
     val edgeWithIndex = indexEdgeDeserializer.fromKeyValues(param, kvs, param.label.schemaVersion, cacheElementOpt)
@@ -601,34 +605,18 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
     }
   }
 
-  private def writeAsyncWithWaitRetry(zkQuorum: String, elementRpcs: Seq[Seq[HBaseRpc]], retryNum: Int): Future[Seq[Boolean]] = {
-    if (retryNum > MaxRetryNum) {
-      logger.error(s"writeAsyncWithWaitRetry failed: $elementRpcs")
-      Future.successful(elementRpcs.map(_ => false))
-    } else {
-      writeAsyncWithWait(zkQuorum, elementRpcs).flatMap { rets =>
-        val allSuccess = rets.forall(identity)
-        if (allSuccess) Future.successful(elementRpcs.map(_ => true))
-        else {
-          Thread.sleep(Random.nextInt(MaxBackOff) + 1)
-          writeAsyncWithWaitRetry(zkQuorum, elementRpcs, retryNum + 1)
-        }
-      }
+  private def writeAsyncWithWaitRetry(zkQuorum: String, elementRpcs: Seq[Seq[HBaseRpc]], retryNum: Int): Future[Seq[Boolean]] = retry(MaxRetryNum) {
+    writeAsyncWithWait(zkQuorum, elementRpcs).flatMap { rets =>
+      val allSuccess = rets.forall(identity)
+      if (allSuccess) Future.successful(elementRpcs.map(_ => true))
+      else throw FetchTimeoutException("writeAsyncWithWaitRetry")
     }
   }
 
-  private def writeAsyncWithWaitRetrySimple(zkQuorum: String, elementRpcs: Seq[HBaseRpc], retryNum: Int): Future[Boolean] = {
-    if (retryNum > MaxRetryNum) {
-      logger.error(s"writeAsyncWithWaitRetry failed: $elementRpcs")
-      Future.successful(false)
-    } else {
-      writeAsyncWithWaitSimple(zkQuorum, elementRpcs).flatMap { ret =>
-        if (ret) Future.successful(ret)
-        else {
-          Thread.sleep(Random.nextInt(MaxBackOff) + 1)
-          writeAsyncWithWaitRetrySimple(zkQuorum, elementRpcs, retryNum + 1)
-        }
-      }
+  private def writeAsyncWithWaitRetrySimple(zkQuorum: String, elementRpcs: Seq[HBaseRpc], retryNum: Int): Future[Boolean] = retry(MaxRetryNum) {
+    writeAsyncWithWaitSimple(zkQuorum, elementRpcs).flatMap { ret =>
+      if (ret) Future.successful(ret)
+      else throw FetchTimeoutException("writeAsyncWithWaitRetrySimple")
     }
   }
 
@@ -639,7 +627,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
     } else {
       val defers = elementRpcs.map { rpcs =>
         val defer = rpcs.map { rpc =>
-          rpc.setTimeout(0)
+          // logger.error(rpc.toString)
           val deferred = rpc match {
             case d: DeleteRequest => client.delete(d).addErrback(errorBack(ex => logger.error(s"delete request failed. $d, $ex", ex)))
             case p: PutRequest => client.put(p).addErrback(errorBack(ex => logger.error(s"put request failed. $p, $ex", ex)))
@@ -668,7 +656,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
       Future.successful(true)
     } else {
       val defers = elementRpcs.map { rpc =>
-        rpc.setTimeout(0)
+        logger.error(rpc.toString)
         val deferred = rpc match {
           case d: DeleteRequest => client.delete(d).addErrback(errorBack(ex => logger.error(s"delete request failed. $d, $ex", ex)))
           case p: PutRequest => client.put(p).addErrback(errorBack(ex => logger.error(s"put request failed. $p, $ex", ex)))
@@ -693,7 +681,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
       Future.successful(true)
     } else {
       elementRpcs.foreach { rpc =>
-        rpc.setTimeout(0)
+        logger.error(rpc.toString)
         val deferred = rpc match {
           case d: DeleteRequest => client.delete(d).addErrback(errorBack(ex => logger.error(s"delete request failed. $d, $ex", ex)))
           case p: PutRequest => client.put(p).addErrback(errorBack(ex => logger.error(s"put request failed. $p, $ex", ex)))
@@ -719,7 +707,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
     } else {
       elementRpcs.foreach { rpcs =>
         rpcs.foreach { rpc =>
-          rpc.setTimeout(0)
+          // logger.error(rpc.toString)
           val deferred = rpc match {
             case d: DeleteRequest => client.delete(d).addErrback(errorBack(ex => logger.error(s"delete request failed. $d, $ex", ex)))
             case p: PutRequest => client.put(p).addErrback(errorBack(ex => logger.error(s"put request failed. $p, $ex", ex)))
@@ -989,6 +977,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
     val queryResultToDelete = queryResult.edgeWithScoreLs.filter { case (edge, score) =>
       (edge.ts < requestTs) && !edge.propsWithTs.containsKey(LabelMeta.degreeSeq)
     }
+
     if (queryResultToDelete.isEmpty) {
       Future.successful(true)
     } else {
@@ -1007,7 +996,6 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
             //        version = edge.version + Edge.incrementVersion // this lead to forcing delete on fetched edges
             version = requestTs
             copiedEdge = edge.copy(op = GraphUtil.operations("delete"), ts = requestTs, version = version)
-            hbaseZkAddr = queryResult.queryParam.label.hbaseZkAddr
           } yield {
             logger.debug(s"FetchedEdge: $edge")
             logger.debug(s"DeleteEdge: $duplicateEdge")
@@ -1062,11 +1050,10 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
               rets
             }
           }
-          if (edgesToRetry.isEmpty) {
-            Future.successful(true)
-          } else {
-            deleteAllFetchedEdgesAsync(queryResultToRetry, requestTs, retryNum + 1)
-          }
+
+          if (edgesToRetry.isEmpty) Future.successful(true)
+          else deleteAllFetchedEdgesAsync(queryResultToRetry, requestTs, retryNum + 1)
+
         }
       }
     }
@@ -1080,11 +1067,11 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
     } else {
       val futures = for {
         queryResult <- queryResultLs
-      } yield {
-          deleteAllFetchedEdgesAsync(queryResult, requestTs, 0)
-        }
+      } yield deleteAllFetchedEdgesAsync(queryResult, requestTs, 0)
+
       Future.sequence(futures).flatMap { rets =>
         val allSuccess = rets.forall(identity)
+
         if (!allSuccess) deleteAllFetchedEdgesLs(queryResultLs, requestTs, retryNum + 1)
         else Future.successful(allSuccess)
       }

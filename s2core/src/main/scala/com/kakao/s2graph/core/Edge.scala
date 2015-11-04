@@ -250,8 +250,6 @@ case class Edge(srcVertex: Vertex,
 
     ret.mkString("\t")
   }
-
-
 }
 
 case class EdgeWriter(edge: Edge) {
