@@ -9,7 +9,7 @@ import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.mysqls.{Label, LabelMeta}
 import com.kakao.s2graph.core.storage.{SKeyValue, Storage}
 import com.kakao.s2graph.core.types._
-import com.kakao.s2graph.core.utils.DeferOp._
+import com.kakao.s2graph.core.utils.DeferOps._
 import com.kakao.s2graph.core.utils.{Extensions, logger}
 import com.stumbleupon.async.{Callback, Deferred}
 import com.typesafe.config.Config
@@ -605,19 +605,18 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
     }
   }
 
-
   private def writeAsyncWithWaitRetry(zkQuorum: String, elementRpcs: Seq[Seq[HBaseRpc]], retryNum: Int): Future[Seq[Boolean]] =
     writeAsyncWithWait(zkQuorum, elementRpcs).flatMap { rets =>
       val allSuccess = rets.forall(identity)
       if (allSuccess) Future.successful(elementRpcs.map(_ => true))
       else throw FetchTimeoutException("writeAsyncWithWaitRetry")
-    } retry MaxRetryNum
+    }.retryFallback(MaxRetryNum)(elementRpcs.map(_ => false))
 
   private def writeAsyncWithWaitRetrySimple(zkQuorum: String, elementRpcs: Seq[HBaseRpc], retryNum: Int): Future[Boolean] =
     writeAsyncWithWaitSimple(zkQuorum, elementRpcs).flatMap { ret =>
       if (ret) Future.successful(ret)
       else throw FetchTimeoutException("writeAsyncWithWaitRetrySimple")
-    } retry MaxRetryNum
+    }.retryFallback(MaxRetryNum)(false)
 
   private def writeAsyncWithWait(zkQuorum: String, elementRpcs: Seq[Seq[HBaseRpc]]): Future[Seq[Boolean]] = {
     val client = clientWithFlush
@@ -655,7 +654,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
       Future.successful(true)
     } else {
       val defers = elementRpcs.map { rpc =>
-//        logger.error(rpc.toString)
+        //        logger.error(rpc.toString)
         val deferred = rpc match {
           case d: DeleteRequest => client.delete(d).addErrback(errorBack(ex => logger.error(s"delete request failed. $d, $ex", ex)))
           case p: PutRequest => client.put(p).addErrback(errorBack(ex => logger.error(s"put request failed. $p, $ex", ex)))
@@ -680,7 +679,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
       Future.successful(true)
     } else {
       elementRpcs.foreach { rpc =>
-        logger.error(rpc.toString)
+        //        logger.error(rpc.toString)
         val deferred = rpc match {
           case d: DeleteRequest => client.delete(d).addErrback(errorBack(ex => logger.error(s"delete request failed. $d, $ex", ex)))
           case p: PutRequest => client.put(p).addErrback(errorBack(ex => logger.error(s"put request failed. $p, $ex", ex)))
