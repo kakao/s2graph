@@ -167,7 +167,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
       }
 
     val step = Step(queryParams.toList)
-    val q = Query(srcVertices, Vector(step), false)
+    val q = Query(srcVertices, Vector(step))
 
     for {
       queryResultLs <- getEdges(q)
@@ -175,7 +175,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
     } yield ret
   }
 
-  def mutateElements(elements: Seq[GraphElement], withWait: Boolean = false): Future[Seq[Boolean]] = {
+  def mutateElements(elements: Seq[GraphElement], withWait: Boolean): Future[Seq[Boolean]] = {
     val futures = elements.map {
       case edge: Edge => mutateEdge(edge, withWait)
       case vertex: Vertex => mutateVertex(vertex, withWait)
@@ -185,9 +185,9 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
     Future.sequence(futures)
   }
 
-  private def mutateEdge(edge: Edge, withWait: Boolean = false): Future[Boolean] = mutateEdgeWithOp(edge, withWait)
+  private def mutateEdge(edge: Edge, withWait: Boolean): Future[Boolean] = mutateEdgeWithOp(edge, withWait)
 
-  def mutateEdges(edges: Seq[Edge], withWait: Boolean = false): Future[Seq[Boolean]] = {
+  def mutateEdges(edges: Seq[Edge], withWait: Boolean): Future[Seq[Boolean]] = {
     val edgeGrouped = edges.groupBy { edge => (edge.label, edge.srcVertex.innerId, edge.tgtVertex.innerId) } toSeq
 
     val ret = edgeGrouped.map { case ((label, srcId, tgtId), edges) =>
@@ -209,7 +209,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
     Future.sequence(ret)
   }
 
-  private def mutateVertex(vertex: Vertex, withWait: Boolean = false): Future[Boolean] = {
+  private def mutateVertex(vertex: Vertex, withWait: Boolean): Future[Boolean] = {
     if (vertex.op == GraphUtil.operations("delete")) {
       deleteVertex(vertex, withWait)
     } else if (vertex.op == GraphUtil.operations("deleteAll")) {
@@ -223,7 +223,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
     }
   }
 
-  def mutateVertices(vertices: Seq[Vertex], withWait: Boolean = false): Future[Seq[Boolean]] = {
+  def mutateVertices(vertices: Seq[Vertex], withWait: Boolean): Future[Seq[Boolean]] = {
     val futures = vertices.map { vertex => mutateVertex(vertex, withWait) }
     Future.sequence(futures)
   }
@@ -600,22 +600,17 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
     else
       buildPutsAsync(edge.srcForVertex) ++ buildPutsAsync(edge.tgtForVertex)
 
-  private def insertBulkForLoaderAsync(edge: Edge, createRelEdges: Boolean = true) = {
-    val relEdges = if (createRelEdges) edge.relatedEdges else List(edge)
-    buildPutAsync(edge.toSnapshotEdge) ++ relEdges.flatMap { relEdge =>
-      relEdge.edgesWithIndex.flatMap(e => buildPutsAsync(e))
-    }
-  }
 
-  private def writeAsyncWithWaitRetry(zkQuorum: String, elementRpcs: Seq[Seq[HBaseRpc]], retryNum: Int): Future[Seq[Boolean]] =
-    writeAsyncWithWait(zkQuorum, elementRpcs).flatMap { rets =>
-      val allSuccess = rets.forall(identity)
-      if (allSuccess) Future.successful(elementRpcs.map(_ => true))
-      else throw FetchTimeoutException("writeAsyncWithWaitRetry")
-    }.retryFallback(retryNum) {
-      logger.error(s"writeAsyncWithWaitRetry: $elementRpcs")
-      elementRpcs.map(_ => false)
-    }
+
+//  private def writeAsyncWithWaitRetry(zkQuorum: String, elementRpcs: Seq[Seq[HBaseRpc]], retryNum: Int): Future[Seq[Boolean]] =
+//    writeAsyncWithWait(zkQuorum, elementRpcs).flatMap { rets =>
+//      val allSuccess = rets.forall(identity)
+//      if (allSuccess) Future.successful(elementRpcs.map(_ => true))
+//      else throw FetchTimeoutException("writeAsyncWithWaitRetry")
+//    }.retryFallback(retryNum) {
+//      logger.error(s"writeAsyncWithWaitRetry: $elementRpcs")
+//      elementRpcs.map(_ => false)
+//    }
 
   private def writeAsyncWithWaitRetrySimple(zkQuorum: String, elementRpcs: Seq[HBaseRpc], retryNum: Int): Future[Boolean] =
     writeAsyncWithWaitSimple(zkQuorum, elementRpcs).flatMap { ret =>
@@ -909,8 +904,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
     }
   }
 
-
-  private def mutateEdgeWithOp(edge: Edge, withWait: Boolean = false): Future[Boolean] = {
+  private def mutateEdgeWithOp(edge: Edge, withWait: Boolean): Future[Boolean] = {
     val edgeWriter = EdgeWriter(edge)
     val zkQuorum = edge.label.hbaseZkAddr
     val rpcLs = new ListBuffer[HBaseRpc]()
@@ -920,7 +914,6 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
     val vertexMutateFuture =
       if (withWait) writeAsyncWithWaitSimple(zkQuorum, rpcLs)
       else writeAsyncSimple(zkQuorum, rpcLs)
-
 
     val edgeMutateFuture = edge.op match {
       case op if op == GraphUtil.operations("insert") =>
@@ -958,7 +951,7 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
   }
 
 
-  private def deleteVertex(vertex: Vertex, withWait: Boolean = false): Future[Boolean] = {
+  private def deleteVertex(vertex: Vertex, withWait: Boolean): Future[Boolean] = {
     if (withWait)
       writeAsyncWithWait(vertex.hbaseZkAddr, Seq(vertex).map(buildDeleteAsync(_))).map(_.forall(identity))
     else
