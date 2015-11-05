@@ -150,8 +150,8 @@ class StrongLabelDeleteSpec extends SpecCommon {
     val labelName = testLabelName2
     val maxTgtId = 10
     val batchSize = 100
-    val testNum = 2
-    val numOfBatch = 1000
+    val testNum = 10
+    val numOfBatch = 100
 
     def testInner(startTs: Long, src: Long) = {
       val labelName = testLabelName2
@@ -219,14 +219,22 @@ class StrongLabelDeleteSpec extends SpecCommon {
         } yield {
             val (ret, lastTs) = testInner(ts, src)
             val deletedAt = lastTs + 1
-            ts = deletedAt + 1 // nex start ts
+            val deletedAt2 = lastTs + 2
+            ts = deletedAt2 + 1 // nex start ts
 
             ret must beEqualTo(true)
 
             logger.error(s"delete timestamp: $deletedAt")
 
+
             val deleteAllRequest = Json.arr(Json.obj("label" -> labelName, "ids" -> Json.arr(src), "timestamp" -> deletedAt))
-            contentAsString(EdgeController.deleteAllInner(deleteAllRequest))
+            val deleteAllRequest2 = Json.arr(Json.obj("label" -> labelName, "ids" -> Json.arr(src), "timestamp" -> deletedAt2))
+
+            val deleteRet = EdgeController.deleteAllInner(deleteAllRequest)
+            val deleteRet2 = EdgeController.deleteAllInner(deleteAllRequest2)
+
+            contentAsString(deleteRet)
+            contentAsString(deleteRet2)
 
             val result = getEdges(query(id = src))
             println(result)

@@ -195,12 +195,14 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
       else {
         val head = edges.head
         val strongConsistency = head.label.consistencyLevel == "strong"
+
         if (strongConsistency) {
           val edgeFuture = mutateEdgesInner(edges, edges.head.label.consistencyLevel == "strong", withWait)(Edge.buildOperation)
+          //TODO: decide what we will do on failure on vertex put
           val vertexFuture = writeAsyncSimple(head.label.hbaseZkAddr, buildVertexPutsAsync(head))
           Future.sequence(Seq(edgeFuture, vertexFuture)).map { rets => rets.forall(identity) }
         } else {
-          Future.sequence(edges.map { edge => mutateEdge(edge) }).map { rets => rets.forall(identity) }
+          Future.sequence(edges.map { edge => mutateEdge(edge, withWait = withWait) }).map { rets => rets.forall(identity) }
         }
       }
     }
@@ -956,23 +958,12 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
   }
 
 
-  /**
-   *
-   * @param vertex
-   * @param withWait
-   * @return
-   */
   private def deleteVertex(vertex: Vertex, withWait: Boolean = false): Future[Boolean] = {
     if (withWait)
       writeAsyncWithWait(vertex.hbaseZkAddr, Seq(vertex).map(buildDeleteAsync(_))).map(_.forall(identity))
     else
       writeAsync(vertex.hbaseZkAddr, Seq(vertex).map(buildDeleteAsync(_))).map(_.forall(identity))
   }
-
-  //  private def deleteVertices(vertices: Seq[Vertex]): Future[Seq[Boolean]] = {
-  //    val futures = vertices.map { vertex => deleteVertex(vertex) }
-  //    Future.sequence(futures)
-  //  }
 
   private def deleteAllFetchedEdgesAsync(queryResult: QueryResult,
                                          requestTs: Long,
@@ -985,81 +976,10 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
     if (queryResultToDelete.isEmpty) {
       Future.successful(true)
     } else {
-      if (retryNum > MaxRetryNum) {
-        queryResult.edgeWithScoreLs.foreach { case (edge, score) =>
-          val copiedEdge = edge.copy(op = GraphUtil.operations("delete"), ts = requestTs, version = requestTs)
-          logger.error(s"deleteAll failed: $copiedEdge")
-          ExceptionHandler.enqueue(ExceptionHandler.toKafkaMessage(element = copiedEdge))
-        }
-        Future.successful(false)
-      } else {
-        val futures: Seq[Future[Boolean]] =
-          for {
-            (edge, score) <- queryResultToDelete
-            duplicateEdge = edge.duplicateEdge.copy(op = GraphUtil.operations("delete"))
-            //        version = edge.version + Edge.incrementVersion // this lead to forcing delete on fetched edges
-            version = requestTs
-            copiedEdge = edge.copy(op = GraphUtil.operations("delete"), ts = requestTs, version = version)
-          } yield {
-            logger.debug(s"FetchedEdge: $edge")
-            logger.debug(s"DeleteEdge: $duplicateEdge")
-            /** reverted direction */
-            val indexedEdgesDeletes = duplicateEdge.edgesWithIndex.flatMap { indexedEdge =>
-              val delete = buildDeletesAsync(indexedEdge)
-              logger.debug(s"indexedEdgeDelete: $delete")
-              delete
-            }
-
-            val snapshotEdgeDelete = buildDeleteAsync(duplicateEdge.toSnapshotEdge)
-
-            val indexedEdgesIncrements = duplicateEdge.edgesWithIndex.flatMap { indexedEdge =>
-              val incr = buildIncrementsAsync(indexedEdge, -1L)
-              logger.debug(s"indexedEdgeIncr: $incr")
-              incr
-            }
-
-            /** forward direction */
-            val copyEdgeIndexedEdgesDeletes = copiedEdge.edgesWithIndex.flatMap { e => buildDeletesAsync(e) }
-
-            val deletesForThisEdge = snapshotEdgeDelete ++ indexedEdgesDeletes ++ copyEdgeIndexedEdgesDeletes
-
-            writeAsyncWithWait(queryParam.label.hbaseZkAddr, Seq(deletesForThisEdge)).flatMap { rets =>
-              if (rets.forall(identity)) {
-                writeAsyncWithWait(queryParam.label.hbaseZkAddr, Seq(indexedEdgesIncrements)).map { rets =>
-                  rets.forall(identity)
-                }
-              } else {
-                Future.successful(false)
-              }
-            }
-          }
-
-        Future.sequence(futures).flatMap { duplicateEdgeDeletedLs =>
-          val edgesToRetry = for {
-            ((edge, score), duplicatedEdgeDeleted) <- queryResultToDelete.zip(duplicateEdgeDeletedLs) if !duplicatedEdgeDeleted
-          } yield (edge, score)
-
-          val deletedEdgesNum = queryResultToDelete.size - edgesToRetry.size
-          //        val deletedEdgeNum = size - edgesToRetry.size
-          val queryResultToRetry = queryResult.copy(edgeWithScoreLs = edgesToRetry)
-          // not sure if increment rpc itset fail, then should we retry increment also?
-          if (deletedEdgesNum > 0) {
-            // decrement on current queryResult`s start vertex`s degree
-            val (edge, score) = queryResultToDelete.head
-            val incrs = edge.edgesWithIndex.flatMap { indexedEdge => buildIncrementsAsync(indexedEdge, -1 * deletedEdgesNum) }
-
-            writeAsyncWithWaitRetry(queryParam.label.hbaseZkAddr, Seq(incrs), MaxRetryNum).map { rets =>
-              if (!rets.forall(identity)) logger.error(s"decrement for deleteAll failed. $incrs")
-              else logger.debug(s"decrement for deleteAll success. $incrs")
-              rets
-            }
-          }
-
-          if (edgesToRetry.isEmpty) Future.successful(true)
-          else deleteAllFetchedEdgesAsync(queryResultToRetry, requestTs, retryNum + 1)
-
-        }
+      val edgesToDelete = queryResultToDelete.flatMap { case (edge, score) =>
+        edge.copy(op = GraphUtil.operations("delete"), ts = requestTs, version = requestTs).relatedEdges
       }
+      mutateEdges(edgesToDelete, withWait = true).map { rets => rets.forall(identity) }
     }
   }
 
