@@ -2,9 +2,10 @@ package com.kakao.s2graph.core
 
 import com.kakao.s2graph.core.mysqls._
 import com.kakao.s2graph.core.parsers.{Where, WhereParser}
+import com.kakao.s2graph.core.storage.hbase.AsynchbaseQueryBuilder
 import com.kakao.s2graph.core.types._
 import org.apache.hadoop.hbase.util.Bytes
-import org.hbase.async.{ColumnRangeFilter, GetRequest}
+import org.hbase.async.ColumnRangeFilter
 import play.api.libs.json.{JsNumber, JsValue, Json}
 
 import scala.util.hashing.MurmurHash3
@@ -54,8 +55,8 @@ case class Query(vertices: Seq[Vertex] = Seq.empty[Vertex],
       step <- steps
       queryParam <- step.queryParams.sortBy(_.labelWithDir.labelId)
     } yield {
-      Json.obj("label" -> queryParam.label.label, "direction" -> GraphUtil.fromDirection(queryParam.labelWithDir.dir))
-    })
+        Json.obj("label" -> queryParam.label.label, "direction" -> GraphUtil.fromDirection(queryParam.labelWithDir.dir))
+      })
   }
 
   def impressionId(): JsNumber = {
@@ -71,9 +72,9 @@ object EdgeTransformer {
 }
 
 /**
-  * TODO: step wise outputFields should be used with nextStepLimit, nextStepThreshold.
-  * @param jsValue
-  */
+ * TODO: step wise outputFields should be used with nextStepLimit, nextStepThreshold.
+ * @param jsValue
+ */
 case class EdgeTransformer(queryParam: QueryParam, jsValue: JsValue) {
   val Delimiter = "\\$"
   val targets = jsValue.asOpt[List[Vector[String]]].toList
@@ -161,10 +162,12 @@ case class Step(queryParams: List[QueryParam],
   lazy val includes = queryParams.filterNot(_.exclude)
   lazy val excludeIds = excludes.map(x => x.labelWithDir.labelId -> true).toMap
 
-  def toCacheKey(lss: Iterable[(GetRequest, QueryParam)]): Int = {
-    val s = "step" + Step.Delimiter +
-      lss.map { case (getRequest, param) => param.toCacheKey(getRequest) } mkString (Step.Delimiter)
-    MurmurHash3.stringHash(s)
+  def toCacheKey(lss: Seq[Int]): Int = MurmurHash3.bytesHash(toCacheKeyRaw(lss))
+
+  def toCacheKeyRaw(lss: Seq[Int]): Array[Byte] = {
+    var bytes = Array.empty[Byte]
+    lss.sorted.foreach { h => bytes = Bytes.add(bytes, Bytes.toBytes(h)) }
+    bytes
   }
 }
 
@@ -200,21 +203,13 @@ case class RankParam(labelId: Int, var keySeqAndWeights: Seq[(Byte, Double)] = S
     this
   }
 
-  //
-  //  def singleKey(key: String) = {
-  //    this.keySeqAndWeights =
-  //      LabelMeta.findByName(labelId, key) match {
-  //        case None => List.empty[(Byte, Double)]
-  //        case Some(ktype) => List((ktype.seq, 1.0))
-  //      }
-  //    this
-  //  }
-  //
-  //  def multipleKey(keyAndWeights: Seq[(String, Double)]) = {
-  //    this.keySeqAndWeights =
-  //      for ((key, weight) <- keyAndWeights; row <- LabelMeta.findByName(labelId, key)) yield (row.seq, weight)
-  //    this
-  //  }
+  def toHashKeyBytes(): Array[Byte] = {
+    var bytes = Array.empty[Byte]
+    keySeqAndWeights.map { case (key, weight) =>
+      bytes = Bytes.add(bytes, Array.fill(1)(key), Bytes.toBytes(weight))
+    }
+    bytes
+  }
 }
 
 object QueryParam {
@@ -260,22 +255,31 @@ case class QueryParam(labelWithDir: LabelWithDirection, timestamp: Long = System
   var exclude = false
   var include = false
 
+  var columnRangeFilterMinBytes = Array.empty[Byte]
+  var columnRangeFilterMaxBytes = Array.empty[Byte]
+
   lazy val srcColumnWithDir = label.srcColumnWithDir(labelWithDir.dir)
   lazy val tgtColumnWithDir = label.tgtColumnWithDir(labelWithDir.dir)
 
+  def toBytes(idxSeq: Byte, offset: Int, limit: Int, isInverted: Boolean): Array[Byte] = {
+    val front = Array[Byte](idxSeq, if (isInverted) 1.toByte else 0.toByte)
+    Bytes.add(front, Bytes.toBytes((offset.toLong << 32 | limit)))
+  }
+
   /**
-    * consider only I/O specific parameters.
-    * properties that is used on Graph.filterEdges should not be considered.
-    * @param getRequest
-    * @return
-    */
-  def toCacheKey(getRequest: GetRequest): Int = {
-    val s = Seq(getRequest, labelWithDir, labelOrderSeq, offset, limit, rank,
-      //      duration,
-      isInverted,
-      columnRangeFilter).mkString(QueryParam.Delimiter)
-    //    logger.info(s"toCacheKey: $s")
-    MurmurHash3.stringHash(s)
+   * consider only I/O specific parameters.
+   * properties that is used on Graph.filterEdges should not be considered.
+   * @param bytes
+   * @return
+   */
+  def toCacheKey(bytes: Array[Byte]): Int = {
+    val hashBytes = toCacheKeyRaw(bytes)
+    MurmurHash3.bytesHash(hashBytes)
+  }
+  
+  def toCacheKeyRaw(bytes: Array[Byte]): Array[Byte] = {
+    Bytes.add(Bytes.add(bytes, labelWithDir.bytes, toBytes(labelOrderSeq, offset, limit, isInverted)), rank.toHashKeyBytes(),
+      Bytes.add(columnRangeFilterMinBytes, columnRangeFilterMaxBytes))
   }
 
   def isInverted(isInverted: Boolean): QueryParam = {
@@ -324,6 +328,8 @@ case class QueryParam(labelWithDir: LabelWithDirection, timestamp: Long = System
     fromVal(0) = len
     val maxBytes = fromVal
     val minBytes = toVal
+    this.columnRangeFilterMaxBytes = maxBytes
+    this.columnRangeFilterMinBytes = minBytes
     val rangeFilter = new ColumnRangeFilter(minBytes, true, maxBytes, true)
     this.columnRangeFilter = rangeFilter
     this
