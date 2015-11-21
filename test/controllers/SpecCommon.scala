@@ -347,7 +347,9 @@ trait SpecCommon extends Specification {
         Management.deleteLabel(labelName)
         Label.findByName(labelName, useCache = false) match {
           case None =>
-            AdminController.createLabelInner(Json.parse(create))
+            val label = AdminController.createLabelInner(Json.parse(create))
+            println(s">> Label created: $create, $label")
+            label
           case Some(label) =>
             println(s">> Label already exist: $create, $label")
         }
@@ -355,7 +357,9 @@ trait SpecCommon extends Specification {
 
       // 5. create vertex
       vertexPropsKeys.map { case (key, keyType) =>
-        Management.addVertexProp(testServiceName, testColumnName, key, keyType)
+        val vertex = Management.addVertexProp(testServiceName, testColumnName, key, keyType)
+        println(s">> VertexProps: $key, $keyType")
+        vertex
       }
 
       println("[init end]: >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
