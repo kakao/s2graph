@@ -14,6 +14,9 @@ import org.hbase.async.GetRequest
 import scala.collection.JavaConversions._
 import scala.collection.{Map, Seq}
 import scala.concurrent.{ExecutionContext, Future}
+import scala.util.Random
+import scala.collection.mutable.ArrayBuffer
+
 
 class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionContext)
   extends QueryBuilder[GetRequest, Deferred[QueryResult]](storage) {
@@ -80,11 +83,28 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
 
   override def fetch(queryRequest: QueryRequest): Deferred[QueryResult] = {
 
+    def sample(edges: Seq[EdgeWithScore], n: Int): Seq[EdgeWithScore] = {
+      val pureEdges = if (queryRequest.queryParam.offset == 0 ) {
+        edges.filterNot { case x => x.edge.propsPlusTs.contains(LabelMeta.degreeSeq) }
+      } else edges
+      val sampled = ArrayBuffer[EdgeWithScore]()
+      while (sampled.size < n) {
+        val selectedEdge = pureEdges(Random.nextInt(pureEdges.size))
+        if (!sampled.contains(selectedEdge)) sampled += pureEdges(Random.nextInt(pureEdges.size))
+      }
+      sampled.toSeq
+    }
+
     def fetchInner: Deferred[QueryResult] = {
       val request = buildRequest(queryRequest)
       storage.client.get(request) withCallback { kvs =>
         val edgeWithScores = storage.toEdges(kvs.toSeq, queryRequest.queryParam, queryRequest.prevStepScore, queryRequest.isInnerCall, queryRequest.parentEdges)
-        QueryResult(queryRequest.query, queryRequest.stepIdx, queryRequest.queryParam, edgeWithScores)
+
+        val resultEdgesWithScores = if (queryRequest.queryParam.sample >= 0 ) {
+          sample(edgeWithScores, queryRequest.queryParam.sample)
+        } else edgeWithScores
+
+        QueryResult(queryRequest.query, queryRequest.stepIdx, queryRequest.queryParam, resultEdgesWithScores)
       } recoverWith { ex =>
         logger.error(s"fetchQueryParam failed. fallback return.", ex)
         QueryResult(queryRequest.query, queryRequest.stepIdx, queryRequest.queryParam, isFailure = true)

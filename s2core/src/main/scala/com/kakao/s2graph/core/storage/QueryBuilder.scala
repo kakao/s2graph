@@ -4,9 +4,10 @@ import com.google.common.cache.Cache
 import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.types.{LabelWithDirection, VertexId}
 import com.kakao.s2graph.core.utils.logger
+import scala.collection.mutable.ArrayBuffer
 import scala.collection.{Map, Seq}
 import scala.concurrent.{Future, ExecutionContext}
-import scala.util.Try
+import scala.util.{Random, Try}
 
 abstract class QueryBuilder[R, T](storage: Storage)(implicit ec: ExecutionContext) {
 
