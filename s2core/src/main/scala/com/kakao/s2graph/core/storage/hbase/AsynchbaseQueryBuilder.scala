@@ -87,12 +87,7 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
       val pureEdges = if (queryRequest.queryParam.offset == 0 ) {
         edges.filterNot { case x => x.edge.propsPlusTs.contains(LabelMeta.degreeSeq) }
       } else edges
-      val sampled = ArrayBuffer[EdgeWithScore]()
-      while (sampled.size < n) {
-        val selectedEdge = pureEdges(Random.nextInt(pureEdges.size))
-        if (!sampled.contains(selectedEdge)) sampled += pureEdges(Random.nextInt(pureEdges.size))
-      }
-      sampled.toSeq
+      Random.shuffle(pureEdges).take(n)
     }
 
     def fetchInner: Deferred[QueryResult] = {
