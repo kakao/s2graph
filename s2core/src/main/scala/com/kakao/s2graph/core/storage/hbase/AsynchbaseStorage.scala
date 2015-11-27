@@ -441,9 +441,13 @@ class AsynchbaseStorage(config: Config, cache: Cache[Integer, Seq[QueryResult]],
         } else {
           val msg = Seq("\nFATAL ERROR\n",
             "=" * 50,
-            oldBytes.toList,
-            lockEdgePut.value.toList,
-            releaseLockEdgePut.value().toList,
+            s"RequestEdge: ${edge.toLogString}",
+            s"LockEdge: ${lockEdge.toLogString}",
+            s"ReleaseLockEdge: ${releaseLockEdge.toLogString}",
+            s"EdgeMutate: ${_edgeMutate.toLogString}",
+            s"OldValueBytes: ${oldBytes.toList}",
+            s"LockEdgePut: ${lockEdgePut.value.toList}",
+            s"ReleaseLockEdgePut: ${releaseLockEdgePut.value().toList}",
             "=" * 50,
             "\n"
           )
