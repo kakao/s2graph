@@ -250,8 +250,11 @@ object Management extends JSONParser {
 
     val label = tryOption(labelStr, getServiceLable)
     val dir =
-      if (direction == "") GraphUtil.toDirection(label.direction)
-      else GraphUtil.toDirection(direction)
+      if (direction == "")
+//        GraphUtil.toDirection(label.direction)
+        GraphUtil.directions("out")
+      else
+        GraphUtil.toDirection(direction)
 
     //    logger.debug(s"$srcId, ${label.srcColumnWithDir(dir)}")
     //    logger.debug(s"$tgtId, ${label.tgtColumnWithDir(dir)}")
@@ -278,7 +281,7 @@ object Management extends JSONParser {
     val propsWithTs = parsedProps.map(kv => (kv._1 -> InnerValLikeWithTs(kv._2, ts))) ++
       Map(LabelMeta.timeStampSeq -> InnerValLikeWithTs(InnerVal.withLong(ts, label.schemaVersion), ts))
 
-    Edge(srcVertex, tgtVertex, labelWithDir, op, ts, version = ts, propsWithTs = propsWithTs)
+    Edge(srcVertex, tgtVertex, labelWithDir, op, version = ts, propsWithTs = propsWithTs)
 
   }
 
@@ -456,11 +459,11 @@ object Management extends JSONParser {
   }
 
   // we only use murmur hash to distribute row key.
-  private def getStartKey(regionCount: Int) = {
+  def getStartKey(regionCount: Int): Array[Byte] = {
     Bytes.toBytes((Int.MaxValue / regionCount))
   }
 
-  private def getEndKey(regionCount: Int) = {
+  def getEndKey(regionCount: Int): Array[Byte] = {
     Bytes.toBytes((Int.MaxValue / regionCount * (regionCount - 1)))
   }
 
