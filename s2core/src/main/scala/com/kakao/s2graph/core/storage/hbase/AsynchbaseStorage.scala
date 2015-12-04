@@ -148,14 +148,23 @@ class AsynchbaseStorage(val config: Config, vertexCache: Cache[Integer, Option[V
   }
 
   override def mutateEdges(edges: Seq[Edge], withWait: Boolean): Future[Seq[Boolean]] = {
+    /// Squashing edges to mutate with triple of label name, source vertex's innerId, target vertex's innerId
+    /// * objectives
+    ///   - reduce rpc calls to storage with mutation on each local instance
+    ///   - This makes edge group which have same key consolidate one edge after process mutation(?)
+    ///   - Best practice is all edges to process have same group by key
+    ///   - Worst case is all ones have different key
     val edgeGrouped = edges.groupBy { edge => (edge.label, edge.srcVertex.innerId, edge.tgtVertex.innerId) } toSeq
 
+    /// processing squashed grouped edges
     val ret = edgeGrouped.map { case ((label, srcId, tgtId), edges) =>
       if (edges.isEmpty) Future.successful(true)
       else {
+        /// head represents this edge groups' information
         val head = edges.head
         val strongConsistency = head.label.consistencyLevel == "strong"
 
+        /// processing grouped edges
         if (strongConsistency) {
           val edgeFuture = mutateEdgesInner(edges, strongConsistency, withWait)(Edge.buildOperation)
           //TODO: decide what we will do on failure on vertex put
@@ -239,7 +248,8 @@ class AsynchbaseStorage(val config: Config, vertexCache: Cache[Integer, Option[V
     } else {
       val defers = elementRpcs.map { rpc => writeToStorage(_client, rpc) }
       if (withWait)
-        Deferred.group(defers).toFuture map { arr => arr.forall(identity) }
+        Deferred.group(defers) /// all deferrs to one Deferred group, so that deferred list can run at once
+          .toFuture map { arr => arr.forall(identity) } // flatten results
       else
         Future.successful(true)
     }
@@ -533,8 +543,12 @@ class AsynchbaseStorage(val config: Config, vertexCache: Cache[Integer, Option[V
                                withWait: Boolean)(f: (Option[Edge], Seq[Edge]) => (Edge, EdgeMutate)): Future[Boolean] = {
     if (!checkConsistency) {
       val zkQuorum = edges.head.label.hbaseZkAddr
+      /// execute mutations as future
       val futures = edges.map { edge =>
+        /// function f is always use "Edge.buildOperation" on current version of s2graph core
+        /// so we may use hard code with Edge.buildOperation, if there is no requirements to currying
         val (_, edgeUpdate) = f(None, Seq(edge))
+        /// generate mutations for indexedEdge, snapshotEdge, incrementEdge series
         val mutations =
           mutationBuilder.indexedEdgeMutations(edgeUpdate) ++
             mutationBuilder.snapshotEdgeMutations(edgeUpdate) ++

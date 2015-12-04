@@ -317,13 +317,18 @@ object Edge extends JSONParser {
   def buildOperation(invertedEdge: Option[Edge], requestEdges: Seq[Edge]): (Edge, EdgeMutate) = {
     //            logger.debug(s"oldEdge: ${invertedEdge.map(_.toStringRaw)}")
     //            logger.debug(s"requestEdge: ${requestEdge.toStringRaw}")
+
+    /// invertedEdge name was changed to snapshotEdge
+    /// initial operation for current given requestEdges, if invertedEdge is None
     val oldPropsWithTs =
       if (invertedEdge.isEmpty) Map.empty[Byte, InnerValLikeWithTs] else invertedEdge.get.propsWithTs
 
+    /// F.Y.I. You can refer to "http://jim-mcbeath.blogspot.kr/2009/05/scala-functions-vs-methods.html" about syntax for "method _"
+    /// transform from edges to real operation by each edge operation and consistency level
     val funcs = requestEdges.map { edge =>
       if (edge.op == GraphUtil.operations("insert")) {
         edge.label.consistencyLevel match {
-          case "strong" => Edge.mergeUpsert _
+          case "strong" => Edge.mergeUpsert _ /// change method to function to pass functionality as parameter
           case _ => Edge.mergeInsertBulk _
         }
       } else if (edge.op == GraphUtil.operations("insertBulk")) {
@@ -340,14 +345,21 @@ object Edge extends JSONParser {
     }
 
     val oldTs = invertedEdge.map(_.ts).getOrElse(minTsVal)
+    /// filter out edges with each operation when equal to snapshot edge's timestamp
+    /// Edges have same timestamp value with snapshot edges' are re-visited or not target for mutation, so we filter out
+    /// that kind of edges because they are treated as already processed one.
     val requestWithFuncs = requestEdges.zip(funcs).filter(oldTs != _._1.ts).sortBy(_._1.ts)
 
     if (requestWithFuncs.isEmpty) {
+      /// There are no processing edges, if filtered out list is empty. So we just return empty mutation tuple
       (requestEdges.head, EdgeMutate())
     } else {
+      /// fetch latest edge with function tuple
       val requestEdge = requestWithFuncs.last._1
       var prevPropsWithTs = oldPropsWithTs
 
+      /// iterate all edges' propsWithTs with paired function (mergeUpsert, mergeInsertBulk, mergeDelete, mergeUpdate, mergeIncrement)
+      /// and execute it. And then we can merge(update or insert) props with given grouped edges' props
       for {
         (requestEdge, func) <- requestWithFuncs
       } {
@@ -356,10 +368,13 @@ object Edge extends JSONParser {
         //        logger.debug(s"${requestEdge.toLogString}\n$oldPropsWithTs\n$prevPropsWithTs\n")
       }
       val requestTs = requestEdge.ts
+      /// Just adjust ONE version up even though there are multiple edges' mutations
+      ///  - Initial version value will be first Edge's timestamp value
       /** version should be monotoniously increasing so our RPC mutation should be applied safely */
       val newVersion = invertedEdge.map(e => e.version + incrementVersion).getOrElse(requestTs)
       val maxTs = prevPropsWithTs.map(_._2.ts).max
       val newTs = if (maxTs > requestTs) maxTs else requestTs
+      /// build final propsWithTs
       val propsWithTs = prevPropsWithTs ++
         Map(LabelMeta.timeStampSeq -> InnerValLikeWithTs(InnerVal.withLong(newTs, requestEdge.label.schemaVersion), newTs))
       val edgeMutate = buildMutation(invertedEdge, requestEdge, newVersion, oldPropsWithTs, propsWithTs)
@@ -417,8 +432,10 @@ object Edge extends JSONParser {
   }
 
   def mergeUpsert(propsPairWithTs: PropsPairWithTs): (State, Boolean) = {
+    //TODO: shouldReplace seems useless because don't use it in caller function side logic
     var shouldReplace = false
     val (oldPropsWithTs, propsWithTs, requestTs, version) = propsPairWithTs
+    /// Fetch that timestamp, if operation history has deleted operation.
     val lastDeletedAt = oldPropsWithTs.get(LabelMeta.lastDeletedAt).map(v => v.ts).getOrElse(minTsVal)
     val existInOld = for ((k, oldValWithTs) <- oldPropsWithTs) yield {
       propsWithTs.get(k) match {
