@@ -385,25 +385,38 @@ object Edge extends JSONParser {
     }
   }
 
+  /**
+    *  build EdgeMutate using given edge
+    * @param snapshotEdgeOpt Optional snapshot edge(old inverted edge)
+    * @param requestEdge Current target edge to build mutation
+    * @param newVersion New version to build
+    * @param oldPropsWithTs Snapshot edge's properties with timestamp
+    * @param newPropsWithTs Merged edge's properties with timestamp with snapshot edge's
+    * @return Edge Mutation as EdgeMutate
+    */
   def buildMutation(snapshotEdgeOpt: Option[Edge],
                     requestEdge: Edge,
                     newVersion: Long,
                     oldPropsWithTs: Map[Byte, InnerValLikeWithTs],
                     newPropsWithTs: Map[Byte, InnerValLikeWithTs]): EdgeMutate = {
+    /// discard building and return empty mutation, if old and new props are exactly same
     if (oldPropsWithTs == newPropsWithTs) {
       // all requests should be dropped. so empty mutation.
       //      logger.error(s"Case 1")
       EdgeMutate(edgesToDelete = Nil, edgesToInsert = Nil, newSnapshotEdge = None)
     } else {
+      /// Filter out last deleted at property
       val withOutDeletedAt = newPropsWithTs.filter(kv => kv._1 != LabelMeta.lastDeletedAt)
       val newOp = snapshotEdgeOpt match {
-        case None => requestEdge.op
+        case None => requestEdge.op /// use requested edge's operation, if this is initial edge operation
         case Some(old) =>
           val oldMaxTs = old.propsWithTs.map(_._2.ts).max
+          /// If oldMaxTs is greater than requested edge's timestamp, latest operation is old(snapshot) edge.
           if (oldMaxTs > requestEdge.ts) old.op
           else requestEdge.op
       }
 
+      /// create snapshot edge
       val newSnapshotEdgeOpt =
         Option(requestEdge.copy(op = newOp, propsWithTs = newPropsWithTs, version = newVersion).toSnapshotEdge)
       // delete request must always update snapshot.
@@ -413,13 +426,17 @@ object Edge extends JSONParser {
         EdgeMutate(edgesToDelete = Nil, edgesToInsert = Nil, newSnapshotEdge = newSnapshotEdgeOpt)
       } else {
         //        logger.error(s"Case 3")
+        /// build edges to delete
+        ///  - snapshot edge has snapshot edge and that snapshot edge is not delete operation
+        ///    => We need to clean up old indexed edges because there will be changes for old related edges(indexed edges for each property if they have)
         val edgesToDelete = snapshotEdgeOpt match {
           case Some(snapshotEdge) if snapshotEdge.op != GraphUtil.operations("delete") =>
-            snapshotEdge.copy(op = GraphUtil.defaultOpByte).
+            snapshotEdge.copy(op = GraphUtil.defaultOpByte).  /// default op byte is "insert"
               relatedEdges.flatMap { relEdge => relEdge.edgesWithIndexValid }
           case _ => Nil
         }
 
+        /// generate edges to build mutation (include indexed edge - indexed props)
         val edgesToInsert =
           if (newPropsWithTs.isEmpty || allPropsDeleted(newPropsWithTs)) Nil
           else

@@ -548,7 +548,7 @@ class AsynchbaseStorage(val config: Config, vertexCache: Cache[Integer, Option[V
         /// function f is always use "Edge.buildOperation" on current version of s2graph core
         /// so we may use hard code with Edge.buildOperation, if there is no requirements to currying
         val (_, edgeUpdate) = f(None, Seq(edge))
-        /// generate mutations for indexedEdge, snapshotEdge, incrementEdge series
+        /// generate mutations for indexedEdge, snapshotEdge, incrementEdge series ( convert from operation to HBaseClient's operation unit )
         val mutations =
           mutationBuilder.indexedEdgeMutations(edgeUpdate) ++
             mutationBuilder.snapshotEdgeMutations(edgeUpdate) ++
@@ -559,6 +559,7 @@ class AsynchbaseStorage(val config: Config, vertexCache: Cache[Integer, Option[V
     } else {
       def commit(_edges: Seq[Edge], statusCode: Byte): Future[Boolean] = {
 
+        /// read snapshot edge from hbase( occur read request to HBase, here )
         fetchSnapshotEdge(_edges.head) flatMap { case (queryParam, snapshotEdgeOpt, kvOpt) =>
 
           val (newEdge, edgeUpdate) = f(snapshotEdgeOpt, _edges)
@@ -567,6 +568,14 @@ class AsynchbaseStorage(val config: Config, vertexCache: Cache[Integer, Option[V
             logger.debug(s"${newEdge.toLogString} drop.")
             Future.successful(true)
           } else {
+            ///
+            /// state machine of statusCode
+            ///  0 -> initial status
+            ///  1 -> lock acquired
+            ///  2 -> edge mutated
+            ///  3 -> edge degree mutated
+            ///  4 -> lock released
+            ///
             commitUpdate(newEdge, statusCode)(snapshotEdgeOpt, kvOpt, edgeUpdate).map { ret =>
               if (ret) {
                 logger.info(s"[Success] commit: \n${_edges.map(_.toLogString).mkString("\n")}")
