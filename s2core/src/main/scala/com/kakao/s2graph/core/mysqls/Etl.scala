@@ -1,18 +1,12 @@
 package com.kakao.s2graph.core.mysqls
 
-import scala.util.Try
 import scalikejdbc._
+
+import scala.util.Try
 
 /**
   * Created by hsleep(honeysleep@gmail.com) on 2015. 12. 7..
   */
-case class Etl(id: Option[Int],
-               originalLabelId: Int,
-               transformLabelId: Int,
-               srcEtlQueryId: Option[Int],
-               tgtEtlQueryId: Option[Int],
-               propEtlQueryId: Option[Int])
-
 object Etl extends Model[Etl] {
   val e = Etl.syntax("e")
   val columnName = Etl.column
@@ -69,3 +63,10 @@ object Etl extends Model[Etl] {
     }
   }
 }
+
+case class Etl(id: Option[Int],
+               originalLabelId: Int,
+               transformLabelId: Int,
+               srcEtlQueryId: Option[Int],
+               tgtEtlQueryId: Option[Int],
+               propEtlQueryId: Option[Int])
