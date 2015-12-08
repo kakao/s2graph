@@ -58,10 +58,12 @@ object QueryController extends Controller with JSONParser {
   private def getEdgesAsync(jsonQuery: JsValue)
                            (post: (Seq[QueryRequestWithResult], Seq[QueryRequestWithResult]) => JsValue): Future[Result] = {
     if (!Config.IS_QUERY_SERVER) Unauthorized.as(applicationJsonHeader)
+    /// currying function
     val fetch = eachQuery(post) _
 //    logger.info(jsonQuery)
 
     Try {
+      /// run real fetch edges for each query
       val future = jsonQuery match {
         case JsArray(arr) => Future.traverse(arr.map(requestParser.toQuery(_)))(fetch).map(JsArray)
         case obj@JsObject(_) => fetch(requestParser.toQuery(obj))

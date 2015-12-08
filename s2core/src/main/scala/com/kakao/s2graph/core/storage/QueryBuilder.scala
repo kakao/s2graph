@@ -28,41 +28,54 @@ abstract class QueryBuilder[R, T](storage: Storage)(implicit ec: ExecutionContex
   def fetchStep(queryRequestWithResultsLs: Seq[QueryRequestWithResult]): Future[Seq[QueryRequestWithResult]] = {
     if (queryRequestWithResultsLs.isEmpty) Future.successful(Nil)
     else {
+      /// fetch edge's query request ( maybe stepIdx is "-1", if edge is self-directed )
       val queryRequest = queryRequestWithResultsLs.head.queryRequest
+      /// real query from client
       val q = queryRequest.query
       val queryResultsLs = queryRequestWithResultsLs.map(_.queryResult)
 
+      /// increase stepIdx
       val stepIdx = queryRequest.stepIdx + 1
 
+      /// prevStepOpt cannot be "None" and also stepIdx cannot be less than "0", so is this condition check routine required?
       val prevStepOpt = if (stepIdx > 0) Option(q.steps(stepIdx - 1)) else None
+      /// If this is defense code, I think we'd better use assertion. Because below this line can raise exception I think.
       val prevStepThreshold = prevStepOpt.map(_.nextStepScoreThreshold).getOrElse(QueryParam.DefaultThreshold)
       val prevStepLimit = prevStepOpt.map(_.nextStepLimit).getOrElse(-1)
+      /// fetch step to process from query
       val step = q.steps(stepIdx)
+      /// fetch already visited all vertex map
       val alreadyVisited =
         if (stepIdx == 0) Map.empty[(LabelWithDirection, Vertex), Boolean]
         else Graph.alreadyVisitedVertices(queryResultsLs)
 
+      /// group by target Vertex from sequences of (Vertex, EdgeWithScore)
       val groupedBy = queryResultsLs.flatMap { queryResult =>
         queryResult.edgeWithScoreLs.map { case edgeWithScore =>
+          /// emit (Vertex, EdgeWithScore) tuple
           edgeWithScore.edge.tgtVertex -> edgeWithScore
         }
       }.groupBy { case (vertex, edgeWithScore) => vertex }
 
       val groupedByFiltered = for {
         (vertex, edgesWithScore) <- groupedBy
+        /// score aggregation by target vertex with sum function and cut the vertex with edges by step threshold
         aggregatedScore = edgesWithScore.map(_._2.score).sum if aggregatedScore >= prevStepThreshold
       } yield vertex -> aggregatedScore
 
+      /// build [VertexId, Seq[EdgeWithScore]] map for previous step's
       val prevStepTgtVertexIdEdges = for {
         (vertex, edgesWithScore) <- groupedBy
       } yield vertex.id -> edgesWithScore.map { case (vertex, edgeWithScore) => edgeWithScore }
 
+      /// build top-k(step limit) (vertex, aggregated score) map or all
       val nextStepSrcVertices = if (prevStepLimit >= 0) {
         groupedByFiltered.toSeq.sortBy(-1 * _._2).take(prevStepLimit)
       } else {
         groupedByFiltered.toSeq
       }
 
+      /// build query requests for next step query
       val queryRequests = for {
         (vertex, prevStepScore) <- nextStepSrcVertices
         queryParam <- step.queryParams
@@ -89,9 +102,12 @@ abstract class QueryBuilder[R, T](storage: Storage)(implicit ec: ExecutionContex
         // TODO: this should be get vertex query.
         fallback
       } else {
+        /// change from start vertices to self directed edges to make consistent with edge traverse logic
         // current stepIdx = -1
         val startQueryResultLs = QueryResult.fromVertices(q)
+        /// "acc" is accumulated value, all steps are iterate in here for accumulation
         q.steps.foldLeft(Future.successful(startQueryResultLs)) { case (acc, step) =>
+          /// fetch each edge ( built from start vertex ) result edges
           fetchStepFuture(acc)
         }
       }

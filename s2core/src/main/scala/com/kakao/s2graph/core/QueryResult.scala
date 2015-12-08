@@ -17,6 +17,7 @@ object QueryResult {
     } yield {
       val edge = Edge(vertex, vertex, queryParam.labelWithDir, propsWithTs = propsWithTs)
       val edgeWithScore = EdgeWithScore(edge, Graph.DefaultScore)
+      /// Make step value "-1" because this is just make self-directed edge for given start vertex
       QueryRequestWithResult(QueryRequest(query, -1, vertex, queryParam),
         QueryResult(edgeWithScoreLs = Seq(edgeWithScore)))
     }
