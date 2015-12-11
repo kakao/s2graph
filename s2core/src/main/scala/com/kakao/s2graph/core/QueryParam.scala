@@ -42,7 +42,9 @@ case class Query(vertices: Seq[Vertex] = Seq.empty[Vertex],
                  filterOutQuery: Option[Query] = None,
                  filterOutFields: Seq[String] = Seq(LabelMeta.to.name),
                  withScore: Boolean = true,
-                 returnTree: Boolean = false) {
+                 returnTree: Boolean = false,
+                 limitOpt: Option[Int] = None,
+                 returnAgg: Boolean = true) {
 
   def cacheKeyBytes: Array[Byte] = {
     val selectBytes = Bytes.toBytes(selectColumns.toString)
@@ -324,7 +326,7 @@ case class QueryParam(labelWithDir: LabelWithDirection, timestamp: Long = System
 
   def limit(offset: Int, limit: Int): QueryParam = {
     /** since degree info is located on first always */
-    if (offset == 0) {
+    if (offset == 0 && this.columnRangeFilter == null) {
       this.limit = limit + 1
       this.offset = offset
     } else {
