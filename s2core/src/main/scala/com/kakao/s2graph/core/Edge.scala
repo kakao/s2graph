@@ -586,6 +586,8 @@ object Edge extends JSONParser {
         }
       }
     }
+    /// Put "-2", LabelMeta.lastDeletedAt, key with value - InnerValLikeWithTs with deletion timestamp when operation is "delete"
+    /// Edge's deletion last deletion time is saved in snapshot edges' properties map to check later for building edge mutation
     val mustExistInNew = Map(LabelMeta.lastDeletedAt -> InnerValLikeWithTs.withLong(lastDeletedAt, lastDeletedAt, version))
     ((existInOld.flatten ++ mustExistInNew).toMap, shouldReplace)
   }
