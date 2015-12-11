@@ -6,32 +6,6 @@ import com.kakao.s2graph.core.utils.logger
 import org.scalatest.FunSuite
 
 class EdgeTest extends FunSuite with TestCommon with TestCommonWithModels {
-  test("buildOperation") {
-    val schemaVersion = "v2"
-    val vertexId = VertexId(0, InnerVal.withStr("dummy", schemaVersion))
-    val srcVertex = Vertex(vertexId)
-    val tgtVertex = srcVertex
-
-    val timestampProp = LabelMeta.timeStampSeq -> InnerValLikeWithTs(InnerVal.withLong(0, schemaVersion), 1)
-
-    val snapshotEdge = None
-    val propsWithTs = Map(timestampProp)
-    val requestEdge = Edge(srcVertex, tgtVertex, labelWithDirV2, propsWithTs = propsWithTs)
-    val newVersion = 0L
-
-    val newPropsWithTs = Map(
-      timestampProp,
-      1.toByte -> InnerValLikeWithTs(InnerVal.withBoolean(false, schemaVersion), 1)
-    )
-
-    val edgeMutate = Edge.buildMutation(snapshotEdge, requestEdge, newVersion, propsWithTs, newPropsWithTs)
-    logger.info(edgeMutate.toLogString)
-
-    assert(edgeMutate.newSnapshotEdge.isDefined)
-    assert(edgeMutate.edgesToInsert.nonEmpty)
-    assert(edgeMutate.edgesToDelete.isEmpty)
-  }
-
   test("buildMutation: snapshotEdge: None with newProps") {
     val schemaVersion = "v2"
     val vertexId = VertexId(0, InnerVal.withStr("dummy", schemaVersion))
