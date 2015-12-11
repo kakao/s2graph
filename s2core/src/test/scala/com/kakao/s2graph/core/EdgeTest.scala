@@ -47,6 +47,7 @@ class EdgeTest extends FunSuite with TestCommon with TestCommonWithModels {
 
     val newPropsWithTs = Map(
       timestampProp,
+      /// build another meta property
       1.toByte -> InnerValLikeWithTs(InnerVal.withBoolean(false, schemaVersion), 1)
     )
 
