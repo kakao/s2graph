@@ -29,8 +29,11 @@ object ExperimentController extends Controller with RequestParser {
       case None => Future.successful(NotFound("bucket is not found."))
       case Some(bucket) =>
         try {
-          if (bucket.isGraphQuery) buildRequestInner(request, bucket, uuid)
-          else buildRequest(request, bucket, uuid)
+          if (bucket.isEmpty) Future.successful(Ok(Json.obj("isEmpty" -> true)).withHeaders(impressionKey -> bucket.impressionId))
+          else {
+            if (bucket.isGraphQuery) buildRequestInner(request, bucket, uuid)
+            else buildRequest(request, bucket, uuid)
+          }
         } catch {
           case e: Exception =>
             logger.error(e.toString())
@@ -58,28 +61,25 @@ object ExperimentController extends Controller with RequestParser {
   }
 
   private def buildRequestInner(request: Request[AnyContent], bucket: Bucket, uuid: String): Future[Result] = {
-    if (bucket.isEmpty) Future.successful(Ok(Json.obj("isEmpty" -> true)).withHeaders(impressionKey -> bucket.impressionId))
-    else {
-      val jsonBody = makeRequestJson(request.body.asJson, bucket, uuid)
-      val url = new URL(bucket.apiPath)
-      val path = url.getPath()
+    val jsonBody = makeRequestJson(request.body.asJson, bucket, uuid)
+    val url = new URL(bucket.apiPath)
+    val path = url.getPath()
 
-      // dummy log for sampling
-      val experimentLog = s"POST $path took -1 ms 200 -1 $jsonBody"
-      logger.info(experimentLog)
+    // dummy log for sampling
+    val experimentLog = s"POST $path took -1 ms 200 -1 $jsonBody"
+    logger.info(experimentLog)
 
-      val response = path match {
-        case "/graphs/getEdges" => controllers.QueryController.getEdgesInner(jsonBody)
-        case "/graphs/getEdges/grouped" => controllers.QueryController.getEdgesWithGroupingInner(jsonBody)
-        case "/graphs/getEdgesExcluded" => controllers.QueryController.getEdgesExcludedInner(jsonBody)
-        case "/graphs/getEdgesExcluded/grouped" => controllers.QueryController.getEdgesExcludedWithGroupingInner(jsonBody)
-        case "/graphs/checkEdges" => controllers.QueryController.checkEdgesInner(jsonBody)
-        case "/graphs/getEdgesGrouped" => controllers.QueryController.getEdgesGroupedInner(jsonBody)
-        case "/graphs/getEdgesGroupedExcluded" => controllers.QueryController.getEdgesGroupedExcludedInner(jsonBody)
-        case "/graphs/getEdgesGroupedExcludedFormatted" => controllers.QueryController.getEdgesGroupedExcludedFormattedInner(jsonBody)
-      }
-      response.map { r => r.withHeaders(impressionKey -> bucket.impressionId) }
+    val response = path match {
+      case "/graphs/getEdges" => controllers.QueryController.getEdgesInner(jsonBody)
+      case "/graphs/getEdges/grouped" => controllers.QueryController.getEdgesWithGroupingInner(jsonBody)
+      case "/graphs/getEdgesExcluded" => controllers.QueryController.getEdgesExcludedInner(jsonBody)
+      case "/graphs/getEdgesExcluded/grouped" => controllers.QueryController.getEdgesExcludedWithGroupingInner(jsonBody)
+      case "/graphs/checkEdges" => controllers.QueryController.checkEdgesInner(jsonBody)
+      case "/graphs/getEdgesGrouped" => controllers.QueryController.getEdgesGroupedInner(jsonBody)
+      case "/graphs/getEdgesGroupedExcluded" => controllers.QueryController.getEdgesGroupedExcludedInner(jsonBody)
+      case "/graphs/getEdgesGroupedExcludedFormatted" => controllers.QueryController.getEdgesGroupedExcludedFormattedInner(jsonBody)
     }
+    response.map { r => r.withHeaders(impressionKey -> bucket.impressionId) }
   }
 
   private def toSimpleMap(map: Map[String, Seq[String]]): Map[String, String] = {
