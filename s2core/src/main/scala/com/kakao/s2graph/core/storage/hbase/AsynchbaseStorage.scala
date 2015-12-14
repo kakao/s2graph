@@ -275,8 +275,10 @@ class AsynchbaseStorage(val config: Config, vertexCache: Cache[Integer, Option[V
   }
 
   private def fetchSnapshotEdge(edge: Edge): Future[(QueryParam, Option[Edge], Option[KeyValue])] = {
+    /// build snapshot edge query request(QueryRequest)
     val labelWithDir = edge.labelWithDir
     val queryParam = QueryParam(labelWithDir)
+    /// Query changed for snapshot edge after set target vertex inner id to in
     val _queryParam = queryParam.tgtVertexInnerIdOpt(Option(edge.tgtVertex.innerId))
     val q = Query.toQuery(Seq(edge.srcVertex), _queryParam)
     val queryRequest = QueryRequest(q, 0, edge.srcVertex, _queryParam)
@@ -400,6 +402,7 @@ class AsynchbaseStorage(val config: Config, vertexCache: Cache[Integer, Option[V
       Future.successful(true)
     } else {
       val p = Random.nextDouble()
+      /// for testing storage layer problem situation in certain probability
       if (p < FailProb) throw new PartialFailureException(edge, 0, s"$p")
       else {
         val lockEdgePut = toPutRequest(lockEdge)
@@ -483,11 +486,26 @@ class AsynchbaseStorage(val config: Config, vertexCache: Cache[Integer, Option[V
 //    def oldBytes = snapshotEdgeOpt.map { e =>
 //      snapshotEdgeSerializer(e.toSnapshotEdge).toKeyValues.head.value
 //    }.getOrElse(Array.empty)
+    /**
+      * Processing state machine for edge mutation
+      * @param lockEdge locked edge
+      * @param releaseLockEdge release locked edge
+      * @param _edgeMutate edge mutation
+      * @param statusCode status code for mutation state machine
+      * @return
+      */
     def process(lockEdge: SnapshotEdge,
                 releaseLockEdge: SnapshotEdge,
                 _edgeMutate: EdgeMutate,
                 statusCode: Byte): Future[Boolean] = {
-
+      ///
+      /// state machine of statusCode
+      ///  0 -> initial status
+      ///  1 -> after acquireLock
+      ///  2 -> after mutate
+      ///  3 -> after increment
+      ///  4 -> after releaseLock
+      ///
       for {
         locked <- acquireLock(statusCode, edge, lockEdge, oldBytes)
         mutated <- mutate(locked, edge, statusCode, _edgeMutate)

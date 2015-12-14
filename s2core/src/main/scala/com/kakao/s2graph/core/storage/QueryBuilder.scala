@@ -37,9 +37,7 @@ abstract class QueryBuilder[R, T](storage: Storage)(implicit ec: ExecutionContex
       /// increase stepIdx
       val stepIdx = queryRequest.stepIdx + 1
 
-      /// prevStepOpt cannot be "None" and also stepIdx cannot be less than "0", so is this condition check routine required?
       val prevStepOpt = if (stepIdx > 0) Option(q.steps(stepIdx - 1)) else None
-      /// If this is defense code, I think we'd better use assertion. Because below this line can raise exception I think.
       val prevStepThreshold = prevStepOpt.map(_.nextStepScoreThreshold).getOrElse(QueryParam.DefaultThreshold)
       val prevStepLimit = prevStepOpt.map(_.nextStepLimit).getOrElse(-1)
       /// fetch step to process from query
@@ -49,7 +47,7 @@ abstract class QueryBuilder[R, T](storage: Storage)(implicit ec: ExecutionContex
         if (stepIdx == 0) Map.empty[(LabelWithDirection, Vertex), Boolean]
         else Graph.alreadyVisitedVertices(queryResultsLs)
 
-      /// group by target Vertex from sequences of (Vertex, EdgeWithScore)
+      /// group by target Vertex from sequences of (Vertex, EdgeWithScore) ==> ( TargetVertex ID, Seq[EdgeWithScore])
       val groupedBy = queryResultsLs.flatMap { queryResult =>
         queryResult.edgeWithScoreLs.map { case edgeWithScore =>
           /// emit (Vertex, EdgeWithScore) tuple
