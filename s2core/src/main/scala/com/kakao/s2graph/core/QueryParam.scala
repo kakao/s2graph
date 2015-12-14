@@ -3,7 +3,6 @@ package com.kakao.s2graph.core
 import com.google.common.hash.Hashing
 import com.kakao.s2graph.core.mysqls._
 import com.kakao.s2graph.core.parsers.{Where, WhereParser}
-import com.kakao.s2graph.core.storage.hbase.AsynchbaseQueryBuilder
 import com.kakao.s2graph.core.types._
 import org.apache.hadoop.hbase.util.Bytes
 import org.hbase.async.ColumnRangeFilter
@@ -43,7 +42,9 @@ case class Query(vertices: Seq[Vertex] = Seq.empty[Vertex],
                  filterOutQuery: Option[Query] = None,
                  filterOutFields: Seq[String] = Seq(LabelMeta.to.name),
                  withScore: Boolean = true,
-                 returnTree: Boolean = false) {
+                 returnTree: Boolean = false,
+                 limitOpt: Option[Int] = None,
+                 returnAgg: Boolean = true) {
 
   def cacheKeyBytes: Array[Byte] = {
     val selectBytes = Bytes.toBytes(selectColumns.toString)
@@ -245,6 +246,7 @@ case class QueryParam(labelWithDir: LabelWithDirection, timestamp: Long = System
 
   var labelOrderSeq = fullKey
 
+  var sample = -1
   var limit = 10
   var offset = 0
   var rank = new RankParam(labelWithDir.labelId, List(LabelMeta.countSeq -> 1))
@@ -296,7 +298,11 @@ case class QueryParam(labelWithDir: LabelWithDirection, timestamp: Long = System
     val transformBytes = transformer.toHashKeyBytes
     //TODO: change this to binrary format.
     val whereBytes = Bytes.toBytes(where.toString())
-    val durationBytes = duration.map { case (min, max) => Bytes.add(Bytes.toBytes(min), Bytes.toBytes(max)) } getOrElse Array.empty[Byte]
+    val durationBytes = duration.map { case (min, max) =>
+      val minTs = min / cacheTTLInMillis
+      val maxTs = max / cacheTTLInMillis
+      Bytes.add(Bytes.toBytes(minTs), Bytes.toBytes(maxTs))
+    } getOrElse Array.empty[Byte]
 //    Bytes.toBytes(duration.toString)
     val conditionBytes = Bytes.add(transformBytes, whereBytes, durationBytes)
     Bytes.add(Bytes.add(bytes, labelWithDir.bytes, toBytes(labelOrderSeq, offset, limit, isInverted)), rank.toHashKeyBytes(),
@@ -313,9 +319,14 @@ case class QueryParam(labelWithDir: LabelWithDirection, timestamp: Long = System
     this
   }
 
+  def sample(n: Int): QueryParam = {
+    this.sample = n
+    this
+  }
+
   def limit(offset: Int, limit: Int): QueryParam = {
     /** since degree info is located on first always */
-    if (offset == 0) {
+    if (offset == 0 && this.columnRangeFilter == null) {
       this.limit = limit + 1
       this.offset = offset
     } else {
