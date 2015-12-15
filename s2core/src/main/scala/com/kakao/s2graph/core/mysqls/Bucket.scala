@@ -32,6 +32,18 @@ object Bucket extends Model[Bucket] {
     }
   }
 
+  def findById(id: Int, useCache: Boolean = true)(implicit session: DBSession = AutoSession): Option[Bucket] = {
+    val cacheKey = s"id=$id"
+    val sql = sql"""SELECT * FROM buckets WHERE id = $id""".map { rs => Bucket(rs) }
+    if (useCache) {
+      withCache(cacheKey) {
+        sql.single().apply()
+      }
+    } else {
+      sql.single().apply()
+    }
+  }
+
   def toRange(str: String): Option[(Int, Int)] = {
     val range = str.split(rangeDelimiter)
     if (range.length == 2) Option(range.head.toInt, range.last.toInt)

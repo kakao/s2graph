@@ -5,7 +5,7 @@ import java.util.concurrent.atomic.AtomicLong
 
 import akka.actor._
 import akka.routing.{Broadcast, RoundRobinPool}
-import com.kakao.s2graph.core.utils.Configuration
+import com.typesafe.config.Config
 import org.apache.kafka.clients.producer._
 
 import scala.concurrent.duration._
@@ -24,7 +24,7 @@ object ExceptionHandler {
   var phase = "dev"
   lazy val failTopic = s"mutateFailed_${phase}"
 
-  def apply(config: Configuration) = {
+  def apply(config: Config) = {
     properties =
       if (config.hasPath("kafka.metadata.broker.list")) Option(kafkaConfig(config))
       else None
@@ -66,7 +66,7 @@ object ExceptionHandler {
   }
 
 
-  def kafkaConfig(config: Configuration) = {
+  def kafkaConfig(config: Config) = {
     val props = new Properties();
 
     /** all default configuration for new producer */

@@ -9,8 +9,8 @@ import com.kakao.s2graph.core.parsers.WhereParser
 import com.kakao.s2graph.core.storage.Storage
 import com.kakao.s2graph.core.storage.hbase._
 import com.kakao.s2graph.core.types._
-import com.kakao.s2graph.core.utils.{Configuration, logger}
-import com.typesafe.config.ConfigFactory
+import com.kakao.s2graph.core.utils.logger
+import com.typesafe.config.{Config, ConfigFactory}
 
 import scala.collection.JavaConversions._
 import scala.collection._
@@ -43,7 +43,7 @@ object Graph {
     "future.cache.max.idle.ttl" -> java.lang.Integer.valueOf(60000)
   )
 
-  var DefaultConfig: Configuration = ConfigFactory.parseMap(DefaultConfigs)
+  var DefaultConfig: Config = ConfigFactory.parseMap(DefaultConfigs)
 
   /** helpers for filterEdges */
   type HashKey = (Int, Int, Int, Int, Boolean)
@@ -311,7 +311,7 @@ object Graph {
   } get
 }
 
-class Graph(_config: Configuration)(implicit ec: ExecutionContext) {
+class Graph(_config: Config)(implicit ec: ExecutionContext) {
   val config = _config.withFallback(Graph.DefaultConfig)
   val cacheSize = config.getInt("cache.max.size")
 //  val cache = CacheBuilder.newBuilder().maximumSize(cacheSize).build[java.lang.Integer, Seq[QueryResult]]()

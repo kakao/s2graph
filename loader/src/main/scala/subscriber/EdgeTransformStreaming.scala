@@ -23,7 +23,6 @@ object EdgeTransformStreaming extends SparkApp {
 
   val initialize = {
     println("streaming initialize")
-    //    Graph(config)
     Model(config)
     true
   }
