@@ -90,12 +90,16 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
   }
 
   val maxSize = storage.config.getInt("future.cache.max.size")
-  val futureCacheTTL = storage.config.getInt("future.cache.max.idle.ttl")
+  val expreAfterWrite = storage.config.getInt("future.cache.expire.after.write")
+  val expreAfterAccess = storage.config.getInt("future.cache.expire.after.access")
+
+
   val futureCache = CacheBuilder.newBuilder()
   .initialCapacity(maxSize)
   .concurrencyLevel(Runtime.getRuntime.availableProcessors())
-  .expireAfterWrite(futureCacheTTL, TimeUnit.MILLISECONDS)
-  .expireAfterAccess(futureCacheTTL, TimeUnit.MILLISECONDS)
+  .expireAfterWrite(expreAfterWrite, TimeUnit.MILLISECONDS)
+  .expireAfterAccess(expreAfterAccess, TimeUnit.MILLISECONDS)
+  .weakKeys()
   .maximumSize(maxSize).build[java.lang.Long, (Long, Deferred[QueryRequestWithResult])]()
 
   override def fetch(queryRequest: QueryRequest,
@@ -143,7 +147,7 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
                        defer: Deferred[QueryRequestWithResult]): Deferred[QueryRequestWithResult] = {
       if (System.currentTimeMillis() >= cachedAt + cacheTTL) {
         // future is too old. so need to expire and fetch new data from storage.
-        futureCache.asMap().remove(cacheKey)
+        futureCache.invalidate(cacheKey)
         val newPromise = new Deferred[QueryRequestWithResult]()
         futureCache.asMap().putIfAbsent(cacheKey, (System.currentTimeMillis(), newPromise)) match {
           case null =>
@@ -170,7 +174,7 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
       val cacheKeyBytes = Bytes.add(queryRequest.query.cacheKeyBytes, toCacheKeyBytes(request))
       val cacheKey = queryParam.toCacheKey(cacheKeyBytes)
 
-      val cacheVal = futureCache.asMap().get(cacheKey)
+      val cacheVal = futureCache.getIfPresent(cacheKey)
       cacheVal match {
         case null =>
           // here there is no promise set up for this cacheKey so we need to set promise on future cache.
