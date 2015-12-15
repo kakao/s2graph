@@ -1,7 +1,7 @@
 package com.kakao.s2graph.core.storage.hbase
 
 import java.util
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.{Executors, TimeUnit}
 import com.google.common.cache.CacheBuilder
 import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.mysqls.LabelMeta
@@ -22,6 +22,31 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
 
   import Extensions.DeferOps
 
+  val maxSize = storage.config.getInt("future.cache.max.size")
+  val expreAfterWrite = storage.config.getInt("future.cache.expire.after.write")
+  val expreAfterAccess = storage.config.getInt("future.cache.expire.after.access")
+
+
+  val futureCache = CacheBuilder.newBuilder()
+  .initialCapacity(maxSize)
+  .concurrencyLevel(Runtime.getRuntime.availableProcessors())
+  .expireAfterWrite(expreAfterWrite, TimeUnit.MILLISECONDS)
+  .expireAfterAccess(expreAfterAccess, TimeUnit.MILLISECONDS)
+//  .weakKeys()
+  .maximumSize(maxSize).build[java.lang.Long, (Long, Deferred[QueryRequestWithResult])]()
+
+  val scheduleTime = 60L * 60
+  val scheduler = Executors.newScheduledThreadPool(1)
+
+  scheduler.scheduleAtFixedRate(new Runnable(){
+    override def run() = {
+      val startedAt = System.currentTimeMillis()
+      logger.info(s"[FutureCacheCleanUpStart]: $startedAt")
+      futureCache.cleanUp()
+      val duration = System.currentTimeMillis() - startedAt
+      logger.info(s"[FutureCacheCleanUpFinished]: $duration")
+    }
+  }, scheduleTime, scheduleTime, TimeUnit.SECONDS)
 
   override def buildRequest(queryRequest: QueryRequest): GetRequest = {
     val srcVertex = queryRequest.vertex
@@ -89,18 +114,6 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
     fetch(queryRequest, 1.0, isInnerCall = true, parentEdges = Nil)
   }
 
-  val maxSize = storage.config.getInt("future.cache.max.size")
-  val expreAfterWrite = storage.config.getInt("future.cache.expire.after.write")
-  val expreAfterAccess = storage.config.getInt("future.cache.expire.after.access")
-
-
-  val futureCache = CacheBuilder.newBuilder()
-  .initialCapacity(maxSize)
-  .concurrencyLevel(Runtime.getRuntime.availableProcessors())
-  .expireAfterWrite(expreAfterWrite, TimeUnit.MILLISECONDS)
-  .expireAfterAccess(expreAfterAccess, TimeUnit.MILLISECONDS)
-  .weakKeys()
-  .maximumSize(maxSize).build[java.lang.Long, (Long, Deferred[QueryRequestWithResult])]()
 
   override def fetch(queryRequest: QueryRequest,
                      prevStepScore: Double,
