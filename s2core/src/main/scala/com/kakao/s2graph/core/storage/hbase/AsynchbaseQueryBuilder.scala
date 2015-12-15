@@ -28,6 +28,7 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
 
 
   val futureCache = CacheBuilder.newBuilder()
+  .recordStats()
   .initialCapacity(maxSize)
   .concurrencyLevel(Runtime.getRuntime.availableProcessors())
   .expireAfterWrite(expreAfterWrite, TimeUnit.MILLISECONDS)
@@ -35,16 +36,13 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
 //  .weakKeys()
   .maximumSize(maxSize).build[java.lang.Long, (Long, Deferred[QueryRequestWithResult])]()
 
-  val scheduleTime = 60L * 60
+//  val scheduleTime = 60L * 60
+  val scheduleTime = 10
   val scheduler = Executors.newScheduledThreadPool(1)
 
   scheduler.scheduleAtFixedRate(new Runnable(){
     override def run() = {
-      val startedAt = System.currentTimeMillis()
-      logger.info(s"[FutureCacheCleanUpStart]: $startedAt")
-      futureCache.cleanUp()
-      val duration = System.currentTimeMillis() - startedAt
-      logger.info(s"[FutureCacheCleanUpFinished]: $duration")
+      logger.info(s"[FutureCache]: ${futureCache.stats()}")
     }
   }, scheduleTime, scheduleTime, TimeUnit.SECONDS)
 
