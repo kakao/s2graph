@@ -1,8 +1,7 @@
 package com.kakao.s2graph.core.storage.hbase
 
 import java.util
-import java.util.concurrent.TimeUnit
-import com.google.common.cache.CacheBuilder
+
 import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.mysqls.LabelMeta
 import com.kakao.s2graph.core.storage.QueryBuilder
@@ -11,11 +10,12 @@ import com.kakao.s2graph.core.utils.{Extensions, logger}
 import com.stumbleupon.async.Deferred
 import org.apache.hadoop.hbase.util.Bytes
 import org.hbase.async.GetRequest
+
 import scala.annotation.tailrec
 import scala.collection.JavaConversions._
 import scala.collection.{Map, Seq}
-import scala.util.Random
 import scala.concurrent.{ExecutionContext, Future}
+import scala.util.Random
 
 class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionContext)
   extends QueryBuilder[GetRequest, Deferred[QueryRequestWithResult]](storage) {
@@ -91,12 +91,29 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
 
   val maxSize = storage.config.getInt("future.cache.max.size")
   val futureCacheTTL = storage.config.getInt("future.cache.max.idle.ttl")
-  val futureCache = CacheBuilder.newBuilder()
-  .initialCapacity(maxSize)
-  .concurrencyLevel(Runtime.getRuntime.availableProcessors())
-  .expireAfterWrite(futureCacheTTL, TimeUnit.MILLISECONDS)
-  .expireAfterAccess(futureCacheTTL, TimeUnit.MILLISECONDS)
-  .maximumSize(maxSize).build[java.lang.Long, (Long, Deferred[QueryRequestWithResult])]()
+
+  val cacheSizeInGB: Double = 2.0
+  val db =
+    org.mapdb.DBMaker
+      .memoryDirectDB()
+      .transactionDisable()
+      .cacheWeakRefEnable()
+      .cacheExecutorEnable()
+      .cacheLRUEnable()
+      .make()
+
+  val futureCache: org.mapdb.HTreeMap[java.lang.Long, (Long, Deferred[QueryRequestWithResult])] =
+    db.hashMapCreate("futureCache")
+      .expireStoreSize(cacheSizeInGB)
+      .make()
+
+  // open existing an collection (or create new)
+  //  val futureCache = CacheBuilder.newBuilder()
+  //  .initialCapacity(maxSize)
+  //  .concurrencyLevel(Runtime.getRuntime.availableProcessors())
+  //  .expireAfterWrite(futureCacheTTL, TimeUnit.MILLISECONDS)
+  //  .expireAfterAccess(futureCacheTTL, TimeUnit.MILLISECONDS)
+  //  .maximumSize(maxSize).build[java.lang.Long, (Long, Deferred[QueryRequestWithResult])]()
 
   override def fetch(queryRequest: QueryRequest,
                      prevStepScore: Double,
@@ -127,7 +144,7 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
     def fetchInner(request: GetRequest) = {
       storage.client.get(request) withCallback { kvs =>
         val edgeWithScores = storage.toEdges(kvs.toSeq, queryRequest.queryParam, prevStepScore, isInnerCall, parentEdges)
-        val resultEdgesWithScores = if (queryRequest.queryParam.sample >= 0 ) {
+        val resultEdgesWithScores = if (queryRequest.queryParam.sample >= 0) {
           sample(edgeWithScores, queryRequest.queryParam.sample)
         } else edgeWithScores
         QueryRequestWithResult(queryRequest, QueryResult(resultEdgesWithScores))
@@ -143,9 +160,10 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
                        defer: Deferred[QueryRequestWithResult]): Deferred[QueryRequestWithResult] = {
       if (System.currentTimeMillis() >= cachedAt + cacheTTL) {
         // future is too old. so need to expire and fetch new data from storage.
-        futureCache.asMap().remove(cacheKey)
+        futureCache.remove(cacheKey)
         val newPromise = new Deferred[QueryRequestWithResult]()
-        futureCache.asMap().putIfAbsent(cacheKey, (System.currentTimeMillis(), newPromise)) match {
+
+        futureCache.putIfAbsent(cacheKey, (System.currentTimeMillis(), newPromise)) match {
           case null =>
             // only one thread succeed to come here concurrently
             // initiate fetch to storage then add callback on complete to finish promise.
@@ -170,13 +188,13 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
       val cacheKeyBytes = Bytes.add(queryRequest.query.cacheKeyBytes, toCacheKeyBytes(request))
       val cacheKey = queryParam.toCacheKey(cacheKeyBytes)
 
-      val cacheVal = futureCache.asMap().get(cacheKey)
+      val cacheVal = futureCache.get(cacheKey)
       cacheVal match {
         case null =>
           // here there is no promise set up for this cacheKey so we need to set promise on future cache.
           val promise = new Deferred[QueryRequestWithResult]()
           val now = System.currentTimeMillis()
-          val (cachedAt, defer) = futureCache.asMap().putIfAbsent(cacheKey, (now, promise)) match {
+          val (cachedAt, defer) = futureCache.putIfAbsent(cacheKey, (now, promise)) match {
             case null =>
               fetchInner(request) withCallback { queryRequestWithResult =>
                 promise.callback(queryRequestWithResult)
@@ -215,7 +233,7 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
       (queryRequest, prevStepScore) <- queryRequestWithScoreLs
       parentEdges <- prevStepEdges.get(queryRequest.vertex.id)
     } yield fetch(queryRequest, prevStepScore, isInnerCall = true, parentEdges)
-    
+
     val grouped: Deferred[util.ArrayList[QueryRequestWithResult]] = Deferred.group(defers)
     grouped withCallback {
       queryResults: util.ArrayList[QueryRequestWithResult] =>
