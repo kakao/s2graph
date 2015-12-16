@@ -96,6 +96,7 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
   val db =
     org.mapdb.DBMaker
       .memoryDirectDB()
+      .cacheSize(maxSize)
       .transactionDisable()
       .cacheWeakRefEnable()
       .cacheExecutorEnable()
