@@ -1,5 +1,6 @@
 package controllers
 
+import com.kakao.s2graph.core.utils.logger
 import play.api.libs.json._
 import play.api.test.{FakeApplication, FakeRequest, PlaySpecification}
 import play.api.{Application => PlayApplication}
@@ -292,6 +293,51 @@ class QuerySpec extends SpecCommon with PlaySpecification {
       )
     }
 
+    def queryGlobalLimit(id: Int, limit: Int): JsValue = {
+      Json.obj(
+        "limit" -> limit,
+        "srcVertices" -> Json.arr(
+          Json.obj("serviceName" -> testServiceName, "columnName" -> testColumnName, "id" -> id)
+        ),
+        "steps" -> Json.arr(
+          Json.obj(
+            "step" -> Json.arr(
+              Json.obj(
+                "label" -> testLabelName
+              )
+            )
+          )
+        )
+      )
+    }
+
+    def queryWithInterval(id: Int, index: String, prop: String, fromVal: Int, toVal: Int) = Json.parse( s"""
+        { "srcVertices": [
+          { "serviceName": "${testServiceName}",
+            "columnName": "${testColumnName}",
+            "id": ${id}
+           }],
+          "steps": [
+          [ {
+              "label": "${testLabelName}",
+              "index": "${index}",
+              "interval": {
+                  "from": [
+                      {
+                          "${prop}": ${fromVal}
+                      }
+                  ],
+                  "to": [
+                      {
+                          "${prop}": ${toVal}
+                      }
+                  ]
+              }
+            }
+          ]]
+        }
+        """)
+
     def getEdges(queryJson: JsValue): JsValue = {
       val ret = route(FakeRequest(POST, "/graphs/getEdges").withJsonBody(queryJson)).get
       contentAsJson(ret)
@@ -323,6 +369,27 @@ class QuerySpec extends SpecCommon with PlaySpecification {
       val $steps = $a($(step = $step))
 
       $(srcVertices = $from, steps = $steps).toJson
+    }
+
+    "interval" >> {
+      running(FakeApplication()) {
+        // insert test set
+        var edges = getEdges(queryWithInterval(0, index2, "_timestamp", 1000, 1001))  // test interval on timestamp index
+        println(edges)
+        (edges \ "size").toString must_== "1"
+
+        edges = getEdges(queryWithInterval(0, index2, "_timestamp", 1000, 2000))  // test interval on timestamp index
+        println(edges)
+        (edges \ "size").toString must_== "2"
+
+        edges = getEdges(queryWithInterval(2, index1, "weight", 10, 11))  // test interval on weight index
+        println(edges)
+        (edges \ "size").toString must_== "1"
+
+        edges = getEdges(queryWithInterval(2, index1, "weight", 10, 20))  // test interval on weight index
+        println(edges)
+        (edges \ "size").toString must_== "2"
+      }
     }
 
     "union query" in {
@@ -470,8 +537,7 @@ class QuerySpec extends SpecCommon with PlaySpecification {
         (result \ "results").as[List[JsValue]].size must equalTo(1)
 
         result = getEdges(queryDuration(Seq(0, 2), from = 3000, to = 2000))
-        (result \ "message").as[String] must contain("java.lang.Exception")
-        true
+        (result \ "message").as[String] must contain("Duration error. Timestamp of From cannot be larger than To")
       }
     }
 
@@ -560,7 +626,7 @@ class QuerySpec extends SpecCommon with PlaySpecification {
       }
     }
 
-    "query with sampling" in {
+    "query with sampling" >> {
       running(FakeApplication()) {
         val sampleSize = 2
         val testId = 22
@@ -584,11 +650,7 @@ class QuerySpec extends SpecCommon with PlaySpecification {
           edge"1442985659166 insert e 322 3322 $testLabelName"
         )
 
-        val req = FakeRequest(POST, "/graphs/edges/bulk").withBody(bulkEdges.mkString("\n"))
-        Await.result(route(req).get, HTTP_REQ_WAITING_TIME)
-
-        Thread.sleep(asyncFlushInterval)
-
+        contentAsJson(EdgeController.mutateAndPublish(bulkEdges.mkString("\n"), withWait = true))
 
         val result1 = getEdges(queryWithSampling(testId, sampleSize))
         println(Json.toJson(result1))
@@ -601,6 +663,30 @@ class QuerySpec extends SpecCommon with PlaySpecification {
         val result3 = getEdges(twoQueryWithSampling(testId, sampleSize))
         println(Json.toJson(result3))
         (result3 \ "results").as[List[JsValue]].size must equalTo(sampleSize + 3) // edges in testLabelName2 = 3
+      }
+    }
+
+    "limit" >> {
+      running(FakeApplication()) {
+        // insert test set
+        val bulkEdges: String = Seq(
+          edge"1001 insert e 0 1 $testLabelName"($(weight = 10, is_hidden = true)),
+          edge"2002 insert e 0 2 $testLabelName"($(weight = 20, is_hidden = false)),
+          edge"3003 insert e 2 0 $testLabelName"($(weight = 30)),
+          edge"4004 insert e 2 1 $testLabelName"($(weight = 40))
+        ).mkString("\n")
+        contentAsJson(EdgeController.mutateAndPublish(bulkEdges, withWait = true))
+
+        val edges = getEdges(querySingle(0, limit=1))
+        val limitEdges = getEdges(queryGlobalLimit(0, 1))
+
+        println(edges)
+        println(limitEdges)
+
+        val edgesTo = edges \ "results" \\ "to"
+        val limitEdgesTo = limitEdges \ "results" \\ "to"
+
+        edgesTo must_== limitEdgesTo
       }
     }
   }

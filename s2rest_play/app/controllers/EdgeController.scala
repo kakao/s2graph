@@ -4,6 +4,7 @@ import actors.QueueActor
 import com.kakao.s2graph.core.GraphExceptions.BadQueryException
 import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.mysqls.{LabelMeta, Label}
+import com.kakao.s2graph.core.rest.RequestParser
 import com.kakao.s2graph.core.types.LabelWithDirection
 import com.kakao.s2graph.core.utils.logger
 import config.Config
@@ -99,7 +100,11 @@ object EdgeController extends Controller {
   }
 
   def mutateBulk() = withHeaderAsync(parse.text) { request =>
-    mutateAndPublish(request.body)
+    mutateAndPublish(request.body, withWait = false)
+  }
+
+  def mutateBulkWithWait() = withHeaderAsync(parse.text) { request =>
+    mutateAndPublish(request.body, withWait = true)
   }
 
   def inserts() = withHeaderAsync(jsonParser) { request =>

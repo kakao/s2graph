@@ -39,8 +39,9 @@ object Graph {
     "max.back.off" -> java.lang.Integer.valueOf(100),
     "hbase.fail.prob" -> java.lang.Double.valueOf(-0.1),
     "delete.all.fetch.size" -> java.lang.Integer.valueOf(1000),
-    "future.cache.max.size" -> java.lang.Integer.valueOf(1000000),
-    "future.cache.max.idle.ttl" -> java.lang.Integer.valueOf(60000)
+    "future.cache.max.size" -> java.lang.Integer.valueOf(100000),
+    "future.cache.expire.after.write" -> java.lang.Integer.valueOf(10000),
+    "future.cache.expire.after.access" -> java.lang.Integer.valueOf(5000)
   )
 
   var DefaultConfig: Config = ConfigFactory.parseMap(DefaultConfigs)
@@ -75,7 +76,7 @@ object Graph {
   /** common methods for filter out, transform, aggregate queryResult */
   def convertEdges(queryParam: QueryParam, edge: Edge, nextStepOpt: Option[Step]): Seq[Edge] = {
     for {
-      convertedEdge <- queryParam.transformer.transform(edge, nextStepOpt)
+      convertedEdge <- queryParam.transformer.transform(edge, nextStepOpt) if !edge.isDegree
     } yield convertedEdge
   }
 
@@ -220,10 +221,10 @@ object Graph {
                 val (hashKey, filterHashKey) = toHashKey(queryParam, convertedEdge, isDegree)
 
                 /** check if this edge should be exlcuded. */
-                if (shouldBeExcluded) {
+                if (shouldBeExcluded && !isDegree) {
                   edgesToExclude.add(filterHashKey)
                 } else {
-                  if (shouldBeIncluded) {
+                  if (shouldBeIncluded && !isDegree) {
                     edgesToInclude.add(filterHashKey)
                   }
                   val tsVal = processTimeDecay(queryParam, convertedEdge)
@@ -317,7 +318,8 @@ class Graph(_config: Config)(implicit ec: ExecutionContext) {
 //  val cache = CacheBuilder.newBuilder().maximumSize(cacheSize).build[java.lang.Integer, Seq[QueryResult]]()
   val vertexCache = CacheBuilder.newBuilder().maximumSize(cacheSize).build[java.lang.Integer, Option[Vertex]]()
 
-  Model(config)
+  Model.apply(config)
+  Model.loadCache()
 
   // TODO: Make storage client by config param
   val storage: Storage = new AsynchbaseStorage(config, vertexCache)(ec)
