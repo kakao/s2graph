@@ -3,7 +3,6 @@ package com.kakao.s2graph
 import com.kakao.s2graph.core.mysqls.{Etl, Label}
 import com.kakao.s2graph.core.rest.RestCaller
 import com.kakao.s2graph.core.{Edge, GraphUtil, Management}
-import com.typesafe.config.Config
 import org.slf4j.LoggerFactory
 import play.api.libs.json._
 
@@ -12,7 +11,7 @@ import scala.concurrent.{ExecutionContext, Future}
 /**
   * Created by hsleep(honeysleep@gmail.com) on 2015. 12. 8..
   */
-class EdgeTransform(config: Config, rest: RestCaller)(implicit ec: ExecutionContext) {
+class EdgeTransform(rest: RestCaller)(implicit ec: ExecutionContext) {
   val log = LoggerFactory.getLogger(getClass)
 
   def changeEdge(edge: Edge): Future[Option[Edge]] = {
