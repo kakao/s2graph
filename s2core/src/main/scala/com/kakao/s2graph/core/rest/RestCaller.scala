@@ -37,6 +37,16 @@ class RestCaller(graph: Graph)(implicit ec: ExecutionContext) {
     }
   }
 
+  def bucket(contentsBody: JsValue, bucketId: Int, uuid: String): Future[(JsValue, String)] = {
+    Bucket.findById(bucketId) match {
+      case Some(bucket) =>
+        if (bucket.isGraphQuery) buildRequestInner(contentsBody, bucket, uuid).map(_ -> bucket.impressionId)
+        else throw new RuntimeException("not supported yet")
+      case None =>
+        throw new RuntimeException("bucket is not found")
+    }
+  }
+
   def uriMatch(uri: String, jsQuery: JsValue): Future[JsValue] = {
     try {
       uri match {
