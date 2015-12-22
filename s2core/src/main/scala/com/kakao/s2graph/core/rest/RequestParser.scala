@@ -92,11 +92,11 @@ class RequestParser(config: Config) extends JSONParser {
     ret.map(_.toMap).getOrElse(Map.empty[Byte, InnerValLike])
   }
 
-  def extractWhere(labelMap: Map[String, Label], jsValue: JsValue) = {
-    (jsValue \ "where").asOpt[String] match {
+  def extractWhere(label: Label, whereClauseOpt: Option[String]) = {
+    whereClauseOpt match {
       case None => Success(WhereParser.success)
       case Some(where) =>
-        WhereParser(labelMap).parse(where) match {
+        WhereParser(label).parse(where) match {
           case s@Success(_) => s
           case Failure(ex) => throw BadQueryException(ex.getMessage, ex)
         }
@@ -202,7 +202,7 @@ class RequestParser(config: Config) extends JSONParser {
           val queryParams =
             for {
               labelGroup <- queryParamJsVals
-              queryParam <- parseQueryParam(labelMap, labelGroup)
+              queryParam <- parseQueryParam(labelGroup)
             } yield {
               val (_, columnName) =
                 if (queryParam.labelWithDir.dir == GraphUtil.directions("out")) {
@@ -251,7 +251,7 @@ class RequestParser(config: Config) extends JSONParser {
     }
   }
 
-  private def parseQueryParam(labelMap: Map[String, Label], labelGroup: JsValue): Option[QueryParam] = {
+  private def parseQueryParam(labelGroup: JsValue): Option[QueryParam] = {
     for {
       labelName <- parse[Option[String]](labelGroup, "label")
     } yield {
@@ -279,7 +279,8 @@ class RequestParser(config: Config) extends JSONParser {
         case None => label.indexSeqsMap.get(scoring.map(kv => kv._1)).map(_.seq).getOrElse(LabelIndex.DefaultSeq)
         case Some(indexName) => label.indexNameMap.get(indexName).map(_.seq).getOrElse(throw new RuntimeException("cannot find index"))
       }
-      val where = extractWhere(labelMap, labelGroup)
+      val whereClauseOpt = (labelGroup \ "where").asOpt[String]
+      val where = extractWhere(label, whereClauseOpt)
       val includeDegree = (labelGroup \ "includeDegree").asOpt[Boolean].getOrElse(true)
       val rpcTimeout = (labelGroup \ "rpcTimeout").asOpt[Int].getOrElse(DefaultRpcTimeout)
       val maxAttempt = (labelGroup \ "maxAttempt").asOpt[Int].getOrElse(DefaultMaxAttempt)
