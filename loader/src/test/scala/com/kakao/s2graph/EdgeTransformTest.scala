@@ -1,6 +1,6 @@
 package com.kakao.s2graph
 
-import com.kakao.s2graph.core.mysqls.{Etl, Label, Model, Service}
+import com.kakao.s2graph.core.mysqls.{Etl, Model}
 import com.kakao.s2graph.core.rest.RestCaller
 import com.kakao.s2graph.core.{Graph, GraphConfig, Management}
 import com.typesafe.config.ConfigFactory
@@ -23,28 +23,37 @@ class EdgeTransformTest extends FlatSpec with Matchers with BeforeAndAfterAll {
   lazy val _edgeTransform = new EdgeTransform(_rest)
 
   override def beforeAll: Unit = {
-    if (Service.findByName("test").isEmpty) {
-      Service.insert("test", "localhost", "test", 1, None, "gz")
+    if (Management.findService("test").isEmpty) {
+      Management.createService("test", graphConfig.HBASE_ZOOKEEPER_QUORUM, "test", 1, None, "gz")
     }
-    val service = Service.findByName("test").get
 
-    if (Label.findByName("test1").isEmpty) {
-      Label.insert("test1", service.id.get, "c1", "string", service.id.get, "c1", "string", true, "test", service.id.get, "weak", "test", None, "v3", false, "gz")
+    if (Management.findLabel("test1").isEmpty) {
+      Management.createLabel("test1", "test", "c1", "string", "test", "c1", "string", true, "test", Nil, Nil, "weak", None, None, isAsync = false)
     }
-    val l1Id = Label.findByName("test1").get.id.get
-    if (Label.findByName("test2").isEmpty) {
-      Label.insert("test2", service.id.get, "c1", "string", service.id.get, "c1", "string", true, "test", service.id.get, "weak", "test", None, "v3", false, "gz")
+    val l1Id = Management.findLabel("test1").get.id.get
+    if (Management.findLabel("test2").isEmpty) {
+      Management.createLabel("test2", "test", "c1", "string", "test", "c1", "string", true, "test", Nil, Nil, "weak", None, None, isAsync = false)
     }
-    val l2Id = Label.findByName("test2").get.id.get
+    val l2Id = Management.findLabel("test2").get.id.get
     Etl.create(l1Id.toInt, l2Id.toInt)
   }
 
-  "EdgeTransform" should "change label" in {
+  override def afterAll: Unit = {
+  }
+
+  "EdgeTransform" should "transform edge" in {
     val e1 = Management.toEdge(1, "insert", "0", "1", "test1", "out", "{}")
     val future = _edgeTransform.changeEdge(e1)
 
     val result = Await.result(future, 10 seconds)
     result should not be empty
-    result.get.label.label should equal("test2")
+
+    val e2 = result.get
+    e2.label.label should equal("test2")
+
+    val rets = Await.result(_s2graph.mutateEdges(Seq(e2), withWait = true), 10 seconds)
+    rets should not be empty
+
+    rets.head should equal(true)
   }
 }
