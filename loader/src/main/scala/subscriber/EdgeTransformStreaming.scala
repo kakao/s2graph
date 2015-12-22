@@ -75,11 +75,12 @@ object EdgeTransformStreaming extends SparkApp {
           for {
             orgEdgesGrouped <- orgEdges.grouped(10)
           } yield {
-            acc += ("Edges", orgEdgesGrouped.length)
+            acc += ("Input", orgEdgesGrouped.length)
             for {
               transEdges <- _edgeTransform.changeEdges(orgEdgesGrouped)
               rets <- _s2graph.mutateEdges(transEdges, withWait = true)
             } yield {
+              acc += ("Transform", rets.count(x => x))
               transEdges.zip(rets).filterNot(_._2).foreach { case (e, _) =>
                 logError(s"failed to mutateEdge: ${e.toLogString}")
               }
