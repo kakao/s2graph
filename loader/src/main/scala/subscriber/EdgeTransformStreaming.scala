@@ -13,6 +13,7 @@ import s2.spark.{HashMapParam, SparkApp}
 import scala.collection.mutable.{HashMap => MutableHashMap}
 import scala.concurrent.duration._
 import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.util.Try
 
 /**
   * Created by hsleep(honeysleep@gmail.com) on 2015. 12. 8..
@@ -67,7 +68,7 @@ object EdgeTransformStreaming extends SparkApp {
         val orgEdges = for {
           (k, v) <- part
           line <- GraphUtil.parseString(v)
-          edge <- Graph.toEdge(line)
+          edge <- Try { Graph.toEdge(line) }.toOption.flatten
         } yield edge
 
         // transform and send edges to graph
