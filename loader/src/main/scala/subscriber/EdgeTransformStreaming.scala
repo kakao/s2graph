@@ -42,9 +42,43 @@ object EdgeTransformStreaming extends SparkApp {
     "zookeeper.connection.timeout.ms" -> "10000"
   )
 
-  lazy val _s2graph = new Graph(config)
-  lazy val _rest = new RestCaller(_s2graph)
-  lazy val _edgeTransform = new EdgeTransform(_rest)
+  var _s2graph: Graph = null
+  def getGraph: Graph = {
+    if (_s2graph == null) {
+      this.synchronized {
+        if (_s2graph == null) {
+          _s2graph = new Graph(config)
+        }
+      }
+    }
+    _s2graph
+  }
+  var _rest: RestCaller = null
+  def getRest: RestCaller = {
+    if (_rest == null) {
+      this.synchronized {
+        if (_rest == null) {
+          _rest = new RestCaller(getGraph)
+        }
+      }
+    }
+    _rest
+  }
+  var _transformer: EdgeTransform = null
+  def getTransformer: EdgeTransform = {
+    if (_transformer == null) {
+      this.synchronized {
+        if (_transformer == null) {
+          _transformer = new EdgeTransform(getRest)
+        }
+      }
+    }
+    _transformer
+  }
+
+//  lazy val _s2graph = new Graph(config)
+//  lazy val _rest = new RestCaller(_s2graph)
+//  lazy val _edgeTransform = new EdgeTransform(_rest)
 
   // should implement in derived class
   override def run(): Unit = {
@@ -78,8 +112,8 @@ object EdgeTransformStreaming extends SparkApp {
           } yield {
             acc += ("Input", orgEdgesGrouped.length)
             for {
-              transEdges <- _edgeTransform.changeEdges(orgEdgesGrouped)
-              rets <- _s2graph.mutateEdges(transEdges, withWait = true)
+              transEdges <- getTransformer.changeEdges(orgEdgesGrouped)
+              rets <- getGraph.mutateEdges(transEdges, withWait = true)
             } yield {
               acc += ("Transform", rets.count(x => x))
               transEdges.zip(rets).filterNot(_._2).foreach { case (e, _) =>
