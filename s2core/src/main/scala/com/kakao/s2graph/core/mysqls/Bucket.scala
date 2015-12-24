@@ -7,7 +7,6 @@ package com.kakao.s2graph.core.mysqls
 import scalikejdbc._
 
 object Bucket extends Model[Bucket] {
-
   val rangeDelimiter = "~"
   val INVALID_BUCKET_EXCEPTION = new RuntimeException("invalid bucket.")
 
@@ -24,13 +23,13 @@ object Bucket extends Model[Bucket] {
       rs.boolean("is_empty"))
   }
 
-  def finds(experimentId: Int)(implicit session: DBSession = AutoSession): List[Bucket] = {
-    val cacheKey = "experimentId=" + experimentId
-    withCaches(cacheKey) {
-      sql"""select * from buckets where experiment_id = $experimentId"""
-        .map { rs => Bucket(rs) }.list().apply()
-    }
-  }
+//  def finds(experimentId: Int)(implicit session: DBSession = AutoSession): List[Bucket] = {
+//    val cacheKey = "experimentId=" + experimentId
+//    withCaches(cacheKey) {
+//      sql"""select * from buckets where experiment_id = $experimentId"""
+//        .map { rs => Bucket(rs) }.list().apply()
+//    }
+//  }
 
   def toRange(str: String): Option[(Int, Int)] = {
     val range = str.split(rangeDelimiter)

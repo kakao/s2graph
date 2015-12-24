@@ -8,36 +8,51 @@ import scala.util.Random
 object Experiment extends Model[Experiment] {
   val impressionKey = "S2-Impression-Id"
 
-  def apply(rs: WrappedResultSet): Experiment = {
+  def apply(rs: WrappedResultSet, buckets: List[Bucket]): Experiment = {
     Experiment(rs.intOpt("id"),
       rs.int("service_id"),
       rs.string("name"),
       rs.string("description"),
       rs.string("experiment_type"),
-      rs.int("total_modular"))
+      rs.int("total_modular"),
+      buckets)
   }
 
-  def finds(serviceId: Int)(implicit session: DBSession = AutoSession): List[Experiment] = {
-    val cacheKey = "serviceId=" + serviceId
-    withCaches(cacheKey) {
-      sql"""select * from experiments where service_id = ${serviceId}"""
-        .map { rs => Experiment(rs) }.list().apply()
-    }
-  }
+  //  def finds(serviceId: Int)(implicit session: DBSession = AutoSession): List[Experiment] = {
+  //    val cacheKey = "serviceId=" + serviceId
+  //    withCaches(cacheKey) {
+  //      sql"""select * from experiments where service_id = ${serviceId}"""
+  //        .map { rs => Experiment(rs) }.list().apply()
+  //    }
+  //  }
 
   def findBy(serviceId: Int, name: String)(implicit session: DBSession = AutoSession): Option[Experiment] = {
     val cacheKey = "serviceId=" + serviceId + ":name=" + name
+
     withCache(cacheKey) {
       sql"""select * from experiments where service_id = ${serviceId} and name = ${name}"""
-        .map { rs => Experiment(rs) }.single.apply
+        .map { rs =>
+          val buckets =
+            sql"""select * from buckets where experiment_id = ${rs.int("id")}"""
+              .map { rs => Bucket(rs) }.list().apply()
+
+          Experiment(rs, buckets)
+        }.single.apply
     }
   }
 
   def findById(id: Int)(implicit session: DBSession = AutoSession): Option[Experiment] = {
     val cacheKey = "id=" + id
+
     withCache(cacheKey)(
       sql"""select * from experiments where id = ${id}"""
-        .map { rs => Experiment(rs) }.single.apply
+        .map { rs =>
+          val buckets =
+            sql"""select * from buckets where experiment_id = ${rs.int("id")}"""
+              .map { rs => Bucket(rs) }.list().apply()
+
+          Experiment(rs, buckets)
+        }.single.apply
     )
   }
 }
@@ -47,20 +62,18 @@ case class Experiment(id: Option[Int],
                       name: String,
                       description: String,
                       experimentType: String,
-                      totalModular: Int) {
-
-  def buckets = Bucket.finds(id.get)
+                      totalModular: Int,
+                      buckets: List[Bucket]) {
 
   def rangeBuckets = for {
     bucket <- buckets
     range <- bucket.rangeOpt
   } yield range -> bucket
 
-
   def findBucket(uuid: String): Option[Bucket] = {
     val seed = experimentType match {
       case "u" => (GraphUtil.murmur3(uuid) % totalModular) + 1
-      case _ => (Random.nextInt(totalModular)) + 1
+      case _ => Random.nextInt(totalModular) + 1
     }
     findBucket(seed)
   }
