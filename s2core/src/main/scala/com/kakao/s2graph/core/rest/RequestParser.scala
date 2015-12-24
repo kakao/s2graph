@@ -161,6 +161,7 @@ class RequestParser(config: Config) extends JSONParser {
       //TODO: Refactor this
       val limitOpt = (jsValue \ "limit").asOpt[Int]
       val returnAgg = (jsValue \ "returnAgg").asOpt[Boolean].getOrElse(true)
+      val cacheTTLOpt = (jsValue \ "cacheTTL").asOpt[Long]
 
       // TODO: throw exception, when label dosn't exist
       val labelMap = (for {
@@ -237,7 +238,8 @@ class RequestParser(config: Config) extends JSONParser {
         withScore = withScore,
         returnTree = returnTree,
         limitOpt = limitOpt,
-        returnAgg = returnAgg
+        returnAgg = returnAgg,
+        cacheTTLOpt = cacheTTLOpt
       )
       //      logger.debug(ret.toString)
       ret

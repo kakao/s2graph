@@ -4,6 +4,7 @@ import java.net.URL
 
 import com.kakao.s2graph.core.GraphExceptions.BadQueryException
 import com.kakao.s2graph.core._
+import com.kakao.s2graph.core.cache.RedisCache
 import com.kakao.s2graph.core.mysqls.{Bucket, Experiment, Service}
 import com.kakao.s2graph.core.utils.logger
 import play.api.libs.json._
@@ -16,8 +17,14 @@ import scala.util.Try
   * Don't throw exception
   */
 class RestCaller(graph: Graph)(implicit ec: ExecutionContext) {
+  type CacheKey = java.lang.Long
+
   val s2Parser = new RequestParser(graph.config)
 
+  val resultCache = new RedisCache[CacheKey, JsValue](graph.config) {
+    override def serialize(value: JsValue): String = value.toString()
+    override def deserialize(value: String): JsValue = if (value == null) null else Json.parse(value)
+  }
   /**
     * Public APIS
     */
@@ -81,17 +88,33 @@ class RestCaller(graph: Graph)(implicit ec: ExecutionContext) {
     * Private APIS
     */
   private def eachQuery(post: (Seq[QueryRequestWithResult], Seq[QueryRequestWithResult]) => JsValue)(q: Query): Future[JsValue] = {
-    val filterOutQueryResultsLs = q.filterOutQuery match {
-      case Some(filterOutQuery) => graph.getEdges(filterOutQuery)
-      case None => Future.successful(Seq.empty)
-    }
 
-    for {
-      queryResultsLs <- graph.getEdges(q)
-      filterOutResultsLs <- filterOutQueryResultsLs
-    } yield {
-      val json = post(queryResultsLs, filterOutResultsLs)
-      json
+    def eachQueryInner = {
+      val filterOutQueryResultsLs = q.filterOutQuery match {
+        case Some(filterOutQuery) => graph.getEdges(filterOutQuery)
+        case None => Future.successful(Seq.empty)
+      }
+
+      for {
+        queryResultsLs <- graph.getEdges(q)
+        filterOutResultsLs <- filterOutQueryResultsLs
+      } yield {
+        val json = post(queryResultsLs, filterOutResultsLs)
+        json
+      }
+    }
+    q.cacheTTLOpt match {
+      case None => eachQueryInner
+      case Some(cacheTTL) =>
+        val cacheKey = q.cacheKey
+        val oldVal = resultCache.getIfPresent(cacheKey)
+        if (oldVal != null) Future.successful(oldVal)
+        else
+          eachQueryInner.map { newVal =>
+            resultCache.putIfAbsent(cacheKey, newVal, Option(cacheTTL))
+            newVal
+          }
+
     }
   }
 

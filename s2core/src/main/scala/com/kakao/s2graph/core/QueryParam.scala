@@ -44,7 +44,10 @@ case class Query(vertices: Seq[Vertex] = Seq.empty[Vertex],
                  withScore: Boolean = true,
                  returnTree: Boolean = false,
                  limitOpt: Option[Int] = None,
-                 returnAgg: Boolean = true) {
+                 returnAgg: Boolean = true,
+                 cacheTTLOpt: Option[Long] = None) {
+
+  def cacheKey: Long = Hashing.murmur3_128().hashBytes(cacheKeyBytes).asLong()
 
   def cacheKeyBytes: Array[Byte] = {
     val selectBytes = Bytes.toBytes(selectColumns.toString)

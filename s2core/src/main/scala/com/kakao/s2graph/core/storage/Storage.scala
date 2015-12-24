@@ -4,12 +4,13 @@ import com.google.common.cache.Cache
 import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.mysqls.Label
 import com.kakao.s2graph.core.utils.logger
+import com.typesafe.config.Config
 
 
 import scala.collection.Seq
 import scala.concurrent.{ExecutionContext, Future}
 
-abstract class Storage(implicit ec: ExecutionContext) {
+abstract class Storage(val config: Config)(implicit ec: ExecutionContext) {
 
   def cacheOpt: Option[Cache[Integer, Seq[QueryResult]]]
 

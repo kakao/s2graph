@@ -12,8 +12,7 @@ object S2Cache {
 trait S2Cache[K, V] {
   def getIfPresent(key: K): V
   def invalidate(key: K): Unit
-  def put(key: K, value: V): Unit
-  def asMap(): ConcurrentMap[K, V]
+  def putIfAbsent(key: K, value: V, cacheTTLOpt: Option[Long] = None): V
 }
 
 

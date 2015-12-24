@@ -21,9 +21,8 @@ case class LocalCache[K, V](config: Config) extends S2Cache[K, V] {
 
   override def getIfPresent(key: K): V = cache.getIfPresent(key)
 
-  override def asMap(): ConcurrentMap[K, V] = cache.asMap()
-
-  override def put(key: K, value: V): Unit = cache.put(key, value)
+  /** ignore cache ttl on local cache per key */
+  override def putIfAbsent(key: K, value: V, cacheTTLOpt: Option[Long] = None): V = cache.asMap().putIfAbsent(key, value)
 
   override def invalidate(key: K): Unit = cache.invalidate(key)
 }

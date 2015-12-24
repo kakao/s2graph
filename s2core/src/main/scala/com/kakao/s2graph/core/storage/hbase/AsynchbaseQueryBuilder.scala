@@ -1,9 +1,8 @@
 package com.kakao.s2graph.core.storage.hbase
 
 import java.util
-import java.util.concurrent.{Executors, TimeUnit}
-import com.google.common.cache.CacheBuilder
 import com.kakao.s2graph.core._
+import com.kakao.s2graph.core.cache.{RedisCache, LocalCache}
 import com.kakao.s2graph.core.mysqls.LabelMeta
 import com.kakao.s2graph.core.storage.QueryBuilder
 import com.kakao.s2graph.core.types._
@@ -24,6 +23,7 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
   type FutureCacheKey = java.lang.Long
   type FutureCacheVal = (Long, Deferred[QueryRequestWithResult])
   val futureCache = new LocalCache[FutureCacheKey, FutureCacheVal](storage.config)
+
 
   override def buildRequest(queryRequest: QueryRequest): GetRequest = {
     val srcVertex = queryRequest.vertex
@@ -136,9 +136,9 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
                        defer: Deferred[QueryRequestWithResult]): Deferred[QueryRequestWithResult] = {
       if (System.currentTimeMillis() >= cachedAt + cacheTTL) {
         // future is too old. so need to expire and fetch new data from storage.
-        futureCache.asMap().remove(cacheKey)
+        futureCache.invalidate(cacheKey)
         val newPromise = new Deferred[QueryRequestWithResult]()
-        futureCache.asMap().putIfAbsent(cacheKey, (System.currentTimeMillis(), newPromise)) match {
+        futureCache.putIfAbsent(cacheKey, (System.currentTimeMillis(), newPromise)) match {
           case null =>
             // only one thread succeed to come here concurrently
             // initiate fetch to storage then add callback on complete to finish promise.
@@ -169,7 +169,7 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
           // here there is no promise set up for this cacheKey so we need to set promise on future cache.
           val promise = new Deferred[QueryRequestWithResult]()
           val now = System.currentTimeMillis()
-          val (cachedAt, defer) = futureCache.asMap().putIfAbsent(cacheKey, (now, promise)) match {
+          val (cachedAt, defer) = futureCache.putIfAbsent(cacheKey, (now, promise)) match {
             case null =>
               fetchInner(request) withCallback { queryRequestWithResult =>
                 promise.callback(queryRequestWithResult)
