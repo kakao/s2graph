@@ -21,29 +21,9 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
   extends QueryBuilder[GetRequest, Deferred[QueryRequestWithResult]](storage) {
 
   import Extensions.DeferOps
-
-  val maxSize = storage.config.getInt("future.cache.max.size")
-  val expreAfterWrite = storage.config.getInt("future.cache.expire.after.write")
-  val expreAfterAccess = storage.config.getInt("future.cache.expire.after.access")
-
-  val futureCache = CacheBuilder.newBuilder()
-//  .recordStats()
-  .initialCapacity(maxSize)
-  .concurrencyLevel(Runtime.getRuntime.availableProcessors())
-  .expireAfterWrite(expreAfterWrite, TimeUnit.MILLISECONDS)
-  .expireAfterAccess(expreAfterAccess, TimeUnit.MILLISECONDS)
-//  .weakKeys()
-  .maximumSize(maxSize).build[java.lang.Long, (Long, Deferred[QueryRequestWithResult])]()
-
-  //  val scheduleTime = 60L * 60
-//  val scheduleTime = 60
-//  val scheduler = Executors.newScheduledThreadPool(1)
-//
-//  scheduler.scheduleAtFixedRate(new Runnable(){
-//    override def run() = {
-//      logger.info(s"[FutureCache]: ${futureCache.stats()}")
-//    }
-//  }, scheduleTime, scheduleTime, TimeUnit.SECONDS)
+  type FutureCacheKey = java.lang.Long
+  type FutureCacheVal = (Long, Deferred[QueryRequestWithResult])
+  val futureCache = new LocalCache[FutureCacheKey, FutureCacheVal](storage.config)
 
   override def buildRequest(queryRequest: QueryRequest): GetRequest = {
     val srcVertex = queryRequest.vertex
