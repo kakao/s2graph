@@ -8,6 +8,7 @@ import com.kakao.s2graph.core.mysqls._
 import com.kakao.s2graph.core.parsers.WhereParser
 import com.kakao.s2graph.core.storage.Storage
 import com.kakao.s2graph.core.storage.hbase._
+import com.kakao.s2graph.core.storage.mapdb.MapDBStorage
 import com.kakao.s2graph.core.types._
 import com.kakao.s2graph.core.utils.logger
 import com.typesafe.config.{Config, ConfigFactory}
@@ -318,11 +319,17 @@ class Graph(_config: Config)(implicit ec: ExecutionContext) {
 //  val cache = CacheBuilder.newBuilder().maximumSize(cacheSize).build[java.lang.Integer, Seq[QueryResult]]()
   val vertexCache = CacheBuilder.newBuilder().maximumSize(cacheSize).build[java.lang.Integer, Option[Vertex]]()
 
+  val backendStorage = Try(config.getString("storage")).getOrElse("hbase")
+
   Model.apply(config)
   Model.loadCache()
 
-  // TODO: Make storage client by config param
-  val storage: Storage = new AsynchbaseStorage(config, vertexCache)(ec)
+  val storage: Storage = backendStorage match {
+    case "hbase" => new AsynchbaseStorage(config, vertexCache)(ec)
+    case "mapdb" => new MapDBStorage(config, vertexCache)(ec)
+  }
+
+  println(">>>>>>>>>>>" + storage.getClass)
 
   for {
     entry <- config.entrySet() if Graph.DefaultConfigs.contains(entry.getKey)
