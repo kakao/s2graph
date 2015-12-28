@@ -25,12 +25,7 @@ else
   JAVA="$JAVA_HOME/bin/java"
 fi
 
-rat_command="$JAVA -jar $base_dir/lib/apache-rat-0.11.jar --dir $base_dir "
-
-for f in $(cat $rat_excludes_file);
-do
-  rat_command="${rat_command} -e $f"  
-done
+rat_command="$JAVA -jar $base_dir/lib/apache-rat-0.11.jar --dir $base_dir --exclude-file ${rat_excludes_file}"
 
 echo "Running " $rat_command
 $rat_command > $base_dir/rat.out
