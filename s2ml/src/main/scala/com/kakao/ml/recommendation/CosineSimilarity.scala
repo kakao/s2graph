@@ -194,18 +194,15 @@ object CosineSimilarityByKDTree {
   def dotProductLocal(k: Int, d: Int, vectors: Seq[(Int, Array[Double])]): Seq[(Int, Array[(Int, Double)])] = {
 
     val srcBlock = vectors
-    val indexedBlock = KDTreeMap.fromSeq(vectors.map(_.swap))(dimensionalOrderingForArray(d))
 
     srcBlock.map { case (si, sv) =>
       val n = sv.length
-      si -> indexedBlock.findNearest(sv, k + 1)
-          .flatMap {
-            case (dv, di) if si != di =>
-              val dot = Blas.blas.ddot(n, sv, 1, dv, 1)
-              Some(di, dot)
-            case _ => None
-          }
-          .toArray
+      si -> srcBlock.flatMap {
+        case (di, dv) if si != di =>
+          val dot = Blas.blas.ddot(n, sv, 1, dv, 1)
+          Some(di, dot)
+        case _ => None
+      }.sortBy(-_._2).take(k).toArray
     }
   }
 
