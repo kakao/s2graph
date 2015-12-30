@@ -1,0 +1,21 @@
+{
+  "name": "pi",
+  "comment": "Estimating Pi in https://spark.apache.org/examples.html",
+  "source": {
+    "class": "org.apache.s2graph.lambda.source.SQLContextSource"
+  },
+  "processors": [
+    {
+      "class": "org.apache.s2graph.lambda.example.Tuple2RandomNumberGenerator",
+      "params": {
+        "num": 1000
+      }
+    },
+    {
+      "class": "org.apache.s2graph.lambda.util.Inspector"
+    },
+    {
+      "class": "org.apache.s2graph.lambda.PiEstimator"
+    }
+  ]
+}
