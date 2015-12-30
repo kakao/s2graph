@@ -42,3 +42,5 @@ libraryDependencies ++= Seq(
   "com.github.danielwegener" % "logback-kafka-appender" % "0.0.3",
   "org.json4s" %% "json4s-native" % "3.2.11" % Test
 )
+
+lazy val s2lambda = project.settings(commonSettings: _*)
