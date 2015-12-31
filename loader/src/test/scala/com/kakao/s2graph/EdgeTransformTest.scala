@@ -1,7 +1,7 @@
 package com.kakao.s2graph
 
+import com.kakao.s2graph.client.GraphRestClient
 import com.kakao.s2graph.core.mysqls.{Etl, Model}
-import com.kakao.s2graph.core.rest.RestCaller
 import com.kakao.s2graph.core.{Graph, GraphConfig, Management}
 import com.typesafe.config.ConfigFactory
 import org.scalatest.{BeforeAndAfterAll, FlatSpec, Matchers}
@@ -15,11 +15,14 @@ import scala.concurrent.{Await, ExecutionContext}
 class EdgeTransformTest extends FlatSpec with Matchers with BeforeAndAfterAll {
   implicit val graphEx = ExecutionContext.Implicits.global
 
+  private val builder = new com.ning.http.client.AsyncHttpClientConfig.Builder()
+  private val client = new play.api.libs.ws.ning.NingWSClient(builder.build)
+
   lazy val config = ConfigFactory.load()
   val graphConfig = new GraphConfig(config)
   Model(config)
   lazy val _s2graph = new Graph(config)
-  lazy val _rest = new RestCaller(_s2graph)
+  lazy val _rest = new GraphRestClient(client, "http://localhost:9000")
   lazy val _edgeTransform = new EdgeTransform(_rest)
 
   override def beforeAll: Unit = {

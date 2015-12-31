@@ -1,6 +1,7 @@
 package subscriber
 
 import com.kakao.s2graph.EdgeTransform
+import com.kakao.s2graph.client.GraphRestClient
 import com.kakao.s2graph.core.mysqls.Model
 import com.kakao.s2graph.core.rest.RestCaller
 import com.kakao.s2graph.core.{Graph, GraphConfig, GraphUtil}
@@ -9,6 +10,7 @@ import org.apache.spark.streaming.Durations._
 import org.apache.spark.streaming.kafka.KafkaRDDFunctions.rddToKafkaRDDFunctions
 import s2.config.S2ConfigFactory
 import s2.spark.{HashMapParam, SparkApp}
+import com.kakao.s2graph.core.utils.Configuration._
 
 import scala.collection.mutable.{HashMap => MutableHashMap}
 import scala.concurrent.duration._
@@ -53,19 +55,21 @@ object EdgeTransformStreaming extends SparkApp {
     }
     _s2graph
   }
-  var _rest: RestCaller = null
-  def getRest: RestCaller = {
+  var _rest: GraphRestClient = null
+  def getRest: GraphRestClient = {
     if (_rest == null) {
       this.synchronized {
         if (_rest == null) {
-          _rest = new RestCaller(getGraph)
+          val builder = new com.ning.http.client.AsyncHttpClientConfig.Builder()
+          val client = new play.api.libs.ws.ning.NingWSClient(builder.build)
+          _rest = new GraphRestClient(client, config.getOrElse("s2graph.url", "http://localhost"))
         }
       }
     }
     _rest
   }
   var _transformer: EdgeTransform = null
-  def getTransformer: EdgeTransform = {
+  def transformer: EdgeTransform = {
     if (_transformer == null) {
       this.synchronized {
         if (_transformer == null) {
@@ -112,7 +116,7 @@ object EdgeTransformStreaming extends SparkApp {
           } yield {
             acc += ("Input", orgEdgesGrouped.length)
             for {
-              transEdges <- getTransformer.changeEdges(orgEdgesGrouped)
+              transEdges <- transformer.changeEdges(orgEdgesGrouped)
               rets <- getGraph.mutateEdges(transEdges, withWait = true)
             } yield {
               acc += ("Transform", rets.count(x => x))

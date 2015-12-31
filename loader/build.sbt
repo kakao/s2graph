@@ -9,6 +9,7 @@ projectDependencies := Seq(
 )
 
 libraryDependencies ++= Seq(
+  "com.typesafe.play" %% "play-ws" % Common.playVersion,
   "org.apache.spark" %% "spark-core" % Common.sparkVersion % "provided",
   "org.apache.spark" %% "spark-streaming" % Common.sparkVersion % "provided",
   "org.apache.spark" %% "spark-hive" % Common.sparkVersion % "provided",
