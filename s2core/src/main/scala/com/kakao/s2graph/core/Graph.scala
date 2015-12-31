@@ -8,6 +8,7 @@ import com.kakao.s2graph.core.mysqls._
 import com.kakao.s2graph.core.parsers.WhereParser
 import com.kakao.s2graph.core.storage.Storage
 import com.kakao.s2graph.core.storage.hbase._
+import com.kakao.s2graph.core.storage.redis.RedisStorage
 import com.kakao.s2graph.core.types._
 import com.kakao.s2graph.core.utils.logger
 import com.typesafe.config.{Config, ConfigFactory}
@@ -321,8 +322,16 @@ class Graph(_config: Config)(implicit val ec: ExecutionContext) {
   Model.apply(config)
   Model.loadCache()
 
+  def getStorage: Storage = {
+    val engine = if ( config.hasPath("storage.engine") ) config.getString("storage.engine") else "hbase"
+    engine match {
+      case "redis" => new RedisStorage(config, vertexCache)(ec)
+      case "hbase" | _ => new AsynchbaseStorage(config, vertexCache)(ec)
+    }
+  }
+
   // TODO: Make storage client by config param
-  val storage: Storage = new AsynchbaseStorage(config, vertexCache)(ec)
+  val storage: Storage = getStorage
 
   for {
     entry <- config.entrySet() if Graph.DefaultConfigs.contains(entry.getKey)
