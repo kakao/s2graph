@@ -32,7 +32,7 @@ class RedisGet(key: Array[Byte]) {
 
   // for `interval`
   def setFilter(min: Array[Byte], minInclusive: Boolean, max: Array[Byte], maxInclusive: Boolean, minTime: Long = -1, maxTime: Long = -1): RedisGet = {
-    (this.min, this.minInclusive, this.max, this.maxInclusive, this.minTime, this.maxTime) = (min, minInclusive, max, maxInclusive, minTime, maxTime)
+    this.min = min; this.minInclusive = minInclusive; this.max = max; this.maxInclusive = maxInclusive; this.minTime = minTime; this.maxTime = maxTime;
     this
   }
 
