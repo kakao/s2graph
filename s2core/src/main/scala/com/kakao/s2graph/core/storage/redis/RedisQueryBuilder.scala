@@ -11,7 +11,7 @@ import scala.collection.Map
 import scala.concurrent.{Future, ExecutionContext}
 
 /**
-  * Created by june.kay on 2015. 12. 31..
+  * Created by june.kay with jojo on 2015. 12. 31..
   */
 class RedisQueryBuilder(storage: RedisStorage)(implicit ec: ExecutionContext)
   extends QueryBuilder[RedisGet, Future[QueryRequestWithResult]](storage) {
@@ -53,13 +53,14 @@ class RedisQueryBuilder(storage: RedisStorage)(implicit ec: ExecutionContext)
     }
 
     val row = kv.row
-    val key = row.take(4) ++ label.hTableName.getBytes ++ row.takeRight(row.length-4)
+    val key = row.take(2) ++  // take hash bytes(short bytes size)
+      label.hTableName.getBytes ++ // table name bytes
+      row.takeRight(row.length-2) // rest of bytes from original row key(built from legacy)
 
     // 1. RedisGet instance initialize
     val get = new RedisGet(key)
 
-    // 2. set filter
-    // 3. min/max value's key build
+    // 2. set filter and min/max value's key build
     val (minTs, maxTs) = queryParam.duration.getOrElse(-1L -> -1L)
     val (min, max) = (queryParam.columnRangeFilterMinBytes, queryParam.columnRangeFilterMaxBytes)
     get.setCount(queryParam.limit)
