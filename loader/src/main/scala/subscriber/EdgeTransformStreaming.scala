@@ -44,45 +44,10 @@ object EdgeTransformStreaming extends SparkApp {
     "zookeeper.connection.timeout.ms" -> "10000"
   )
 
-  var _s2graph: Graph = null
-  def getGraph: Graph = {
-    if (_s2graph == null) {
-      this.synchronized {
-        if (_s2graph == null) {
-          _s2graph = new Graph(config)
-        }
-      }
-    }
-    _s2graph
-  }
-  var _rest: GraphRestClient = null
-  def getRest: GraphRestClient = {
-    if (_rest == null) {
-      this.synchronized {
-        if (_rest == null) {
-          val builder = new com.ning.http.client.AsyncHttpClientConfig.Builder()
-          val client = new play.api.libs.ws.ning.NingWSClient(builder.build)
-          _rest = new GraphRestClient(client, config.getOrElse("s2graph.url", "http://localhost"))
-        }
-      }
-    }
-    _rest
-  }
-  var _transformer: EdgeTransform = null
-  def transformer: EdgeTransform = {
-    if (_transformer == null) {
-      this.synchronized {
-        if (_transformer == null) {
-          _transformer = new EdgeTransform(getRest)
-        }
-      }
-    }
-    _transformer
-  }
-
-//  lazy val _s2graph = new Graph(config)
-//  lazy val _rest = new RestCaller(_s2graph)
-//  lazy val _edgeTransform = new EdgeTransform(_rest)
+  lazy val builder = new com.ning.http.client.AsyncHttpClientConfig.Builder()
+  lazy val client = new play.api.libs.ws.ning.NingWSClient(builder.build)
+  lazy val rest = new GraphRestClient(client, config.getOrElse("s2graph.url", "http://localhost"))
+  lazy val transformer = new EdgeTransform(rest)
 
   // should implement in derived class
   override def run(): Unit = {
@@ -117,7 +82,7 @@ object EdgeTransformStreaming extends SparkApp {
             acc += ("Input", orgEdgesGrouped.length)
             for {
               transEdges <- transformer.transformEdges(orgEdgesGrouped)
-              rets <- getGraph.mutateEdges(transEdges, withWait = true)
+              rets <- transformer.loadEdges(transEdges, withWait = true)
             } yield {
               acc += ("Transform", rets.count(x => x))
               transEdges.zip(rets).filterNot(_._2).foreach { case (e, _) =>
