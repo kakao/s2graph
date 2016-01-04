@@ -4,7 +4,7 @@ package com.kakao.s2graph.core.storage.redis
   * Unit to send get request to Redis
   * Created by june.kay on 2015. 12. 31..
   */
-class RedisGet(key: Array[Byte]) {
+case class RedisGet(key: Array[Byte]) extends RedisRPC{
   var timeout: Long = _
   var count: Int = _
   var offset: Int = _

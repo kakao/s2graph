@@ -2,12 +2,15 @@ package com.kakao.s2graph.core.storage.redis
 
 import com.google.common.cache.Cache
 import com.kakao.s2graph.core.mysqls.Label
+import org.apache.hadoop.hbase.util.Bytes
+import scala.collection.JavaConversions._
 import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.storage.hbase.{IndexEdgeDeserializable, VertexDeserializable, SnapshotEdgeDeserializable}
-import com.kakao.s2graph.core.storage.{StorageDeserializable, StorageSerializable, Storage}
+import com.kakao.s2graph.core.storage.{SKeyValue, StorageDeserializable, StorageSerializable, Storage}
+import com.kakao.s2graph.core.utils.AsyncRedisClient
 import com.typesafe.config.Config
-
 import scala.concurrent.{Future, ExecutionContext}
+import scala.util.{Failure, Success}
 
 /**
   * Redis storage handler class
@@ -17,6 +20,10 @@ import scala.concurrent.{Future, ExecutionContext}
   */
 class RedisStorage(val config: Config, vertexCache: Cache[Integer, Option[Vertex]])
                   (implicit ec: ExecutionContext) extends Storage {
+
+
+  implicit val akkaSystem = akka.actor.ActorSystem()
+  lazy val client = new AsyncRedisClient(config)
 
   // initialize just once ( so we use `val` not `def` ) -> validate once
   val cacheOpt = None
@@ -34,7 +41,6 @@ class RedisStorage(val config: Config, vertexCache: Cache[Integer, Option[Vertex
     new RedisSnapshotEdgeSerializable(snapshotEdge)
   def vertexSerializer(vertex: Vertex): StorageSerializable[Vertex] =
     new RedisVertexSerializable(vertex)
-
   override def checkEdges(params: Seq[(Vertex, Vertex, QueryParam)]): Future[Seq[QueryRequestWithResult]] = {
     val futures = for {
       (srcVertex, tgtVertex, queryParam) <- params
@@ -46,6 +52,20 @@ class RedisStorage(val config: Config, vertexCache: Cache[Integer, Option[Vertex
   override def flush(): Unit = ???
 
   override def vertexCacheOpt: Option[Cache[Integer, Option[Vertex]]] = ???
+
+  def get(get: RedisGet): Future[Set[SKeyValue]] = {
+    Future[Set[SKeyValue]] {
+      // send rpc call to Redis instance
+      client.doBlockWithKey[Set[SKeyValue]]("" /* sharding key */) { jedis =>
+        jedis.zrangeByLex(get.key, get.min, get.max, get.offset, get.count).toSet[Array[Byte]].map(v =>
+          SKeyValue(Array.empty[Byte], get.key, Array.empty[Byte], Array.empty[Byte], v, 0L)
+        )
+      } match {
+        case Success(v) => v
+        case Failure(e) => Set[SKeyValue]()
+      }
+    }
+  }
 
 
   // Interface
