@@ -21,6 +21,7 @@ case class ExperimentRequest(accessToken: String, experimentName: String, uuid: 
 case class InsertBulkRequest(override val payload: JsValue) extends GraphRestRequest("/graphs/edges/insertBulk", payload)
 case class DeleteRequest(override val payload: JsValue) extends GraphRestRequest("/graphs/edges/delete", payload)
 case class BulkRequest(override val payload: String) extends GraphRestRequest("/graphs/edges/bulk", payload)
+case class BulkWithWaitRequest(override val payload: String) extends GraphRestRequest("/graphs/edges/bulkWithWait", payload)
 
 class GraphRestClient(wsClient: NingWSClient, baseUrl: String) {
   def post(url: String, payload: JsValue): Future[WSResponse] = {

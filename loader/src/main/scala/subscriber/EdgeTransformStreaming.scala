@@ -116,7 +116,7 @@ object EdgeTransformStreaming extends SparkApp {
           } yield {
             acc += ("Input", orgEdgesGrouped.length)
             for {
-              transEdges <- transformer.changeEdges(orgEdgesGrouped)
+              transEdges <- transformer.transformEdges(orgEdgesGrouped)
               rets <- getGraph.mutateEdges(transEdges, withWait = true)
             } yield {
               acc += ("Transform", rets.count(x => x))
