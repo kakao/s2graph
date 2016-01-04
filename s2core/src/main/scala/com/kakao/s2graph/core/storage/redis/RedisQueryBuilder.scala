@@ -1,20 +1,38 @@
 package com.kakao.s2graph.core.storage.redis
 
+import java.util.concurrent.TimeUnit
+
+import com.google.common.cache.CacheBuilder
 import com.kakao.s2graph.core.mysqls.LabelMeta
 import com.kakao.s2graph.core.storage.hbase.SnapshotEdgeSerializable
 import com.kakao.s2graph.core.types._
 import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.storage.{SKeyValue, QueryBuilder}
+import com.kakao.s2graph.core.utils.logger
 import org.apache.hadoop.hbase.util.Bytes
 
-import scala.collection.Map
-import scala.concurrent.{Future, ExecutionContext}
+import scala.annotation.tailrec
+import scala.collection.{Seq, Map}
+import scala.concurrent.{Future, ExecutionContext, Promise}
+import scala.util.Random
 
 /**
   * Created by june.kay with jojo on 2015. 12. 31..
   */
 class RedisQueryBuilder(storage: RedisStorage)(implicit ec: ExecutionContext)
   extends QueryBuilder[RedisGet, Future[QueryRequestWithResult]](storage) {
+
+  val maxSize = storage.config.getInt("future.cache.max.size")
+  val expireAfterWrite = storage.config.getInt("future.cache.expire.after.write")
+  val expireAfterAccess = storage.config.getInt("future.cache.expire.after.access")
+
+  val futureCache = CacheBuilder.newBuilder()
+    .initialCapacity(maxSize)
+    .concurrencyLevel(Runtime.getRuntime.availableProcessors())
+    .expireAfterWrite(expireAfterWrite, TimeUnit.MILLISECONDS)
+    .expireAfterAccess(expireAfterAccess, TimeUnit.MILLISECONDS)
+    .maximumSize(maxSize).build[java.lang.Long, (Long, Future[QueryRequestWithResult])]()
+
 
   def buildRequest(queryRequest: QueryRequest): RedisGet = {
     val srcVertex = queryRequest.vertex
@@ -52,13 +70,8 @@ class RedisQueryBuilder(storage: RedisStorage)(implicit ec: ExecutionContext)
       storage.indexEdgeSerializer(indexedEdge).toKeyValues.head
     }
 
-    val row = kv.row
-    val key = row.take(2) ++  // take hash bytes(short bytes size)
-      label.hTableName.getBytes ++ // table name bytes
-      row.takeRight(row.length-2) // rest of bytes from original row key(built from legacy)
-
     // 1. RedisGet instance initialize
-    val get = new RedisGet(key)
+    val get = new RedisGet(kv.row)
 
     // 2. set filter and min/max value's key build
     val (minTs, maxTs) = queryParam.duration.getOrElse(-1L -> -1L)
@@ -69,9 +82,117 @@ class RedisQueryBuilder(storage: RedisStorage)(implicit ec: ExecutionContext)
       .setFilter(min, true, max, true, minTs, maxTs)
   }
 
-  def getEdge(srcVertex: Vertex, tgtVertex: Vertex, queryParam: QueryParam, isInnerCall: Boolean): Future[QueryRequestWithResult] = ???
+  def getEdge(srcVertex: Vertex,
+    tgtVertex: Vertex,
+    queryParam: QueryParam,
+    isInnerCall: Boolean): Future[QueryRequestWithResult] = {
 
-  def fetch(queryRequest: QueryRequest, prevStepScore: Double, isInnerCall: Boolean, parentEdges: Seq[EdgeWithScore]): Future[QueryRequestWithResult] = ???
+    val _queryParam = queryParam.tgtVertexInnerIdOpt(Option(tgtVertex.innerId))
+    val q = Query.toQuery(Seq(srcVertex), _queryParam)
+    val queryRequest = QueryRequest(q, 0, srcVertex, _queryParam)
+    fetch(queryRequest, 1.0, isInnerCall = true, parentEdges = Nil)
+  }
+
+  def fetch(queryRequest: QueryRequest,
+    prevStepScore: Double,
+    isInnerCall: Boolean,
+    parentEdges: Seq[EdgeWithScore]): Future[QueryRequestWithResult] = {
+
+    @tailrec
+    def randomInt(sampleNumber: Int, range: Int, set: Set[Int] = Set.empty[Int]): Set[Int] = {
+      if (set.size == sampleNumber) set
+      else randomInt(sampleNumber, range, set + Random.nextInt(range))
+    }
+
+    def sample(edges: Seq[EdgeWithScore], n: Int): Seq[EdgeWithScore] = {
+      val plainEdges = if (queryRequest.queryParam.offset == 0) {
+        edges.tail
+      } else edges
+
+      val randoms = randomInt(n, plainEdges.size)
+      var samples = List.empty[EdgeWithScore]
+      var idx = 0
+      plainEdges.foreach { e =>
+        if (randoms.contains(idx)) samples = e :: samples
+        idx += 1
+      }
+
+      samples.toSeq
+    }
+
+    def fetchInner(request: RedisGet) = {
+      storage.get(request) map { values =>
+        val edgeWithScores = storage.toEdges(values.toSeq, queryRequest.queryParam, prevStepScore, isInnerCall, parentEdges)
+        val resultEdgesWithScores = if (queryRequest.queryParam.sample >= 0 ) {
+          sample(edgeWithScores, queryRequest.queryParam.sample)
+        } else edgeWithScores
+        QueryRequestWithResult(queryRequest, QueryResult(resultEdgesWithScores))
+      } recover {
+        case e: Exception =>
+          logger.error(s"fetchQueryParam failed. fallback return.", e)
+          QueryRequestWithResult(queryRequest, QueryResult(isFailure = true))
+      }
+    }
+
+    def checkAndExpire(request: RedisGet,
+                       cacheKey: Long,
+                       cacheTTL: Long,
+                       cachedAt: Long,
+                       defer: Future[QueryRequestWithResult]): Future[QueryRequestWithResult] = {
+      if (System.currentTimeMillis() >= cachedAt + cacheTTL) {
+        // future is too old. so need to expire and fetch new data from storage.
+        futureCache.asMap().remove(cacheKey)
+        val newPromise = Promise[QueryRequestWithResult]()
+        val newFuture = newPromise.future
+        futureCache.asMap().putIfAbsent(cacheKey, (System.currentTimeMillis(), newFuture)) match {
+          case null =>
+            // only one thread succeed to come here concurrently
+            // initiate fetch to storage then add callback on complete to finish promise.
+            fetchInner(request) map { queryRequestWithResult =>
+              newPromise.trySuccess(queryRequestWithResult)
+              queryRequestWithResult
+            }
+            newFuture
+          case (cachedAt, oldDefer) => oldDefer
+        }
+      } else {
+        // future is not to old so reuse it.
+        defer
+      }
+    }
+
+    val queryParam = queryRequest.queryParam
+    val cacheTTL = queryParam.cacheTTLInMillis
+    val request = buildRequest(queryRequest)
+    if (cacheTTL <= 0) fetchInner(request)
+    else {
+      val cacheKeyBytes = Bytes.add(queryRequest.query.cacheKeyBytes, toCacheKeyBytes(request))
+      val cacheKey = queryParam.toCacheKey(cacheKeyBytes)
+
+      val cacheVal = futureCache.getIfPresent(cacheKey)
+      cacheVal match {
+        case null =>
+          // here there is no promise set up for this cacheKey so we need to set promise on future cache.
+          val promise = Promise[QueryRequestWithResult]()
+          val future = promise.future
+          val now = System.currentTimeMillis()
+          val (cachedAt, defer) = futureCache.asMap().putIfAbsent(cacheKey, (now, future)) match {
+            case null =>
+              fetchInner(request) map { queryRequestWithResult =>
+                promise.trySuccess(queryRequestWithResult)
+                queryRequestWithResult
+              }
+              (now, future)
+            case oldVal => oldVal
+          }
+          checkAndExpire(request, cacheKey, cacheTTL, cachedAt, defer)
+        case (cachedAt, defer) =>
+          checkAndExpire(request, cacheKey, cacheTTL, cachedAt, defer)
+      }
+    }
+
+
+  }
 
   def toCacheKeyBytes(request: RedisGet): Array[Byte] = ???
 

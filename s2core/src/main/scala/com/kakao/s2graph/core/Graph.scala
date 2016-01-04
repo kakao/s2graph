@@ -42,7 +42,8 @@ object Graph {
     "delete.all.fetch.size" -> java.lang.Integer.valueOf(1000),
     "future.cache.max.size" -> java.lang.Integer.valueOf(100000),
     "future.cache.expire.after.write" -> java.lang.Integer.valueOf(10000),
-    "future.cache.expire.after.access" -> java.lang.Integer.valueOf(5000)
+    "future.cache.expire.after.access" -> java.lang.Integer.valueOf(5000),
+    "redis.instances" -> List[(String, java.lang.Integer)]("localhost" -> java.lang.Integer.valueOf(6379))
   )
 
   var DefaultConfig: Config = ConfigFactory.parseMap(DefaultConfigs)
