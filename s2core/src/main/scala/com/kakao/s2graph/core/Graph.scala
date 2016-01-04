@@ -42,8 +42,7 @@ object Graph {
     "delete.all.fetch.size" -> java.lang.Integer.valueOf(1000),
     "future.cache.max.size" -> java.lang.Integer.valueOf(100000),
     "future.cache.expire.after.write" -> java.lang.Integer.valueOf(10000),
-    "future.cache.expire.after.access" -> java.lang.Integer.valueOf(5000),
-    "redis.instances" -> List[(String, java.lang.Integer)]("localhost" -> java.lang.Integer.valueOf(6379))
+    "future.cache.expire.after.access" -> java.lang.Integer.valueOf(5000)
   )
 
   var DefaultConfig: Config = ConfigFactory.parseMap(DefaultConfigs)
@@ -332,7 +331,7 @@ class Graph(_config: Config)(implicit val ec: ExecutionContext) {
   }
 
   // TODO: Make storage client by config param
-  val storage: Storage = getStorage
+  lazy val storage: Storage = getStorage
 
   for {
     entry <- config.entrySet() if Graph.DefaultConfigs.contains(entry.getKey)
