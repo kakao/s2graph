@@ -7,7 +7,6 @@ import kafka.common.TopicAndPartition
 import kafka.consumer.{ConsumerConfig, PartitionTopicInfo, TopicCount}
 import kafka.utils._
 import org.I0Itec.zkclient.{IZkStateListener, ZkClient}
-import org.apache.zookeeper.Watcher.Event
 import org.apache.zookeeper.Watcher.Event.KeeperState
 
 /**

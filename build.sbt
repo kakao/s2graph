@@ -44,3 +44,6 @@ libraryDependencies ++= Seq(
 )
 
 lazy val s2lambda = project.settings(commonSettings: _*)
+
+lazy val s2lambda_loader = project.dependsOn(s2lambda, s2core).settings(commonSettings: _*)
+
