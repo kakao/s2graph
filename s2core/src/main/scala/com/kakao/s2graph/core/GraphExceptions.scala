@@ -26,4 +26,6 @@ object GraphExceptions {
   case class FetchTimeoutException(msg: String) extends Exception(msg)
 
   case class DropRequestException(msg: String) extends Exception(msg)
+
+  case class NotSupportedSchemaVersion(msg: String) extends Exception(msg)
 }
