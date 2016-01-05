@@ -6,7 +6,7 @@ import org.apache.hadoop.hbase.util.Bytes
 import scala.collection.JavaConversions._
 import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.storage.hbase.{IndexEdgeDeserializable, VertexDeserializable, SnapshotEdgeDeserializable}
-import com.kakao.s2graph.core.storage.{SKeyValue, StorageDeserializable, StorageSerializable, Storage}
+import com.kakao.s2graph.core.storage._
 import com.kakao.s2graph.core.utils.AsyncRedisClient
 import com.typesafe.config.Config
 import scala.concurrent.{Future, ExecutionContext}

@@ -4,10 +4,9 @@ import java.util.concurrent.TimeUnit
 
 import com.google.common.cache.CacheBuilder
 import com.kakao.s2graph.core.mysqls.LabelMeta
-import com.kakao.s2graph.core.storage.hbase.SnapshotEdgeSerializable
 import com.kakao.s2graph.core.types._
 import com.kakao.s2graph.core._
-import com.kakao.s2graph.core.storage.{SKeyValue, QueryBuilder}
+import com.kakao.s2graph.core.storage.QueryBuilder
 import com.kakao.s2graph.core.utils.logger
 import org.apache.hadoop.hbase.util.Bytes
 
@@ -70,8 +69,11 @@ class RedisQueryBuilder(storage: RedisStorage)(implicit ec: ExecutionContext)
       storage.indexEdgeSerializer(indexedEdge).toKeyValues.head
     }
 
+    // Redis supports client-side sharding and does not require hash key so remove heading hash key(2 bytes)
+    val rowkey = kv.row.takeRight(kv.row.length - 2)
+
     // 1. RedisGet instance initialize
-    val get = new RedisGet(kv.row)
+    val get = new RedisGet(rowkey)
 
     // 2. set filter and min/max value's key build
     val (minTs, maxTs) = queryParam.duration.getOrElse(-1L -> -1L)
