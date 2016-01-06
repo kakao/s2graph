@@ -3,14 +3,13 @@ package subscriber
 import com.kakao.s2graph.EdgeTransform
 import com.kakao.s2graph.client.GraphRestClient
 import com.kakao.s2graph.core.mysqls.Model
-import com.kakao.s2graph.core.rest.RestCaller
+import com.kakao.s2graph.core.utils.Configuration._
 import com.kakao.s2graph.core.{Graph, GraphConfig, GraphUtil}
 import kafka.serializer.StringDecoder
 import org.apache.spark.streaming.Durations._
 import org.apache.spark.streaming.kafka.KafkaRDDFunctions.rddToKafkaRDDFunctions
 import s2.config.S2ConfigFactory
 import s2.spark.{HashMapParam, SparkApp}
-import com.kakao.s2graph.core.utils.Configuration._
 
 import scala.collection.mutable.{HashMap => MutableHashMap}
 import scala.concurrent.duration._
@@ -48,11 +47,15 @@ object EdgeTransformStreaming extends SparkApp {
   lazy val client = new play.api.libs.ws.ning.NingWSClient(builder.build)
   lazy val rest = new GraphRestClient(client, config.getOrElse("s2graph.url", "http://localhost"))
   lazy val transformer = new EdgeTransform(rest)
+  lazy val streamHelper = getStreamHelper(kafkaParam)
 
   // should implement in derived class
   override def run(): Unit = {
-    validateArgument("interval")
-    val interval = args(0).toLong
+    validateArgument("interval", "clear")
+    val (interval, clear) = (args(0).toLong, args(1).toBoolean)
+    if (clear) {
+      streamHelper.kafkaHelper.consumerGroupCleanup()
+    }
     val intervalInSec = seconds(interval)
 
     val conf = sparkConf(s"$strInputTopics: $className")
@@ -61,7 +64,7 @@ object EdgeTransformStreaming extends SparkApp {
 
     val acc = sc.accumulable(MutableHashMap.empty[String, Long], "Throughput")(HashMapParam[String, Long](_ + _))
 
-    val stream = getStreamHelper(kafkaParam).createStream[String, String, StringDecoder, StringDecoder](ssc, inputTopics)
+    val stream = streamHelper.createStream[String, String, StringDecoder, StringDecoder](ssc, inputTopics)
 
     stream.foreachRDD { (rdd, ts) =>
       rdd.foreachPartitionWithOffsetRange { case (osr, part) =>
@@ -86,7 +89,7 @@ object EdgeTransformStreaming extends SparkApp {
             } yield {
               acc += ("Transform", rets.count(x => x))
               transEdges.zip(rets).filterNot(_._2).foreach { case (e, _) =>
-                logError(s"failed to mutateEdge: ${e.toLogString}")
+                logError(s"failed to loadEdge: ${e.toLogString}")
               }
             }
           }
@@ -94,7 +97,7 @@ object EdgeTransformStreaming extends SparkApp {
 
         Await.result(future, interval seconds)
 
-        getStreamHelper(kafkaParam).commitConsumerOffset(osr)
+        streamHelper.commitConsumerOffset(osr)
       }
     }
 

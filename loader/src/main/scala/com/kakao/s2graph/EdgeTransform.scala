@@ -1,6 +1,6 @@
 package com.kakao.s2graph
 
-import com.kakao.s2graph.client.{BulkWithWaitRequest, BulkRequest, ExperimentRequest, GraphRestClient}
+import com.kakao.s2graph.client.{BulkRequest, BulkWithWaitRequest, ExperimentRequest, GraphRestClient}
 import com.kakao.s2graph.core.mysqls._
 import com.kakao.s2graph.core.{Edge, GraphUtil, Management}
 import org.slf4j.LoggerFactory
@@ -15,10 +15,8 @@ import scala.util.Try
 class EdgeTransform(rest: GraphRestClient)(implicit ec: ExecutionContext) {
   val log = LoggerFactory.getLogger("application")
 
-  def transformEdge(edge: Edge): Future[Option[Edge]] = {
-    transformEdges(Seq(edge)).map { seq =>
-      seq.headOption
-    }
+  def transformEdge(edge: Edge): Future[Seq[Edge]] = {
+    transformEdges(Seq(edge))
   }
 
   def transformEdges(edges: Seq[Edge]): Future[Seq[Edge]] = Future.sequence {
@@ -70,8 +68,8 @@ class EdgeTransform(rest: GraphRestClient)(implicit ec: ExecutionContext) {
       } yield Management.toEdge(
         edge.ts,
         GraphUtil.fromOp(edge.op),
-        src,
-        tgt,
+        newSrc,
+        newTgt,
         transformLabel.label,
         "out",
         Json.toJson(newProps).toString()
@@ -80,16 +78,21 @@ class EdgeTransform(rest: GraphRestClient)(implicit ec: ExecutionContext) {
   }
 
   def loadEdges(edges: Seq[Edge], withWait: Boolean = false): Future[Seq[Boolean]] = {
-    val payload = edges.map(_.toLogString).mkString("\n")
-    val request = withWait match {
-      case true =>
-        BulkWithWaitRequest(payload)
-      case false =>
-        BulkRequest(payload)
-    }
-    rest.post(request).map { resp =>
-      log.debug(s"${resp.json}")
-      resp.json.as[Seq[Boolean]]
+    edges match {
+      case Nil =>
+        Future.successful(Nil)
+      case _ =>
+        val payload = edges.map(_.toLogString).mkString("\n")
+        val request = withWait match {
+          case true =>
+            BulkWithWaitRequest(payload)
+          case false =>
+            BulkRequest(payload)
+        }
+        rest.post(request).map { resp =>
+          log.debug(s"${resp.json}")
+          resp.json.as[Seq[Boolean]]
+        }
     }
   }
 
@@ -104,8 +107,12 @@ class EdgeTransform(rest: GraphRestClient)(implicit ec: ExecutionContext) {
     case None => Future.failed(new RuntimeException("cannot find experiment"))
   }
 
-  private[s2graph] def extractTargetVertex[T](js: JsValue)(implicit rds: Reads[T]): JsResult[T] = {
-    ((js \ "results") (0) \ "to").validate[T]
+  private[s2graph] def extractTargetVertex(js: JsValue): JsResult[String] = {
+    ((js \ "results")(0) \ "to").validate[JsValue].flatMap {
+      case JsString(s) => JsSuccess(s)
+      case JsNumber(n) => JsSuccess(n.toString())
+      case _ => JsError("Unsupported vertex type")
+    }
   }
 
   private[s2graph] def extractProps(js: JsValue): JsResult[JsObject] = {
