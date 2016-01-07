@@ -1,7 +1,6 @@
 package org.apache.s2graph.lambda.example
 
 import org.apache.s2graph.lambda.{BaseDataProcessor, Data}
-import org.apache.spark.sql.SQLContext
 
 case class PiData(pi: Double) extends Data
 

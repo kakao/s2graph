@@ -1,7 +1,6 @@
 package org.apache.s2graph.lambda.source
 
 import org.apache.s2graph.lambda.{BaseDataProcessor, Data, EmptyData, Params}
-import org.apache.spark.SparkContext
 import org.apache.spark.rdd.RDD
 import org.apache.spark.streaming.dstream.DStream
 import org.apache.spark.streaming.{Durations, StreamingContext, Time}
@@ -31,23 +30,13 @@ trait StreamContainerParams extends Params {
 }
 
 abstract class StreamContainer[T: ClassTag](params: StreamContainerParams)
-    extends Source[EmptyData](params) with RequiresSparkContext {
+    extends Source[EmptyData](params) {
 
   final def getParams: StreamContainerParams = params
 
   final val frontEnd: StreamFrontEnd[T] = new StreamFrontEnd[T](params, getClass.getSimpleName)
 
-  final var _streamingContext: StreamingContext = null
-
-  final override def setSparkContext(sc: SparkContext): Unit = {
-    super.setSparkContext(sc)
-    _streamingContext = new StreamingContext(sparkContext, Durations.seconds(params.interval))
-  }
-
-  final def streamingContext: StreamingContext = {
-    require(_streamingContext != null, "StreamingContext never provided")
-    _streamingContext
-  }
+  final lazy val streamingContext: StreamingContext = new StreamingContext(context.sparkContext, Durations.seconds(params.interval))
 
   final def foreachBatch(foreachFunc: => Unit): Unit = {
     stream.foreachRDD { (rdd, time) =>

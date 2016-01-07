@@ -7,7 +7,7 @@ case class QueryParams(query: String) extends Params
 
 case class QueryData(df: DataFrame) extends Data
 
-class Query(params: QueryParams) extends Source[QueryData](params) with RequiresSQLContext {
+class Query(params: QueryParams) extends Source[QueryData](params) {
   override protected def processBlock(input: EmptyData): QueryData =
-    QueryData(sqlContext.sql(params.query))
+    QueryData(context.sqlContext.sql(params.query))
 }

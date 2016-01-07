@@ -16,7 +16,7 @@ abstract class BaseDataProcessor[I <: Data : ClassTag, O <: Data : ClassTag](par
   final private var predecessors: Set[BaseDataProcessor[_, _]] = _
   final private var depth: Int = -1
   final private var order: Int = -1
-  final private var globalContext: GlobalContext = _
+  final protected var context: Context = _
   final protected var predecessorData: PredecessorData = Data.emptyPredecessorData
   final protected val iClass: Class[_] = classTag[I].runtimeClass
   final protected val oClass: Class[_] = classTag[O].runtimeClass
@@ -103,8 +103,8 @@ abstract class BaseDataProcessor[I <: Data : ClassTag, O <: Data : ClassTag](par
     this
   }
 
-  final def setGlobalContext(globalContext: GlobalContext): this.type = {
-    this.globalContext = globalContext
+  final def setContext(globalContext: Context): this.type = {
+    this.context = globalContext
     this
   }
 

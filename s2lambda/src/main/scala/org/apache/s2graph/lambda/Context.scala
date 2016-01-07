@@ -2,8 +2,11 @@ package org.apache.s2graph.lambda
 
 import org.apache.hadoop.fs.{FileSystem, Path}
 import org.apache.spark.SparkContext
+import org.apache.spark.sql.hive.HiveContext
 
-case class GlobalContext(jobId: String, rootDir: String, comment: String, private val sparkContext: SparkContext) {
+case class Context(jobId: String, rootDir: String, comment: String, sparkContext: SparkContext) {
+
+  lazy val sqlContext = new HiveContext(sparkContext)
 
   val BulkDirSuffix = "bulk"
 

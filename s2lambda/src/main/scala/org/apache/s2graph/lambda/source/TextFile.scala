@@ -7,7 +7,7 @@ case class TextFileParams(path: String) extends Params
 
 case class TextFileData(rdd: RDD[String]) extends Data
 
-class TextFile(params: TextFileParams) extends Source[TextFileData](params) with RequiresSparkContext {
+class TextFile(params: TextFileParams) extends Source[TextFileData](params) {
   override protected def processBlock(input: EmptyData): TextFileData =
-    TextFileData(sparkContext.textFile(params.path))
+    TextFileData(context.sparkContext.textFile(params.path))
 }

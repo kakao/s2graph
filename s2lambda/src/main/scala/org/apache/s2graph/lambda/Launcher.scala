@@ -2,10 +2,7 @@ package org.apache.s2graph.lambda
 
 import java.util.UUID
 
-import com.typesafe.config.ConfigFactory
-import org.apache.s2graph.lambda.source.{RequiresSQLContext, RequiresSparkContext, StreamContainer}
-import org.apache.spark.sql.SQLContext
-import org.apache.spark.sql.hive.HiveContext
+import org.apache.s2graph.lambda.source.StreamContainer
 import org.apache.spark.{SparkConf, SparkContext}
 
 import scala.reflect.ClassTag
@@ -14,7 +11,7 @@ case class JobDesc(name: String, processors: List[ProcessorDesc], streamContaine
 
 case class ProcessorDesc(`class`: String, params: Option[JsonUtil.JVal], id: Option[String], pid: Option[String], pids: Option[Seq[String]])
 
-case class ProcessorFactory(className: String, paramsAsJValue: Option[JsonUtil.JVal]) {
+case class ProcessorFactory(className: String, paramsAsJValue: Option[JsonUtil.JVal], context: Context) {
 
   private val constructor = Class.forName(className).getConstructors.head
 
@@ -35,7 +32,7 @@ case class ProcessorFactory(className: String, paramsAsJValue: Option[JsonUtil.J
         require(false,
           Seq(constructor.getParameterTypes.toSeq, className, paramsAsJValue).map(_.toString).mkString(","))
     }
-    instance.asInstanceOf[BaseDataProcessor[Data, Data]]
+    instance.asInstanceOf[BaseDataProcessor[Data, Data]].setContext(context)
   }
 
 }
@@ -59,8 +56,8 @@ object Launcher extends Visualization {
     launch(jsonString, command)
   }
 
-  def buildPipeline(processors: List[ProcessorDesc], globalContext: GlobalContext, source: BaseDataProcessor[_ <: Data, _ <: Data] = null)
-  : (List[BaseDataProcessor[Data, Data]], List[BaseDataProcessor[Data, Data]]) = {
+  def buildPipeline(processors: List[ProcessorDesc], context: Context, source: BaseDataProcessor[_ <: Data, _ <: Data] = null)
+  : List[BaseDataProcessor[Data, Data]] = {
 
     /** instantiation */
     val instances = processors.zipWithIndex.map { case (p, order) =>
@@ -74,7 +71,7 @@ object Launcher extends Visualization {
           Seq(a) ++ b
         }
       }
-      val instance = ProcessorFactory(p.`class`, p.params).getInstance
+      val instance = ProcessorFactory(p.`class`, p.params, context).getInstance
       (order, id, pids, instance)
     }
 
@@ -101,7 +98,6 @@ object Launcher extends Visualization {
       instance
           .setOrder(order)
           .setDepth(depth)
-          .setGlobalContext(globalContext)
           .setPredecessors(predecessors: _*)
     }
 
@@ -121,7 +117,7 @@ object Launcher extends Visualization {
     val leaves = instances.map(_._4).diff(instances.flatMap(_._4.getPredecessors))
     leaves.foreach(x => println(x.toString(false)))
 
-    (leaves, instances.map(_._4))
+    leaves
   }
 
   def launch(jsonString: String, command: String, givenSparkContext: Option[SparkContext] = None): Unit = {
@@ -137,61 +133,26 @@ object Launcher extends Visualization {
       new SparkContext(sparkConf)
     }
 
-    val globalContext = GlobalContext(jobDesc.name, jobDesc.root.orNull, jobDesc.comment.orNull, sparkContext)
+    val context = Context(jobDesc.name, jobDesc.root.orNull, jobDesc.comment.orNull, sparkContext)
 
     val streamContainer = jobDesc.streamContainer.map { desc =>
-      ProcessorFactory(desc.`class`, desc.params).getInstance.asInstanceOf[StreamContainer[_]]
+      ProcessorFactory(desc.`class`, desc.params, context).getInstance.asInstanceOf[StreamContainer[_]]
     }
 
-    /** build Pipeline */
-    val (leaves, instances) = streamContainer match {
-      case Some(container) =>
-        // streaming job
-        buildPipeline(jobDesc.processors, globalContext, container.frontEnd)
-      case None =>
-        // batch job
-        buildPipeline(jobDesc.processors, globalContext)
-    }
+    println(s"running ${context.jobId}/${context.batchId}: ${context.comment}")
 
-    /** set Context */
-    var sqlContext: SQLContext = null
-    instances.foreach {
-      case instance: RequiresSparkContext =>
-        instance.setSparkContext(sparkContext)
-      case instance: RequiresSQLContext if sqlContext != null =>
-        instance.setSQLContext(sqlContext)
-      case instance: RequiresSQLContext if sqlContext == null =>
-        sqlContext = new HiveContext(sparkContext)
-        instance.setSQLContext(sqlContext)
-      case _ =>
-    }
-
-    /** set Context to StreamContainer */
     streamContainer match {
-      case Some(instance: RequiresSparkContext) =>
-        instance.setSparkContext(sparkContext)
-      case Some(instance: RequiresSQLContext) if sqlContext != null =>
-        instance.setSQLContext(sqlContext)
-      case Some(instance: RequiresSQLContext) if sqlContext == null =>
-        sqlContext = new HiveContext(sparkContext)
-        instance.setSQLContext(sqlContext)
-      case _ =>
-    }
-
-    println(s"running ${globalContext.jobId}/${globalContext.batchId}: ${globalContext.comment}")
-
-    if (command == "run") {
-      streamContainer match {
-        case Some(container) =>
+      case Some(container) =>
+        /** streaming job */
+        val leaves = buildPipeline(jobDesc.processors, context, container.frontEnd)
+        if (command == "run") {
           val ssc = container.streamingContext
-
           container.foreachBatch {
             leaves.foreach(_.invalidateCache())
             leaves.foreach(_.process())
           }
 
           ssc.start()
-
           container.getParams.timeout match {
             case Some(timeout) =>
               Thread.sleep(timeout)
@@ -199,9 +160,13 @@ object Launcher extends Visualization {
             case None =>
               ssc.awaitTermination()
           }
-        case _ =>
+        }
+      case _ =>
+        /** batch job */
+        val leaves = buildPipeline(jobDesc.processors, context)
+        if (command == "run") {
           leaves.foreach(_.process())
-      }
+        }
     }
   }
 }
