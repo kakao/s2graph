@@ -4,9 +4,12 @@ import java.util.Properties
 
 import com.kakao.s2graph.core.Management
 import com.kakao.s2graph.core.Management.JsonModel.{Index, Prop}
+import com.kakao.s2graph.core.mysqls.EtlParam.EtlType
 import com.kakao.s2graph.core.types.HBaseType
 import com.typesafe.config.ConfigFactory
 import org.scalatest.{BeforeAndAfterAll, FlatSpec, Matchers}
+import org.slf4j.LoggerFactory
+import play.api.libs.json.Json
 
 /**
   * Created by hsleep(honeysleep@gmail.com) on 2015. 12. 7..
@@ -51,7 +54,7 @@ class EtlSpec extends FlatSpec with Matchers with BeforeAndAfterAll {
     Label.findByName(labelName, useCache = false) match {
       case Some(label) =>
         Etl.findByOriginalLabelIds(label.id.get, useCache = false).foreach { e =>
-          Etl.delete(e.id.get)
+          Etl.delete(e.id)
         }
       case None =>
         Management.createLabel(labelName, serviceName, columnName, columnType, serviceName, columnName, columnType,
@@ -73,7 +76,7 @@ class EtlSpec extends FlatSpec with Matchers with BeforeAndAfterAll {
   override def afterAll: Unit = {
     Label.findByName(labelName, useCache = false).foreach { label =>
       Etl.findByOriginalLabelIds(label.id.get, useCache = false).foreach { e =>
-        Etl.delete(e.id.get)
+        Etl.delete(e.id)
       }
       Label.delete(label.id.get)
     }
@@ -112,7 +115,19 @@ class EtlSpec extends FlatSpec with Matchers with BeforeAndAfterAll {
     }
   }
 
-  it should "find list by transform label id" in {
+  val logger = LoggerFactory.getLogger(getClass)
 
+  "EtlParam" should "parse json" in {
+    val s =
+      """
+        |{
+        | "type": "BUCKET",
+        | "value": "1"
+        |}
+      """.stripMargin
+    val etlParam = Json.parse(s).validate[EtlParam]
+    logger.info(s"${Json.parse(s)}, $etlParam")
+    etlParam.isSuccess should equal(true)
+    etlParam.get.`type` should equal(EtlType.BUCKET)
   }
 }

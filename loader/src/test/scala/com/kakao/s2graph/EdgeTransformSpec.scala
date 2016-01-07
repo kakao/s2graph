@@ -15,7 +15,7 @@ import scala.concurrent.{Await, ExecutionContext}
 /**
   * Created by hsleep(honeysleep@gmail.com) on 2015. 12. 22..
   */
-class EdgeTransformTest extends FlatSpec with Matchers with BeforeAndAfterAll {
+class EdgeTransformSpec extends FlatSpec with Matchers with BeforeAndAfterAll {
   implicit val graphEx = ExecutionContext.Implicits.global
 
   private val builder = new com.ning.http.client.AsyncHttpClientConfig.Builder()
@@ -49,7 +49,7 @@ class EdgeTransformTest extends FlatSpec with Matchers with BeforeAndAfterAll {
         |	"srcVertices": [{
         |		"serviceName": "test",
         |		"columnName": "c1",
-        |		"id": "[[from]]"
+        |		"id": "#uuid"
         |	}],
         |	"steps": [{
         |		"step": [{
@@ -110,12 +110,19 @@ class EdgeTransformTest extends FlatSpec with Matchers with BeforeAndAfterAll {
     Etl.create(l1Id.toInt, l2Id.toInt)
     destroyBucket()
     val bucketId = makeBucket(service)
-    Etl.create(l1Id.toInt, l3Id.toInt, Some(bucketId))
+    val bucketJson =
+      s"""
+         |{
+         |  "type": "bucket",
+         |  "value": "$bucketId"
+         |}
+       """.stripMargin
+    Etl.create(l1Id.toInt, l3Id.toInt, Some(bucketJson))
   }
 
   override def afterAll: Unit = {
     Etl.findByOriginalLabelIds(Management.findLabel("test1").get.id.get).foreach { etl =>
-      Etl.delete(etl.id.get)
+      Etl.delete(etl.id)
     }
 
     destroyBucket()
@@ -190,7 +197,7 @@ class EdgeTransformTest extends FlatSpec with Matchers with BeforeAndAfterAll {
     val orgLabel = Management.findLabel("test1").get
     val etls = Etl.findByOriginalLabelIds(orgLabel.id.get)
     etls should have length 2
-    logger.info(s"$etls")
+//    logger.info(s"$etls")
 
     val e1 = Management.toEdge(1, "insert", "a", "1", "test1", "out", "{}")
     val future = _edgeTransform.transformEdge(e1)
@@ -230,7 +237,7 @@ class EdgeTransformTest extends FlatSpec with Matchers with BeforeAndAfterAll {
       10 seconds
     )
 
-    logger.info(s"$value1")
+//    logger.info(s"$value1")
 
     _edgeTransform.extractTargetVertex(value1).get should equal("1")
 
@@ -260,7 +267,7 @@ class EdgeTransformTest extends FlatSpec with Matchers with BeforeAndAfterAll {
       10 seconds
     )
 
-    logger.info(s"$value2")
+//    logger.info(s"$value2")
 
     _edgeTransform.extractTargetVertex(value2).get should equal("1")
   }

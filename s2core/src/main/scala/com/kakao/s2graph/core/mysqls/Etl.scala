@@ -1,5 +1,6 @@
 package com.kakao.s2graph.core.mysqls
 
+import play.api.libs.json._
 import scalikejdbc._
 
 import scala.util.Try
@@ -13,27 +14,27 @@ object Etl extends Model[Etl] {
 
   def apply(c: SyntaxProvider[Etl])(rs: WrappedResultSet): Etl = apply(c.resultName)(rs)
   def apply(r: ResultName[Etl])(rs: WrappedResultSet): Etl = {
-    Etl(Option(rs.int(r.id)), rs.int(r.originalLabelId), rs.int(r.transformLabelId),
-      rs.intOpt(r.srcEtlQueryId), rs.intOpt(r.tgtEtlQueryId), rs.intOpt(r.propEtlQueryId))
+    Etl(rs.int(r.id), rs.int(r.originalLabelId), rs.int(r.transformLabelId),
+      rs.stringOpt(r.srcEtl), rs.stringOpt(r.tgtEtl), rs.stringOpt(r.propEtl))
   }
 
   def create(originalLabelId: Int,
              transformLabelId: Int,
-             srcEtlQueryId: Option[Int] = None,
-             tgtEtlQueryId: Option[Int] = None,
-             propEtlQueryId: Option[Int] = None)
+             srcEtl: Option[String] = None,
+             tgtEtl: Option[String] = None,
+             propEtl: Option[String] = None)
             (implicit session: DBSession = AutoSession): Try[Etl] = {
     Try {
       val id = withSQL {
         insert.into(Etl).namedValues(
           columnName.originalLabelId -> originalLabelId,
           columnName.transformLabelId -> transformLabelId,
-          columnName.srcEtlQueryId -> srcEtlQueryId,
-          columnName.tgtEtlQueryId -> tgtEtlQueryId,
-          columnName.propEtlQueryId -> propEtlQueryId
+          columnName.srcEtl -> srcEtl,
+          columnName.tgtEtl -> tgtEtl,
+          columnName.propEtl -> propEtl
         )
       }.updateAndReturnGeneratedKey().apply().toInt
-      Etl(Some(id), originalLabelId, transformLabelId, srcEtlQueryId, tgtEtlQueryId, propEtlQueryId)
+      Etl(id, originalLabelId, transformLabelId, srcEtl, tgtEtl, propEtl)
     }
   }
 
@@ -64,9 +65,36 @@ object Etl extends Model[Etl] {
   }
 }
 
-case class Etl(id: Option[Int],
+object EtlParam {
+  object EtlType extends Enumeration {
+    val QUERY, PROP, BUCKET = Value
+
+    implicit val format = new Format[EtlType] {
+      override def reads(json: JsValue): JsResult[EtlType] = {
+        json.validate[String].map(s => EtlType.withName(s.toUpperCase))
+      }
+
+      override def writes(o: EtlType.Value): JsValue = {
+        JsString(o.toString)
+      }
+    }
+  }
+  type EtlType = EtlType.Value
+
+  implicit val format = Json.format[EtlParam]
+}
+
+case class EtlParam(`type`: EtlParam.EtlType, value: String)
+
+case class Etl(id: Int,
                originalLabelId: Int,
                transformLabelId: Int,
-               srcEtlQueryId: Option[Int],
-               tgtEtlQueryId: Option[Int],
-               propEtlQueryId: Option[Int])
+               srcEtl: Option[String],
+               tgtEtl: Option[String],
+               propEtl: Option[String]) {
+  import EtlParam._
+
+  val srcEtlParam: Option[EtlParam] = srcEtl.flatMap(Json.parse(_).validate[EtlParam].asOpt)
+  val tgtEtlParam: Option[EtlParam] = tgtEtl.flatMap(Json.parse(_).validate[EtlParam].asOpt)
+  val propEtlParam: Option[EtlParam] = propEtl.flatMap(Json.parse(_).validate[EtlParam].asOpt)
+}

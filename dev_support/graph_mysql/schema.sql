@@ -225,18 +225,12 @@ CREATE TABLE `etl` (
   `id` int(11) unsigned NOT NULL AUTO_INCREMENT,
   `original_label_id` int(11) NOT NULL,
   `transform_label_id` int(11) NOT NULL,
-  `src_etl_query_id` int(11) DEFAULT NULL,
-  `tgt_etl_query_id` int(11) DEFAULT NULL,
-  `prop_etl_query_id` int(11) DEFAULT NULL,
+  `src_etl` text,
+  `tgt_etl` text,
+  `prop_etl` text,
   PRIMARY KEY (`id`),
   UNIQUE KEY `original_label_id` (`original_label_id`,`transform_label_id`),
   KEY `transform_label_id` (`transform_label_id`),
-  KEY `src_etl_query_id` (`src_etl_query_id`),
-  KEY `tgt_etl_query_id` (`tgt_etl_query_id`),
-  KEY `prop_etl_query_id` (`prop_etl_query_id`),
   CONSTRAINT `etl_ibfk_1` FOREIGN KEY (`original_label_id`) REFERENCES `labels` (`id`),
-  CONSTRAINT `etl_ibfk_2` FOREIGN KEY (`transform_label_id`) REFERENCES `labels` (`id`),
-  CONSTRAINT `etl_ibfk_3` FOREIGN KEY (`src_etl_query_id`) REFERENCES `buckets` (`id`),
-  CONSTRAINT `etl_ibfk_4` FOREIGN KEY (`tgt_etl_query_id`) REFERENCES `buckets` (`id`),
-  CONSTRAINT `etl_ibfk_5` FOREIGN KEY (`prop_etl_query_id`) REFERENCES `buckets` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4;
+  CONSTRAINT `etl_ibfk_2` FOREIGN KEY (`transform_label_id`) REFERENCES `labels` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
