@@ -14,7 +14,7 @@ import scala.util.Try
   * Created by hsleep(honeysleep@gmail.com) on 2015. 12. 8..
   */
 class EdgeTransform(rest: GraphRestClient)(implicit ec: ExecutionContext) {
-  val log = LoggerFactory.getLogger("application")
+  val logger = LoggerFactory.getLogger(getClass)
 
   def transformEdge(edge: Edge): Future[Seq[Edge]] = {
     transformEdges(Seq(edge))
@@ -64,7 +64,7 @@ class EdgeTransform(rest: GraphRestClient)(implicit ec: ExecutionContext) {
             BulkRequest(payload)
         }
         rest.post(request).map { resp =>
-          log.debug(s"${resp.json}")
+          logger.debug(s"loadEdges: ${resp.json}")
           resp.json.as[Seq[Boolean]]
         }
     }
@@ -77,15 +77,16 @@ class EdgeTransform(rest: GraphRestClient)(implicit ec: ExecutionContext) {
           case EtlType.QUERY =>
             val payload = Json.obj()
             runQuery(payload).map { js =>
-              extractTargetVertex(js).getOrElse(original)
+              extractTargetVertex(js).get
             }
           case EtlType.BUCKET =>
             runBucket(Json.obj(), etlParam.value.toInt, original).map { js =>
-              extractTargetVertex(js).getOrElse(original)
+              extractTargetVertex(js).get
             }
           case EtlType.PROP =>
-            Future.successful {
-              propsWithName.get(etlParam.value).map(_.as[String]).getOrElse(original)
+            propsWithName.get(etlParam.value).map(_.as[String]) match {
+              case Some(s) => Future.successful(s)
+              case None => Future.failed(new RuntimeException(s"Doesn't exist a name ${etlParam.value}"))
             }
         }
       case None =>
@@ -101,7 +102,7 @@ class EdgeTransform(rest: GraphRestClient)(implicit ec: ExecutionContext) {
             runQuery(Json.obj()).map { js =>
               extractProps(js).map { newProps =>
                 original ++ newProps.as[JsObject].fields.toMap
-              }.getOrElse(original)
+              }.get
             }
           case EtlType.BUCKET =>
             val payload = Json.obj(
@@ -111,10 +112,10 @@ class EdgeTransform(rest: GraphRestClient)(implicit ec: ExecutionContext) {
             runBucket(payload, etlParam.value.toInt, "").map { js =>
               extractProps(js).map { newProps =>
                 original ++ newProps.as[JsObject].fields.toMap
-              }.getOrElse(original)
+              }.get
             }
           case EtlType.PROP =>
-            throw new RuntimeException("unsupported operation")
+            Future.failed(new RuntimeException("Unsupported operation"))
         }
       case None =>
         Future.successful(original)

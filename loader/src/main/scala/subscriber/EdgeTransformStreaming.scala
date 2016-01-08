@@ -95,7 +95,7 @@ object EdgeTransformStreaming extends SparkApp {
           }
         }
 
-        Await.result(future, interval seconds)
+        Await.ready(future, interval seconds)
 
         streamHelper.commitConsumerOffset(osr)
       }
