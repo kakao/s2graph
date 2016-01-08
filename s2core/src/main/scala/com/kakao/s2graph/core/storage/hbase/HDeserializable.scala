@@ -1,14 +1,12 @@
 package com.kakao.s2graph.core.storage.hbase
 
 import com.kakao.s2graph.core.storage.{SKeyValue, StorageDeserializable}
-import com.kakao.s2graph.core.types.{LabelWithDirection, SourceVertexId, VertexId}
+import com.kakao.s2graph.core.types.{LabelWithDirection, SourceVertexId}
 import org.apache.hadoop.hbase.util.Bytes
 
 
 trait HDeserializable[E] extends StorageDeserializable[E] {
   import StorageDeserializable._
-
-  type RowKeyRaw = (VertexId, LabelWithDirection, Byte, Boolean, Int)
 
   /** version 1 and version 2 share same code for parsing row key part */
   def parseRow(kv: SKeyValue, version: String): RowKeyRaw = {

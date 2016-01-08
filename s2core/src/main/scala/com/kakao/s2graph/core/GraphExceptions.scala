@@ -28,4 +28,6 @@ object GraphExceptions {
   case class DropRequestException(msg: String) extends Exception(msg)
 
   case class NotSupportedSchemaVersion(msg: String) extends Exception(msg)
+
+  case class PartialFailureException(edge: Edge, statusCode: Byte, faileReason: String) extends Exception
 }

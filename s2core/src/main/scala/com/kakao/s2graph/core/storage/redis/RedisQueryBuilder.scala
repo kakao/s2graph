@@ -19,7 +19,7 @@ import scala.util.Random
   * Created by june.kay with jojo on 2015. 12. 31..
   */
 class RedisQueryBuilder(storage: RedisStorage)(implicit ec: ExecutionContext)
-  extends QueryBuilder[RedisGet, Future[QueryRequestWithResult]](storage) {
+  extends QueryBuilder[RedisGetRequest, Future[QueryRequestWithResult]](storage) {
 
   val maxSize = storage.config.getInt("future.cache.max.size")
   val expireAfterWrite = storage.config.getInt("future.cache.expire.after.write")
@@ -33,7 +33,7 @@ class RedisQueryBuilder(storage: RedisStorage)(implicit ec: ExecutionContext)
     .maximumSize(maxSize).build[java.lang.Long, (Long, Future[QueryRequestWithResult])]()
 
 
-  def buildRequest(queryRequest: QueryRequest): RedisGet = {
+  def buildRequest(queryRequest: QueryRequest): RedisGetRequest = {
     val srcVertex = queryRequest.vertex
 
     val queryParam = queryRequest.queryParam
@@ -73,7 +73,7 @@ class RedisQueryBuilder(storage: RedisStorage)(implicit ec: ExecutionContext)
     val rowkey = kv.row.takeRight(kv.row.length - 2)
 
     // 1. RedisGet instance initialize
-    val get = new RedisGet(rowkey)
+    val get = new RedisGetRequest(rowkey)
 
     // 2. set filter and min/max value's key build
     val (minTs, maxTs) = queryParam.duration.getOrElse(-1L -> -1L)
@@ -122,7 +122,7 @@ class RedisQueryBuilder(storage: RedisStorage)(implicit ec: ExecutionContext)
       samples.toSeq
     }
 
-    def fetchInner(request: RedisGet) = {
+    def fetchInner(request: RedisGetRequest) = {
       storage.get(request) map { values =>
         val edgeWithScores = storage.toEdges(values.toSeq, queryRequest.queryParam, prevStepScore, isInnerCall, parentEdges)
         val resultEdgesWithScores = if (queryRequest.queryParam.sample >= 0 ) {
@@ -136,7 +136,7 @@ class RedisQueryBuilder(storage: RedisStorage)(implicit ec: ExecutionContext)
       }
     }
 
-    def checkAndExpire(request: RedisGet,
+    def checkAndExpire(request: RedisGetRequest,
                        cacheKey: Long,
                        cacheTTL: Long,
                        cachedAt: Long,
@@ -196,7 +196,7 @@ class RedisQueryBuilder(storage: RedisStorage)(implicit ec: ExecutionContext)
 
   }
 
-  def toCacheKeyBytes(request: RedisGet): Array[Byte] = ???
+  def toCacheKeyBytes(request: RedisGetRequest): Array[Byte] = ???
 
   def fetches(queryRequestWithScoreLs: Seq[(QueryRequest, Double)], prevStepEdges: Map[VertexId, Seq[EdgeWithScore]]): Future[Seq[QueryRequestWithResult]] = ???
 }
