@@ -1,7 +1,7 @@
 package com.kakao.s2graph.core.storage
 
-import com.kakao.s2graph.core.{Edge, IndexEdge, QueryParam}
-import com.kakao.s2graph.core.types.{HBaseType, InnerVal, InnerValLike, InnerValLikeWithTs}
+import com.kakao.s2graph.core.QueryParam
+import com.kakao.s2graph.core.types._
 
 object StorageDeserializable {
   /** Deserializer */
@@ -78,5 +78,7 @@ object StorageDeserializable {
 }
 
 trait StorageDeserializable[E] {
+  type RowKeyRaw = (VertexId, LabelWithDirection, Byte, Boolean, Int)
+
   def fromKeyValues[T: CanSKeyValue](queryParam: QueryParam, kvs: Seq[T], version: String, cacheElementOpt: Option[E]): E
 }

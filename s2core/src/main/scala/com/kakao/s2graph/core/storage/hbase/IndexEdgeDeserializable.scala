@@ -2,9 +2,8 @@ package com.kakao.s2graph.core.storage.hbase
 
 import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.mysqls.LabelMeta
-import com.kakao.s2graph.core.storage.{CanSKeyValue, StorageDeserializable, SKeyValue}
+import com.kakao.s2graph.core.storage.{CanSKeyValue, SKeyValue, StorageDeserializable}
 import com.kakao.s2graph.core.types._
-import com.kakao.s2graph.core.utils.logger
 import org.apache.hadoop.hbase.util.Bytes
 
 class IndexEdgeDeserializable extends HDeserializable[IndexEdge] {
@@ -82,7 +81,6 @@ class IndexEdgeDeserializable extends HDeserializable[IndexEdge] {
     }
 
     val index = queryParam.label.indicesMap.getOrElse(labelIdxSeq, throw new RuntimeException("invalid index seq"))
-
 
     //    assert(kv.qualifier.nonEmpty && index.metaSeqs.size == idxPropsRaw.size)
 

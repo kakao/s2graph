@@ -3,7 +3,7 @@ package com.kakao.s2graph.core.storage.hbase
 import java.util
 
 import com.google.common.cache.Cache
-import com.kakao.s2graph.core.GraphExceptions.FetchTimeoutException
+import com.kakao.s2graph.core.GraphExceptions.{PartialFailureException, FetchTimeoutException}
 import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.mysqls.{Label, LabelMeta}
 import com.kakao.s2graph.core.storage.Storage
@@ -286,9 +286,6 @@ class AsynchbaseStorage(val config: Config, vertexCache: Cache[Integer, Option[V
       throw new FetchTimeoutException(s"${edge.toLogString}")
     } toFuture
   }
-
-
-  case class PartialFailureException(edge: Edge, statusCode: Byte, faileReason: String) extends Exception
 
   def debug(ret: Boolean, phase: String, snapshotEdge: SnapshotEdge) = {
     val msg = Seq(s"[$ret] [$phase]", s"${snapshotEdge.toLogString()}").mkString("\n")

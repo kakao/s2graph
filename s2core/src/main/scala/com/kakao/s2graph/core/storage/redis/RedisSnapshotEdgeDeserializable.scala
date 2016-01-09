@@ -34,7 +34,7 @@ class RedisSnapshotEdgeDeserializable extends RDeserializable[SnapshotEdge]  {
     val cellVersion = kv.timestamp
 
     /**
-      * Just padding hash bytes for compatibility with legacy codes
+      * put leading hash bytes for compatibility with legacy codes
       * @param v Byte array to pad
       * @return 2 bytes padded bytes array
       */

@@ -1,9 +1,9 @@
 package com.kakao.s2graph.core.storage.redis
 
-import com.kakao.s2graph.core.{GraphExceptions, SnapshotEdge}
 import com.kakao.s2graph.core.mysqls.LabelIndex
 import com.kakao.s2graph.core.storage.{SKeyValue, StorageSerializable}
-import com.kakao.s2graph.core.types.{VertexId, SourceAndTargetVertexIdPair, HBaseType}
+import com.kakao.s2graph.core.types.{HBaseType, SourceAndTargetVertexIdPair}
+import com.kakao.s2graph.core.{GraphExceptions, SnapshotEdge}
 import org.apache.hadoop.hbase.util.Bytes
 
 /**
@@ -44,10 +44,9 @@ class RedisSnapshotEdgeSerializable(snapshotEdge: SnapshotEdge) extends StorageS
       case None => valueBytes()
       case Some(pendingEdge) =>
         val opBytes = statusCodeWithOp(pendingEdge.statusCode, pendingEdge.op)
-        val versionBytes = Array.empty[Byte]
         val propsBytes = propsToKeyValuesWithTs(pendingEdge.propsWithTs.toSeq)
         val lockBytes = Bytes.toBytes(pendingEdge.lockTs.get)
-        Bytes.add(Bytes.add(valueBytes(), opBytes, versionBytes), Bytes.add(propsBytes, lockBytes))
+        Bytes.add(Bytes.add(valueBytes(), opBytes), Bytes.add(propsBytes, lockBytes))
     }
 
     val kv = SKeyValue(Array.empty[Byte], row, Array.empty[Byte], Array.empty[Byte], value, snapshotEdge.version)
