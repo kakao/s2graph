@@ -26,6 +26,10 @@ lazy val s2rest_play = project.enablePlugins(PlayScala)
   .settings(commonSettings: _*)
   .settings(testOptions in Test += Tests.Argument("sequential"))
 
+lazy val s2rest_netty = project
+  .dependsOn(s2core)
+  .settings(commonSettings: _*)
+
 lazy val s2core = project.settings(commonSettings: _*)
 
 lazy val spark = project.settings(commonSettings: _*)
@@ -42,3 +46,9 @@ lazy val s2counter_loader = project.dependsOn(s2counter_core, spark)
 lazy val root = (project in file("."))
   .aggregate(s2core, s2rest_play)
   .settings(commonSettings: _*)
+
+lazy val runRatTask = taskKey[Unit]("Runs Apache rat on S2Graph")
+
+runRatTask := {
+  "sh bin/run-rat.sh" !
+}
