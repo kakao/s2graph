@@ -39,7 +39,8 @@ class RedisIndexEdgeDeserializable(indexEdge: IndexEdge) extends StorageDeserial
   /**
    * Parse qualifier
    *
-   *  | qualifier length byte | indexed property count byte | indexed property values bytes | timestamp bytes | target id bytes | [ operation code byte ] |
+   *  byte map
+   *  [ qualifier length byte | indexed property count byte | indexed property values bytes | timestamp bytes | target id bytes | operation code byte ]
    *
    *  - Please refer to https://hbase.apache.org/apidocs/org/apache/hadoop/hbase/util/OrderedBytes.html regarding actual byte size of InnerVals.
    *
@@ -64,7 +65,7 @@ class RedisIndexEdgeDeserializable(indexEdge: IndexEdge) extends StorageDeserial
       qualifierLen += numOfBytesUsed
 
       val (tgtVertexId, tgtVertexIdLen) =
-        if (pos == totalQualifierLen + 1) { // target id is included in qualifier
+        if (pos == totalQualifierLen) { // target id is included in qualifier
           (HBaseType.defaultTgtVertexId, 0)
         } else {
           TargetVertexId.fromBytes(kv.value, endAt, 0, version)
@@ -72,9 +73,7 @@ class RedisIndexEdgeDeserializable(indexEdge: IndexEdge) extends StorageDeserial
       qualifierLen += tgtVertexIdLen
       (props, tgtVertexId, tgtVertexIdLen, ts)
     }
-    val op =
-      if (qualifierLen == totalQualifierLen + 1) GraphUtil.defaultOpByte
-      else kv.value(qualifierLen)
+    val op = kv.value(totalQualifierLen)
 
     (idxPropsRaw, tgtVertexIdRaw, op, tgtVertexIdLen != 0, timestamp, pos)
   }

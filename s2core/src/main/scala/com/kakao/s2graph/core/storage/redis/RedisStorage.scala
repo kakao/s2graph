@@ -54,6 +54,7 @@ class RedisStorage(val config: Config, vertexCache: Cache[Integer, Option[Vertex
     new RedisVertexSerializable(vertex)
 
   override def checkEdges(params: Seq[(Vertex, Vertex, QueryParam)]): Future[Seq[QueryRequestWithResult]] = {
+    logger.info(s">> Check edges for Redis ::")
     val futures = for {
       (srcVertex, tgtVertex, queryParam) <- params
     } yield queryBuilder.getEdge(srcVertex, tgtVertex, queryParam, false)
@@ -66,9 +67,11 @@ class RedisStorage(val config: Config, vertexCache: Cache[Integer, Option[Vertex
   override def vertexCacheOpt: Option[Cache[Integer, Option[Vertex]]] = ???
 
   def get(get: RedisGetRequest): Future[Set[SKeyValue]] = {
+    logger.info(s">> RedisGet get")
     Future[Set[SKeyValue]] {
       // send rpc call to Redis instance
       client.doBlockWithKey[Set[SKeyValue]]("" /* sharding key */) { jedis =>
+        logger.info(s">> jedis gogo")
         jedis.zrangeByLex(get.key, get.min, get.max, get.offset, get.count).toSet[Array[Byte]].map(v =>
           SKeyValue(Array.empty[Byte], get.key, Array.empty[Byte], Array.empty[Byte], v, 0L)
         )
@@ -393,6 +396,7 @@ class RedisStorage(val config: Config, vertexCache: Cache[Integer, Option[Vertex
           case Some(pendingEdge) =>
             def isLockExpired = pendingEdge.lockTs.get + LockExpireDuration < System.currentTimeMillis()
             if (isLockExpired) {
+              // if snapshot and pending edge's ts are same, it is first edge operation for current src/tgt edge
               val oldSnapshotEdge = if (snapshotEdge.ts == pendingEdge.ts) None else Option(snapshotEdge)
               val (_, newEdgeUpdate) = Edge.buildOperation(oldSnapshotEdge, Seq(pendingEdge))
               val newLockEdge = buildLockEdge(snapshotEdgeOpt, pendingEdge, kvOpt)

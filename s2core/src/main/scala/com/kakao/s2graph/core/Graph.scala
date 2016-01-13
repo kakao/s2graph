@@ -324,6 +324,7 @@ class Graph(_config: Config)(implicit val ec: ExecutionContext) {
 
   def getStorage: Storage = {
     val engine = if ( config.hasPath("storage.engine") ) config.getString("storage.engine") else "hbase"
+    logger.info(s">> storage.engine = $engine")
     engine match {
       case "redis" => new RedisStorage(config, vertexCache)(ec)
       case "hbase" | _ => new AsynchbaseStorage(config, vertexCache)(ec)

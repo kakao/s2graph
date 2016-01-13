@@ -88,6 +88,7 @@ class RedisQueryBuilder(storage: RedisStorage)(implicit ec: ExecutionContext)
     tgtVertex: Vertex,
     queryParam: QueryParam,
     isInnerCall: Boolean): Future[QueryRequestWithResult] = {
+    logger.info(s">> RedisQuerybuilder getEdge::")
 
     val _queryParam = queryParam.tgtVertexInnerIdOpt(Option(tgtVertex.innerId))
     val q = Query.toQuery(Seq(srcVertex), _queryParam)

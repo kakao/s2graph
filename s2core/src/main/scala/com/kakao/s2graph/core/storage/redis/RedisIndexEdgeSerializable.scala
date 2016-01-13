@@ -27,16 +27,26 @@ class RedisIndexEdgeSerializable(indexEdge: IndexEdge) extends StorageSerializab
     val row = Bytes.add(srcIdBytes, labelWithDirBytes, labelIndexSeqWithIsInvertedBytes)
     val _tgtIdBytes = VertexId.toTargetVertexId(indexEdge.tgtVertex.id).bytes
     val tgtIdBytes = _tgtIdBytes.takeRight(_tgtIdBytes.length - GraphUtil.bytesForMurMurHash)
+
+    /**
+      * Qualifier and value byte array map
+      *
+      *  * byte field design
+      *    [{ qualifier total length - 1 byte } | { # of index property - 1 byte } | -
+      *     { series of index property values - sum of length with each property values bytes } | -
+      *     { timestamp - 8 bytes } | { target id inner value - length of target id inner value bytes } | -
+      *     { operation code byte - 1 byte } -
+      *     { series of non-index property values - sum of length with each property values bytes }]
+      *
+      *  ** !Serialize operation code byte after target id or series of index props bytes
+      */
+    //
     val qualifier =
-      if (indexEdge.op == GraphUtil.operations("incrementCount")) {
-        // TODO
-        Bytes.add(idxPropsBytes, tgtIdBytes, Array.fill(1)(indexEdge.op))
-      } else {
-        idxPropsMap.get(LabelMeta.toSeq) match {
+        (idxPropsMap.get(LabelMeta.toSeq) match {
           case None => Bytes.add(idxPropsBytes, tgtIdBytes)
           case Some(vId) => idxPropsBytes
-        }
-      }
+        }) ++ Array.fill(1)(indexEdge.op)
+
     val qualifierLen = Array.fill[Byte](1)(qualifier.length.toByte)
     val timestamp = InnerVal(indexEdge.ts).bytes
     val propsKv = propsToKeyValues(indexEdge.metas.toSeq)
