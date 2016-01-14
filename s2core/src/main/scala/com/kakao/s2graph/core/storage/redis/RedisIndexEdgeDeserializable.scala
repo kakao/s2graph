@@ -9,7 +9,7 @@ import org.apache.hadoop.hbase.util.Bytes
 /**
  * @author Junki Kim (wishoping@gmail.com), Hyunsung Jo (hyunsung.jo@gmail.com) on 1/7/16.
  */
-class RedisIndexEdgeDeserializable(indexEdge: IndexEdge) extends StorageDeserializable[IndexEdge] {
+class RedisIndexEdgeDeserializable extends StorageDeserializable[IndexEdge] {
   import StorageDeserializable._
 
   type QualifierRaw = (Array[(Byte, InnerValLike)],  // Index property key/value map

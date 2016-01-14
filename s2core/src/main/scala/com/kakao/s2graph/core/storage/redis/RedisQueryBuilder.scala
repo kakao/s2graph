@@ -77,7 +77,14 @@ class RedisQueryBuilder(storage: RedisStorage)(implicit ec: ExecutionContext)
 
     // 2. set filter and min/max value's key build
     val (minTs, maxTs) = queryParam.duration.getOrElse(-1L -> -1L)
-    val (min, max) = (queryParam.columnRangeFilterMinBytes, queryParam.columnRangeFilterMaxBytes)
+    val (min, max) =
+      if (queryParam.columnRangeFilterMinBytes.length != 0 && queryParam.columnRangeFilterMaxBytes.length != 0)
+        (queryParam.columnRangeFilterMinBytes, queryParam.columnRangeFilterMaxBytes)
+      else
+        ("-".getBytes, "+".getBytes)
+
+    logger.error(s">>> min : $min , max : $max")
+
     get.setCount(queryParam.limit)
       .setOffset(queryParam.offset)
       .setTimeout(queryParam.rpcTimeoutInMillis)

@@ -3,6 +3,7 @@ package com.kakao.s2graph.core.storage.redis
 import com.kakao.s2graph.core.mysqls.LabelIndex
 import com.kakao.s2graph.core.storage.{SKeyValue, StorageSerializable}
 import com.kakao.s2graph.core.types.{HBaseType, SourceAndTargetVertexIdPair}
+import com.kakao.s2graph.core.utils.logger
 import com.kakao.s2graph.core.{GraphExceptions, SnapshotEdge}
 import org.apache.hadoop.hbase.util.Bytes
 
@@ -30,6 +31,7 @@ class RedisSnapshotEdgeSerializable(snapshotEdge: SnapshotEdge) extends StorageS
     propsToKeyValuesWithTs(snapshotEdge.props.toList))
 
   private def toKeyValuesInnerV3: Seq[SKeyValue]  = {
+    logger.error(s">> toKeyValues for snapshotEdge")
     val srcIdAndTgtIdBytes = SourceAndTargetVertexIdPair(snapshotEdge.srcVertex.innerId, snapshotEdge.tgtVertex.innerId).bytes
     val labelWithDirBytes = snapshotEdge.labelWithDir.bytes
     val labelIndexSeqWithIsInvertedBytes = labelOrderSeqWithIsInverted(LabelIndex.DefaultSeq, isInverted = true)
@@ -39,6 +41,8 @@ class RedisSnapshotEdgeSerializable(snapshotEdge: SnapshotEdge) extends StorageS
       labelWithDirBytes,
       labelIndexSeqWithIsInvertedBytes
     )
+
+    logger.error(s">> snapshot edge : row key completed ")
 
     val value = snapshotEdge.pendingEdgeOpt match {
       case None => valueBytes()
