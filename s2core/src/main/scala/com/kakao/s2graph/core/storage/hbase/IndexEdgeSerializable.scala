@@ -28,18 +28,29 @@ case class IndexEdgeSerializable(indexEdge: IndexEdge) extends HSerializable[Ind
 //    logger.error(s"${row.toList}\n${srcIdBytes.toList}\n${labelWithDirBytes.toList}\n${labelIndexSeqWithIsInvertedBytes.toList}")
     val tgtIdBytes = VertexId.toTargetVertexId(indexEdge.tgtVertex.id).bytes
     val qualifier =
-      if (indexEdge.op == GraphUtil.operations("incrementCount")) {
-        Bytes.add(idxPropsBytes, tgtIdBytes, Array.fill(1)(indexEdge.op))
-      } else {
-        idxPropsMap.get(LabelMeta.toSeq) match {
-          case None => Bytes.add(idxPropsBytes, tgtIdBytes)
-          case Some(vId) => idxPropsBytes
+      if (indexEdge.degreeEdge) Array.empty[Byte]
+      else {
+        if (indexEdge.op == GraphUtil.operations("incrementCount")) {
+          Bytes.add(idxPropsBytes, tgtIdBytes, Array.fill(1)(indexEdge.op))
+        } else {
+          idxPropsMap.get(LabelMeta.toSeq) match {
+            case None => Bytes.add(idxPropsBytes, tgtIdBytes)
+            case Some(vId) => idxPropsBytes
+          }
         }
       }
 
-    val value = propsToKeyValues(indexEdge.metas.toSeq)
+
+    val value =
+      if (indexEdge.degreeEdge)
+        Bytes.toBytes(indexEdge.propsWithTs(LabelMeta.degreeSeq).innerVal.toString().toLong)
+      else if (indexEdge.op == GraphUtil.operations("incrementCount"))
+        Bytes.toBytes(indexEdge.propsWithTs(LabelMeta.countSeq).innerVal.toString().toLong)
+      else propsToKeyValues(indexEdge.metas.toSeq)
+
     val kv = SKeyValue(table, row, cf, qualifier, value, indexEdge.version)
 
     Seq(kv)
   }
+
 }

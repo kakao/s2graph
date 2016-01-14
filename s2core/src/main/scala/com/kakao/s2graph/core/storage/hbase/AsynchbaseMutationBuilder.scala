@@ -1,7 +1,9 @@
 package com.kakao.s2graph.core.storage.hbase
 
 import com.kakao.s2graph.core._
+import com.kakao.s2graph.core.mysqls.LabelMeta
 import com.kakao.s2graph.core.storage.{SKeyValue, MutationBuilder}
+import com.kakao.s2graph.core.types.{InnerVal, InnerValLikeWithTs}
 import org.apache.hadoop.hbase.util.Bytes
 import org.hbase.async.{DeleteRequest, AtomicIncrementRequest, PutRequest, HBaseRpc}
 
@@ -57,22 +59,31 @@ class AsynchbaseMutationBuilder(storage: AsynchbaseStorage)(implicit ec: Executi
   }
 
   /** IndexEdge */
-  def buildIncrementsAsync(indexedEdge: IndexEdge, amount: Long = 1L): Seq[HBaseRpc] =
-    storage.indexEdgeSerializer(indexedEdge).toKeyValues.headOption match {
-      case None => Nil
-      case Some(kv) =>
-        val copiedKV = kv.copy(qualifier = Array.empty[Byte], value = Bytes.toBytes(amount))
-        increment(Seq(copiedKV))
-    }
+  def buildIncrementsAsync(indexedEdge: IndexEdge, amount: Long = 1L): Seq[HBaseRpc] = {
+    val newProps = indexedEdge.props ++ Map(LabelMeta.degreeSeq -> InnerVal.withLong(amount, indexedEdge.schemaVer))
+    val _indexedEdge = indexedEdge.copy(props = newProps)
+    increment(storage.indexEdgeSerializer(_indexedEdge).toKeyValues)
+  }
+
+//    storage.indexEdgeSerializer(indexedEdge).toKeyValues.headOption match {
+//      case None => Nil
+//      case Some(kv) =>
+//        val copiedKV = kv.copy(qualifier = Array.empty[Byte], value = Bytes.toBytes(amount))
+//        increment(Seq(copiedKV))
+//    }
 
 
-  def buildIncrementsCountAsync(indexedEdge: IndexEdge, amount: Long = 1L): Seq[HBaseRpc] =
-    storage.indexEdgeSerializer(indexedEdge).toKeyValues.headOption match {
-      case None => Nil
-      case Some(kv) =>
-        val copiedKV = kv.copy(value = Bytes.toBytes(amount))
-        increment(Seq(copiedKV))
-    }
+  def buildIncrementsCountAsync(indexedEdge: IndexEdge, amount: Long = 1L): Seq[HBaseRpc] = {
+    val newProps = indexedEdge.props ++ Map(LabelMeta.countSeq -> InnerVal.withLong(amount, indexedEdge.schemaVer))
+    val _indexedEdge = indexedEdge.copy(props = newProps)
+    increment(storage.indexEdgeSerializer(_indexedEdge).toKeyValues)
+  }
+//    storage.indexEdgeSerializer(indexedEdge).toKeyValues.headOption match {
+//      case None => Nil
+//      case Some(kv) =>
+//        val copiedKV = kv.copy(value = Bytes.toBytes(amount))
+//        increment(Seq(copiedKV))
+//    }
 
   def buildDeletesAsync(indexedEdge: IndexEdge): Seq[HBaseRpc] =
     delete(storage.indexEdgeSerializer(indexedEdge).toKeyValues)
@@ -88,10 +99,9 @@ class AsynchbaseMutationBuilder(storage: AsynchbaseStorage)(implicit ec: Executi
     delete(storage.snapshotEdgeSerializer(snapshotEdge).toKeyValues)
 
   /** Vertex */
-  def buildPutsAsync(vertex: Vertex): Seq[HBaseRpc] = {
-    val kvs = storage.vertexSerializer(vertex).toKeyValues
-    put(kvs)
-  }
+  def buildPutsAsync(vertex: Vertex): Seq[HBaseRpc] =
+    put(storage.vertexSerializer(vertex).toKeyValues)
+
 
 
   def buildDeleteAsync(vertex: Vertex): Seq[HBaseRpc] = {
