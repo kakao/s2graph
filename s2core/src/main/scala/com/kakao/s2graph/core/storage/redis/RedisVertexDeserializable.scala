@@ -10,7 +10,7 @@ import scala.collection.mutable.ListBuffer
 /**
   * Created by june.kay on 2016. 1. 13..
   */
-class RedisVertexDeserializable(vertex: Vertex) extends StorageDeserializable[Vertex]{
+class RedisVertexDeserializable extends StorageDeserializable[Vertex]{
 
   override def fromKeyValues[T: CanSKeyValue](queryParam: QueryParam,
                                               _kvs: Seq[T],

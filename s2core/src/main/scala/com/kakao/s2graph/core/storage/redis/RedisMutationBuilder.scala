@@ -2,6 +2,7 @@ package com.kakao.s2graph.core.storage.redis
 
 import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.storage.{SKeyValue, MutationBuilder}
+import com.kakao.s2graph.core.utils.logger
 import org.apache.hadoop.hbase.util.Bytes
 
 import scala.concurrent.ExecutionContext
@@ -10,7 +11,7 @@ class RedisMutationBuilder(storage: RedisStorage)(implicit ec: ExecutionContext)
   extends MutationBuilder[RedisRPC](storage) {
 
   def put(kvs: Seq[SKeyValue]): Seq[RedisRPC] =
-    kvs.map { kv => new RedisPutRequest(kv.row, kv.value, kv.timestamp) }
+    kvs.map { kv => new RedisPutRequest(kv.row, kv.qualifier, kv.value, kv.timestamp) }
 
   def increment(kvs: Seq[SKeyValue]): Seq[RedisRPC] =
     kvs.map { kv => new RedisAtomicIncrementRequest(kv.row, kv.value, Bytes.toLong(kv.value)) }
@@ -22,9 +23,21 @@ class RedisMutationBuilder(storage: RedisStorage)(implicit ec: ExecutionContext)
     }
 
   /** Vertex */
-  def buildPutsAsync(vertex: Vertex): Seq[RedisRPC] = ???
+  def buildPutsAsync(vertex: Vertex): Seq[RedisRPC] = {
+    val kvs = storage.vertexSerializer(vertex).toKeyValues
+    put(kvs)
+  }
 
-  def buildDeleteBelongsToId(vertex: Vertex): Seq[RedisRPC] = ???
+  def buildDeleteBelongsToId(vertex: Vertex): Seq[RedisRPC] = {
+    val kvs = storage.vertexSerializer(vertex).toKeyValues
+    val kv = kvs.head
+
+    import org.apache.hadoop.hbase.util.Bytes
+    val newKVs = vertex.belongLabelIds.map { id =>
+      kv.copy(qualifier = Bytes.toBytes(Vertex.toPropKey(id)))
+    }
+    delete(newKVs)
+  }
 
   def increments(edgeMutate: EdgeMutate): Seq[RedisRPC] = ???
 
@@ -33,7 +46,11 @@ class RedisMutationBuilder(storage: RedisStorage)(implicit ec: ExecutionContext)
 
   def buildDeleteAsync(vertex: Vertex): Seq[RedisRPC] = ???
 
-  def buildVertexPutsAsync(edge: Edge): Seq[RedisRPC] = ???
+  def buildVertexPutsAsync(edge: Edge): Seq[RedisRPC] =
+    if (edge.op == GraphUtil.operations("delete"))
+      buildDeleteBelongsToId(edge.srcForVertex) ++ buildDeleteBelongsToId(edge.tgtForVertex)
+    else
+      buildPutsAsync(edge.srcForVertex) ++ buildPutsAsync(edge.tgtForVertex)
 
   def buildDeletesAsync(indexedEdge: IndexEdge): Seq[RedisRPC] = ???
 
@@ -64,7 +81,9 @@ class RedisMutationBuilder(storage: RedisStorage)(implicit ec: ExecutionContext)
   }
 
   /** SnapshotEdge */
-  def buildPutAsync(snapshotEdge: SnapshotEdge): Seq[RedisRPC] = ???
-
+  def buildPutAsync(snapshotEdge: SnapshotEdge): Seq[RedisRPC] = {
+    logger.error(s">> buildPutAsync")
+    put(storage.snapshotEdgeSerializer(snapshotEdge).toKeyValues)
+  }
 
 }

@@ -42,7 +42,7 @@ case class RedisGetRequest(key: Array[Byte]) extends RedisRPC(key){
 
 }
 
-case class RedisPutRequest(key: Array[Byte], value: Array[Byte], timestamp: Long) extends RedisRPC(key)
+case class RedisPutRequest(key: Array[Byte], qualifier: Array[Byte], value: Array[Byte], timestamp: Long) extends RedisRPC(key)
 
 case class RedisAtomicIncrementRequest(key: Array[Byte], value: Array[Byte], delta: Long) extends RedisRPC(key)
 

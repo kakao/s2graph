@@ -1,17 +1,16 @@
 package com.kakao.s2graph.core.storage.redis
 
 import com.google.common.cache.Cache
-import com.kakao.s2graph.core.GraphExceptions.{PartialFailureException, FetchTimeoutException}
-import com.kakao.s2graph.core.mysqls.Label
-import org.apache.hadoop.hbase.util.Bytes
-import scala.collection.JavaConversions._
+import com.kakao.s2graph.core.GraphExceptions.{FetchTimeoutException, PartialFailureException}
 import com.kakao.s2graph.core._
-import com.kakao.s2graph.core.storage.hbase.{IndexEdgeDeserializable, VertexDeserializable, SnapshotEdgeDeserializable}
+import com.kakao.s2graph.core.mysqls.Label
 import com.kakao.s2graph.core.storage._
-import com.kakao.s2graph.core.utils.{logger, AsyncRedisClient}
+import com.kakao.s2graph.core.utils.{AsyncRedisClient, logger}
 import com.typesafe.config.Config
-import scala.concurrent.{Future, ExecutionContext}
-import scala.util.{Random, Failure, Success}
+
+import scala.collection.JavaConversions._
+import scala.concurrent.{ExecutionContext, Future}
+import scala.util.{Failure, Random, Success}
 
 /**
  * Redis storage handler class
@@ -36,9 +35,9 @@ class RedisStorage(val config: Config, vertexCache: Cache[Integer, Option[Vertex
   val LockExpireDuration = Math.max(MaxRetryNum * MaxBackOff * 2, 10000)
   val RedisZsetScore = 1
 
-  val snapshotEdgeDeserializer = new SnapshotEdgeDeserializable
-  val indexEdgeDeserializer = new IndexEdgeDeserializable
-  val vertexDeserializer = new VertexDeserializable
+  val snapshotEdgeDeserializer = new RedisSnapshotEdgeDeserializable
+  val indexEdgeDeserializer = new RedisIndexEdgeDeserializable
+  val vertexDeserializer = new RedisVertexDeserializable
 
   val queryBuilder = new RedisQueryBuilder(this)(ec)
   val mutationBuilder = new RedisMutationBuilder(this)(ec)
@@ -66,18 +65,27 @@ class RedisStorage(val config: Config, vertexCache: Cache[Integer, Option[Vertex
 
   override def vertexCacheOpt: Option[Cache[Integer, Option[Vertex]]] = ???
 
+  def toHex(b: Array[Byte]): String = {
+    val tmp = b.map("%02x".format(_)).mkString("\\x")
+    if ( tmp.isEmpty ) "" else "\\x" + tmp
+  }
+
   def get(get: RedisGetRequest): Future[Set[SKeyValue]] = {
     logger.info(s">> RedisGet get")
     Future[Set[SKeyValue]] {
       // send rpc call to Redis instance
       client.doBlockWithKey[Set[SKeyValue]]("" /* sharding key */) { jedis =>
-        logger.info(s">> jedis gogo")
+        logger.info(s">> jedis gogo; key : ${toHex(get.key)}, min : ${toHex(get.min)}, max : ${toHex(get.max)}, offset :${get.offset}, count : ${get.count}")
         jedis.zrangeByLex(get.key, get.min, get.max, get.offset, get.count).toSet[Array[Byte]].map(v =>
           SKeyValue(Array.empty[Byte], get.key, Array.empty[Byte], Array.empty[Byte], v, 0L)
         )
       } match {
-        case Success(v) => v
-        case Failure(e) => Set[SKeyValue]()
+        case Success(v) =>
+          logger.error(s">> get success!! $v")
+          v
+        case Failure(e) =>
+          logger.error(s">> get fail!! $e")
+          Set[SKeyValue]()
       }
     }
   }
@@ -87,7 +95,10 @@ class RedisStorage(val config: Config, vertexCache: Cache[Integer, Option[Vertex
       client.doBlockWithKey[Boolean]("" /* sharding key */) { jedis =>
         val write = rpc match {
           case d: RedisDeleteRequest => if (jedis.zrem(d.key, d.value) == 1) true else false
-          case p: RedisPutRequest => if (jedis.zadd(p.key, RedisZsetScore, p.value) == 1) true else false
+          case p: RedisPutRequest if p.qualifier.length > 0 => // Edge put operation
+            if (jedis.zadd(p.key, RedisZsetScore, p.value) == 1) true else false
+          case p: RedisPutRequest if p.qualifier.length == 0 =>  // Vertex put operation
+            if (jedis.zadd(p.key, RedisZsetScore, p.qualifier ++ p.value) == 1) true else false
           case i: RedisAtomicIncrementRequest => atomicIncrement(i)
         }
         write
@@ -103,24 +114,68 @@ class RedisStorage(val config: Config, vertexCache: Cache[Integer, Option[Vertex
       client.doBlockWithKey[Boolean]("" /* shard key */) { jedis =>
         jedis.watch(putRequest.key)
 
+
+        val script: String =
+          """local key = KEYS[1]
+            |  local minMax = ARGV[1]
+            |  local oldData = ARGV[2]
+            |  local value = ARGV[3]
+            |  local score = ARGV[4]
+            |  local data = redis.call('ZRANGEBYLEX', key, minMax, minMax)[1]
+            |  if data == oldData then
+            |    redis.call('ZREM', key, data)
+            |    return redis.call('ZADD', key, score, value)
+            |  elseif data == nil then
+            |    return redis.call('ZADD', key, score, value)
+            |  end
+            |  return 0
+          """.stripMargin
+
+
+        logger.error(s">> start compareAndSet")
         val t = jedis.multi()
-        val inclusivePaddedBytes = Bytes.add(Array.fill[Byte](1)("[".toByte), putRequest.value)
-        val newBytes = t.zrangeByLex(putRequest.key, inclusivePaddedBytes, inclusivePaddedBytes, 0, 1).get().headOption.getOrElse(Array.empty[Byte])
-        val rtn = if (oldBytes.equals(newBytes)) {
-          if (t.zrem(putRequest.key, oldBytes).get() == 1) {
-            t.zadd(putRequest.key, RedisZsetScore, putRequest.value)
-            true
-          } else false
-        } else false
+//        val inclusivePaddedBytes = Bytes.add(Array.fill[Byte](1)(Bytes.toBytes("[").head), putRequest.value)
+//        logger.error(s">> inclusivePadded : $inclusivePaddedBytes")
+//        val resp = t.zrangeByLex(putRequest.key, inclusivePaddedBytes, inclusivePaddedBytes, 0, 1)
+//        logger.error(s">> resp : $resp")
+//        resp
+//        val newBytes = resp.get().headOption.getOrElse(Array.empty[Byte])
+//        logger.error(s">> newBytes : $newBytes")
+//        val rtn = if (oldBytes.equals(newBytes)) {
+//          logger.error(s">> compare result - equals ")
+//          if (t.zrem(putRequest.key, oldBytes).get() == 1) {
+//            t.zadd(putRequest.key, RedisZsetScore, putRequest.value)
+//            true
+//          } else false
+//        } else false
+        if ( oldBytes.length == 0 ) {
+          logger.error(s">> oldBytes length 0")
+          t.zadd(putRequest.key, RedisZsetScore, putRequest.value)
+        } else {
+          logger.error(s">> some oldBytes")
+          val keys = List[Array[Byte]](putRequest.key).map("%02x".format(_)).mkString("\\x").map("\\x"+_)
+          val minMax = "[\\x" + oldBytes.map("%02x".format(_)).mkString("\\x")
+          val argv = minMax +: List[Array[Byte]](oldBytes, putRequest.value).map("%02x".format(_)).mkString("\\x").map("\\x"+_) :+ s"$RedisZsetScore"
+
+          t.eval(script, keys, argv)
+        }
+
+//        t.zrem(putRequest.key, oldBytes)
+//        t.zadd(putRequest.key, RedisZsetScore, putRequest.value)
 
         t.exec()
 
+
         jedis.unwatch()
 
-        rtn
+        true
       } match {
-        case Success(v) => v
-        case Failure(e) => false
+        case Success(v) =>
+          logger.error(s">> success compareAndSet : $v")
+          v
+        case Failure(e) =>
+          logger.error(s">> failure compareAndSet : $e")
+          false
       }
     }
   }
@@ -183,6 +238,7 @@ class RedisStorage(val config: Config, vertexCache: Cache[Integer, Option[Vertex
 
 
     get(queryBuilder.buildRequest(queryRequest)) map { s =>
+      logger.error(s">> $s")
       val edgeOpt = toEdges(s.toSeq, queryParam, 1.0, isInnerCall = true, parentEdges = Nil).headOption.map(_.edge)
       (queryParam, edgeOpt, s.headOption)
     }
@@ -246,6 +302,7 @@ class RedisStorage(val config: Config, vertexCache: Cache[Integer, Option[Vertex
       logger.debug(s"skip mutate: [$statusCode]\n${edge.toLogString}")
       Future.successful(true)
     } else {
+      logger.error(s">> mutate start")
       val p = Random.nextDouble()
       if (p < FailProb) throw new PartialFailureException(edge, 1, s"$p")
       else
@@ -288,10 +345,12 @@ class RedisStorage(val config: Config, vertexCache: Cache[Integer, Option[Vertex
       logger.debug(s"skip acquireLock: [$statusCode]\n${edge.toLogString}")
       Future.successful(true)
     } else {
+      logger.error(s">> acquireLock start")
       val p = Random.nextDouble()
       if (p < FailProb) throw new PartialFailureException(edge, 0, s"$p")
       else {
         val lockEdgePut = toPutRequest(lockEdge)
+        logger.error(s">> start compareAndSet")
         compareAndSet(lockEdgePut, oldBytes).recoverWith {
           case ex: Exception =>
             logger.error(s"AcquireLock RPC Failed.")
@@ -370,6 +429,7 @@ class RedisStorage(val config: Config, vertexCache: Cache[Integer, Option[Vertex
                 _edgeMutate: EdgeMutate,
                 statusCode: Byte): Future[Boolean] = {
 
+      logger.error(s">> state machine start")
       for {
         locked <- acquireLock(statusCode, edge, lockEdge, oldBytes)
         mutated <- mutate(locked, edge, statusCode, _edgeMutate)
@@ -383,6 +443,8 @@ class RedisStorage(val config: Config, vertexCache: Cache[Integer, Option[Vertex
 
     val lockEdge = buildLockEdge(snapshotEdgeOpt, edge, kvOpt)
     val releaseLockEdge = buildReleaseLockEdge(snapshotEdgeOpt, lockEdge, edgeUpdate)
+    logger.error(s">> lockEdge: $lockEdge, releaseEdge :$releaseLockEdge")
+
     snapshotEdgeOpt match {
       case None =>
         // 'acquire lock' has never been conducted.
@@ -442,12 +504,15 @@ class RedisStorage(val config: Config, vertexCache: Cache[Integer, Option[Vertex
 
         fetchSnapshotEdge(_edges.head) flatMap { case (queryParam, snapshotEdgeOpt, kvOpt) =>
 
+          logger.error(s">> snapshot edge fetched  : $snapshotEdgeOpt, $kvOpt")
           val (newEdge, edgeUpdate) = f(snapshotEdgeOpt, _edges)
+          logger.error(s">> buildOperation completed  : $newEdge, $edgeUpdate")
           //shouldReplace false.
           if (edgeUpdate.newSnapshotEdge.isEmpty && statusCode <= 0) {
             logger.debug(s"${newEdge.toLogString} drop.")
             Future.successful(true)
           } else {
+            logger.error(s">> start commit update")
             commitUpdate(newEdge, statusCode)(snapshotEdgeOpt, kvOpt, edgeUpdate).map { ret =>
               if (ret) {
                 logger.info(s"[Success] commit: \n${_edges.map(_.toLogString).mkString("\n")}")
