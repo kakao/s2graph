@@ -4,7 +4,7 @@ import com.kakao.s2graph.core.mysqls.LabelMeta
 import com.kakao.s2graph.core.types.v2.InnerVal
 import com.kakao.s2graph.core.{GraphUtil, IndexEdge}
 import com.kakao.s2graph.core.storage.{SKeyValue, StorageSerializable}
-import com.kakao.s2graph.core.types.VertexId
+import com.kakao.s2graph.core.types.{TargetVertexId, VertexId}
 import org.apache.hadoop.hbase.util.Bytes
 
 /**
@@ -25,8 +25,7 @@ class RedisIndexEdgeSerializable(indexEdge: IndexEdge) extends StorageSerializab
     val labelIndexSeqWithIsInvertedBytes = labelOrderSeqWithIsInverted(indexEdge.labelIndexSeq, isInverted = false)
 
     val row = Bytes.add(srcIdBytes, labelWithDirBytes, labelIndexSeqWithIsInvertedBytes)
-    val _tgtIdBytes = VertexId.toTargetVertexId(indexEdge.tgtVertex.id).bytes
-    val tgtIdBytes = _tgtIdBytes.takeRight(_tgtIdBytes.length - GraphUtil.bytesForMurMurHash)
+    val tgtIdBytes = VertexId.toTargetVertexId(indexEdge.tgtVertex.id).bytes
 
     /**
       * Qualifier and value byte array map
@@ -40,17 +39,17 @@ class RedisIndexEdgeSerializable(indexEdge: IndexEdge) extends StorageSerializab
       *
       *  ** !Serialize operation code byte after target id or series of index props bytes
       */
-    //
+    val timestamp = InnerVal(indexEdge.ts).bytes
     val qualifier =
         (idxPropsMap.get(LabelMeta.toSeq) match {
-          case None => Bytes.add(idxPropsBytes, tgtIdBytes)
-          case Some(vId) => idxPropsBytes
+          case None => Bytes.add(idxPropsBytes, timestamp, tgtIdBytes)
+          case Some(vId) => Bytes.add(idxPropsBytes, timestamp)
         }) ++ Array.fill(1)(indexEdge.op)
 
     val qualifierLen = Array.fill[Byte](1)(qualifier.length.toByte)
-    val timestamp = InnerVal(indexEdge.ts).bytes
     val propsKv = propsToKeyValues(indexEdge.metas.toSeq)
-    val value = qualifierLen ++ qualifier ++ timestamp ++ tgtIdBytes ++ propsKv
+
+    val value = qualifierLen ++ qualifier ++ propsKv
     val emptyArray = Array.empty[Byte]
     val kv = SKeyValue(emptyArray, row, emptyArray, emptyArray, value, indexEdge.version)
 

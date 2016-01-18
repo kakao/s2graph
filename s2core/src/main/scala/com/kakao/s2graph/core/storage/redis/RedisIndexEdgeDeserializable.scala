@@ -68,12 +68,14 @@ class RedisIndexEdgeDeserializable extends StorageDeserializable[IndexEdge] {
         if (pos == totalQualifierLen) { // target id is included in qualifier
           (HBaseType.defaultTgtVertexId, 0)
         } else {
-          TargetVertexId.fromBytes(kv.value, endAt, 0, version)
+          TargetVertexId.fromBytes(kv.value, pos, kv.value.length, version)
         }
+      pos += tgtVertexIdLen
       qualifierLen += tgtVertexIdLen
       (props, tgtVertexId, tgtVertexIdLen, ts)
     }
     val op = kv.value(totalQualifierLen)
+    pos += 1
 
     (idxPropsRaw, tgtVertexIdRaw, op, tgtVertexIdLen != 0, timestamp, pos)
   }
@@ -107,7 +109,7 @@ class RedisIndexEdgeDeserializable extends StorageDeserializable[IndexEdge] {
    * @param kv
    * @return true if first byte is zero value
    */
-  private def isEmptyQualifier(kv: SKeyValue) = Bytes.toInt(Array.fill[Byte](1)(kv.value(0))) == 0
+  private def isEmptyQualifier(kv: SKeyValue) = Array.fill[Byte](1)(kv.value(0)) == Bytes.toBytes(0.toByte)
 
   def fromKeyValues[T: CanSKeyValue](queryParam: QueryParam, _kvs: Seq[T], version: String, cacheElementOpt: Option[IndexEdge]): IndexEdge = {
     assert(_kvs.size == 1)
@@ -136,6 +138,7 @@ class RedisIndexEdgeDeserializable extends StorageDeserializable[IndexEdge] {
       parseDegreeValue(kv, numBytesRead, version)
     } else {
       // non-indexed property key/ value retrieval
+
       parseValue(kv, numBytesRead, version)
     }
 
