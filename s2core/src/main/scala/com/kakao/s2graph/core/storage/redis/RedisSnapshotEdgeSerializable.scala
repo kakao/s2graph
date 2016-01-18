@@ -18,7 +18,7 @@ class RedisSnapshotEdgeSerializable(snapshotEdge: SnapshotEdge) extends StorageS
   override def toKeyValues: Seq[SKeyValue] = {
     label.schemaVersion match {
       case HBaseType.VERSION3 => toKeyValuesInnerV3
-      case _ => throw new GraphExceptions.NotSupportedSchemaVersion(">> Redis storage engine can support only v3.")
+      case _ => throw new GraphExceptions.NotSupportedSchemaVersion(s">> Redis storage can only support v3: current schema version ${label.schemaVersion}")
     }
   }
 

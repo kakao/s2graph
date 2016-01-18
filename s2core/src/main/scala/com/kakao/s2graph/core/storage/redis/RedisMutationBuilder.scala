@@ -39,7 +39,26 @@ class RedisMutationBuilder(storage: RedisStorage)(implicit ec: ExecutionContext)
     delete(newKVs)
   }
 
-  def increments(edgeMutate: EdgeMutate): Seq[RedisRPC] = ???
+  def increments(edgeMutate: EdgeMutate): Seq[RedisRPC] = {
+    (edgeMutate.edgesToDelete.isEmpty, edgeMutate.edgesToInsert.isEmpty) match {
+      case (true, true) =>
+
+        /** when there is no need to update. shouldUpdate == false */
+        List.empty[RedisAtomicIncrementRequest]
+      case (true, false) =>
+
+        /** no edges to delete but there is new edges to insert so increase degree by 1 */
+        edgeMutate.edgesToInsert.flatMap { e => buildIncrementsAsync(e) }
+      case (false, true) =>
+
+        /** no edges to insert but there is old edges to delete so decrease degree by 1 */
+        edgeMutate.edgesToDelete.flatMap { e => buildIncrementsAsync(e, -1L) }
+      case (false, false) =>
+
+        /** update on existing edges so no change on degree */
+        List.empty[RedisAtomicIncrementRequest]
+    }
+  }
 
 
   def buildDeleteAsync(snapshotEdge: SnapshotEdge): Seq[RedisRPC] = ???

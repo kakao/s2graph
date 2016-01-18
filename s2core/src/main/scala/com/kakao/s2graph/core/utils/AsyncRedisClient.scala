@@ -65,4 +65,6 @@ class AsyncRedisClient(config: Config) {
   def doBlockWithKey[T](key: String)(f: Jedis => T): Try[T] = {
     doBlockWithIndex(getBucketIdx(key))(f)
   }
+
 }
+
