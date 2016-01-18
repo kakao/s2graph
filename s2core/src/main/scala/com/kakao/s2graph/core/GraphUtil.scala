@@ -1,9 +1,10 @@
 package com.kakao.s2graph.core
 
-import scala.util.Random
-import scala.util.hashing.MurmurHash3
 import java.util.regex.Pattern
+
 import play.api.libs.json.Json
+
+import scala.util.hashing.MurmurHash3
 
 object GraphUtil {
   private val TOKEN_DELIMITER = Pattern.compile("[\t]")
@@ -133,6 +134,11 @@ object GraphUtil {
     } else {
       Json.parse(s).asOpt[List[String]].getOrElse(List.empty[String])
     }
+  }
+
+  def bytesToHexString(b: Array[Byte]): String = {
+    val tmp = b.map("%02x".format(_)).mkString("\\x")
+    if ( tmp.isEmpty ) "" else "\\x" + tmp
   }
 
 }

@@ -1,148 +1,205 @@
 package com.kakao.s2graph.core
 
-import com.kakao.s2graph.core.mysqls.LabelMeta
+import com.kakao.s2graph.core.mysqls.{LabelIndex, LabelMeta}
+import com.kakao.s2graph.core.storage.SKeyValue
+import com.kakao.s2graph.core.storage.StorageSerializable._
+import com.kakao.s2graph.core.storage.redis.{RedisSnapshotEdgeDeserializable, RedisSnapshotEdgeSerializable, RedisVertexDeserializable, RedisVertexSerializable}
 import com.kakao.s2graph.core.types.{InnerVal, InnerValLikeWithTs, VertexId}
 import com.kakao.s2graph.core.utils.logger
+import org.apache.hadoop.hbase.util.Bytes
 import org.scalatest.FunSuite
-import org.scalatest.matchers.Matcher
+import play.api.libs.json.Json
 
 class EdgeTest extends FunSuite with TestCommon with TestCommonWithModels {
   initTests()
 
-  test("toLogString") {
-    val testLabelName = labelNameV2
-    val bulkQueries = List(
-      ("1445240543366", "update", "{\"is_blocked\":true}"),
-      ("1445240543362", "insert", "{\"is_hidden\":false}"),
-      ("1445240543364", "insert", "{\"is_hidden\":false,\"weight\":10}"),
-      ("1445240543363", "delete", "{}"),
-      ("1445240543365", "update", "{\"time\":1, \"weight\":-10}"))
 
-    val (srcId, tgtId, labelName) = ("1", "2", testLabelName)
 
-    val bulkEdge = (for ((ts, op, props) <- bulkQueries) yield {
-      Management.toEdge(ts.toLong, op, srcId, tgtId, labelName, "out", props).toLogString
-    }).mkString("\n")
+    test("toLogString") {
+      val testLabelName = labelNameV2
+      val bulkQueries = List(
+        ("1445240543366", "update", "{\"is_blocked\":true}"),
+        ("1445240543362", "insert", "{\"is_hidden\":false}"),
+        ("1445240543364", "insert", "{\"is_hidden\":false,\"weight\":10}"),
+        ("1445240543363", "delete", "{}"),
+        ("1445240543365", "update", "{\"time\":1, \"weight\":-10}"))
 
-    val expected = Seq(
-      Seq("1445240543366", "update", "e", "1", "2", testLabelName, "{\"is_blocked\":true}"),
-      Seq("1445240543362", "insert", "e", "1", "2", testLabelName, "{\"is_hidden\":false}"),
-      Seq("1445240543364", "insert", "e", "1", "2", testLabelName, "{\"is_hidden\":false,\"weight\":10}"),
-      Seq("1445240543363", "delete", "e", "1", "2", testLabelName),
-      Seq("1445240543365", "update", "e", "1", "2", testLabelName, "{\"time\":1,\"weight\":-10}")
-    ).map(_.mkString("\t")).mkString("\n")
+      val (srcId, tgtId, labelName) = ("1", "2", testLabelName)
 
-    assert(bulkEdge === expected)
-  }
+      val bulkEdge = (for ((ts, op, props) <- bulkQueries) yield {
+        Management.toEdge(ts.toLong, op, srcId, tgtId, labelName, "out", props).toLogString
+      }).mkString("\n")
 
-  test("buildOperation") {
-    val schemaVersion = "v2"
-    val vertexId = VertexId(0, InnerVal.withStr("dummy", schemaVersion))
-    val srcVertex = Vertex(vertexId)
-    val tgtVertex = srcVertex
+      val expected = Seq(
+        Seq("1445240543366", "update", "e", "1", "2", testLabelName, "{\"is_blocked\":true}"),
+        Seq("1445240543362", "insert", "e", "1", "2", testLabelName, "{\"is_hidden\":false}"),
+        Seq("1445240543364", "insert", "e", "1", "2", testLabelName, "{\"is_hidden\":false,\"weight\":10}"),
+        Seq("1445240543363", "delete", "e", "1", "2", testLabelName),
+        Seq("1445240543365", "update", "e", "1", "2", testLabelName, "{\"time\":1,\"weight\":-10}")
+      ).map(_.mkString("\t")).mkString("\n")
 
-    val timestampProp = LabelMeta.timeStampSeq -> InnerValLikeWithTs(InnerVal.withLong(0, schemaVersion), 1)
+      assert(bulkEdge === expected)
+    }
 
-    val snapshotEdge = None
-    val propsWithTs = Map(timestampProp)
-    val requestEdge = Edge(srcVertex, tgtVertex, labelWithDirV2, propsWithTs = propsWithTs)
-    val newVersion = 0L
+    test("buildOperation") {
+      val schemaVersion = "v2"
+      val vertexId = VertexId(0, InnerVal.withStr("dummy", schemaVersion))
+      val srcVertex = Vertex(vertexId)
+      val tgtVertex = srcVertex
 
-    val newPropsWithTs = Map(
-      timestampProp,
-      1.toByte -> InnerValLikeWithTs(InnerVal.withBoolean(false, schemaVersion), 1)
-    )
+      val timestampProp = LabelMeta.timeStampSeq -> InnerValLikeWithTs(InnerVal.withLong(0, schemaVersion), 1)
 
-    val edgeMutate = Edge.buildMutation(snapshotEdge, requestEdge, newVersion, propsWithTs, newPropsWithTs)
-    logger.info(edgeMutate.toLogString)
+      val snapshotEdge = None
+      val propsWithTs = Map(timestampProp)
+      val requestEdge = Edge(srcVertex, tgtVertex, labelWithDirV2, propsWithTs = propsWithTs)
+      val newVersion = 0L
 
-    assert(edgeMutate.newSnapshotEdge.isDefined)
-    assert(edgeMutate.edgesToInsert.nonEmpty)
-    assert(edgeMutate.edgesToDelete.isEmpty)
-  }
+      val newPropsWithTs = Map(
+        timestampProp,
+        1.toByte -> InnerValLikeWithTs(InnerVal.withBoolean(false, schemaVersion), 1)
+      )
 
-  test("buildMutation: snapshotEdge: None with newProps") {
-    val schemaVersion = "v2"
-    val vertexId = VertexId(0, InnerVal.withStr("dummy", schemaVersion))
-    val srcVertex = Vertex(vertexId)
-    val tgtVertex = srcVertex
+      val edgeMutate = Edge.buildMutation(snapshotEdge, requestEdge, newVersion, propsWithTs, newPropsWithTs)
+      logger.info(edgeMutate.toLogString)
 
-    val timestampProp = LabelMeta.timeStampSeq -> InnerValLikeWithTs(InnerVal.withLong(0, schemaVersion), 1)
+      assert(edgeMutate.newSnapshotEdge.isDefined)
+      assert(edgeMutate.edgesToInsert.nonEmpty)
+      assert(edgeMutate.edgesToDelete.isEmpty)
+    }
 
-    val snapshotEdge = None
-    val propsWithTs = Map(timestampProp)
-    val requestEdge = Edge(srcVertex, tgtVertex, labelWithDirV2, propsWithTs = propsWithTs)
-    val newVersion = 0L
+    test("buildMutation: snapshotEdge: None with newProps") {
+      val schemaVersion = "v2"
+      val vertexId = VertexId(0, InnerVal.withStr("dummy", schemaVersion))
+      val srcVertex = Vertex(vertexId)
+      val tgtVertex = srcVertex
 
-    val newPropsWithTs = Map(
-      timestampProp,
-      1.toByte -> InnerValLikeWithTs(InnerVal.withBoolean(false, schemaVersion), 1)
-    )
+      val timestampProp = LabelMeta.timeStampSeq -> InnerValLikeWithTs(InnerVal.withLong(0, schemaVersion), 1)
 
-    val edgeMutate = Edge.buildMutation(snapshotEdge, requestEdge, newVersion, propsWithTs, newPropsWithTs)
-    logger.info(edgeMutate.toLogString)
+      val snapshotEdge = None
+      val propsWithTs = Map(timestampProp)
+      val requestEdge = Edge(srcVertex, tgtVertex, labelWithDirV2, propsWithTs = propsWithTs)
+      val newVersion = 0L
 
-    assert(edgeMutate.newSnapshotEdge.isDefined)
-    assert(edgeMutate.edgesToInsert.nonEmpty)
-    assert(edgeMutate.edgesToDelete.isEmpty)
-  }
+      val newPropsWithTs = Map(
+        timestampProp,
+        1.toByte -> InnerValLikeWithTs(InnerVal.withBoolean(false, schemaVersion), 1)
+      )
 
-  test("buildMutation: oldPropsWithTs == newPropsWithTs, Drop all requests") {
-    val schemaVersion = "v2"
-    val vertexId = VertexId(0, InnerVal.withStr("dummy", schemaVersion))
-    val srcVertex = Vertex(vertexId)
-    val tgtVertex = srcVertex
+      val edgeMutate = Edge.buildMutation(snapshotEdge, requestEdge, newVersion, propsWithTs, newPropsWithTs)
+      logger.info(edgeMutate.toLogString)
 
-    val timestampProp = LabelMeta.timeStampSeq -> InnerValLikeWithTs(InnerVal.withLong(0, schemaVersion), 1)
+      assert(edgeMutate.newSnapshotEdge.isDefined)
+      assert(edgeMutate.edgesToInsert.nonEmpty)
+      assert(edgeMutate.edgesToDelete.isEmpty)
+    }
 
-    val snapshotEdge = None
-    val propsWithTs = Map(timestampProp)
-    val requestEdge = Edge(srcVertex, tgtVertex, labelWithDirV2, propsWithTs = propsWithTs)
-    val newVersion = 0L
+    test("buildMutation: oldPropsWithTs == newPropsWithTs, Drop all requests") {
+      val schemaVersion = "v2"
+      val vertexId = VertexId(0, InnerVal.withStr("dummy", schemaVersion))
+      val srcVertex = Vertex(vertexId)
+      val tgtVertex = srcVertex
 
-    val newPropsWithTs = propsWithTs
+      val timestampProp = LabelMeta.timeStampSeq -> InnerValLikeWithTs(InnerVal.withLong(0, schemaVersion), 1)
 
-    val edgeMutate = Edge.buildMutation(snapshotEdge, requestEdge, newVersion, propsWithTs, newPropsWithTs)
-    logger.info(edgeMutate.toLogString)
+      val snapshotEdge = None
+      val propsWithTs = Map(timestampProp)
+      val requestEdge = Edge(srcVertex, tgtVertex, labelWithDirV2, propsWithTs = propsWithTs)
+      val newVersion = 0L
 
-    assert(edgeMutate.newSnapshotEdge.isEmpty)
-    assert(edgeMutate.edgesToInsert.isEmpty)
-    assert(edgeMutate.edgesToDelete.isEmpty)
-  }
+      val newPropsWithTs = propsWithTs
 
-  test("buildMutation: All props older than snapshotEdge's LastDeletedAt") {
-    val schemaVersion = "v2"
-    val vertexId = VertexId(0, InnerVal.withStr("dummy", schemaVersion))
-    val srcVertex = Vertex(vertexId)
-    val tgtVertex = srcVertex
+      val edgeMutate = Edge.buildMutation(snapshotEdge, requestEdge, newVersion, propsWithTs, newPropsWithTs)
+      logger.info(edgeMutate.toLogString)
 
-    val timestampProp = LabelMeta.timeStampSeq -> InnerValLikeWithTs(InnerVal.withLong(0, schemaVersion), 1)
-    val oldPropsWithTs = Map(
-      timestampProp,
-      LabelMeta.lastDeletedAt -> InnerValLikeWithTs(InnerVal.withLong(0, schemaVersion), 3)
-    )
+      assert(edgeMutate.newSnapshotEdge.isEmpty)
+      assert(edgeMutate.edgesToInsert.isEmpty)
+      assert(edgeMutate.edgesToDelete.isEmpty)
+    }
 
-    val propsWithTs = Map(
-      timestampProp,
-      3.toByte -> InnerValLikeWithTs(InnerVal.withLong(0, schemaVersion), 2),
-      LabelMeta.lastDeletedAt -> InnerValLikeWithTs(InnerVal.withLong(0, schemaVersion), 3)
-    )
+    test("buildMutation: All props older than snapshotEdge's LastDeletedAt") {
+      val schemaVersion = "v2"
+      val vertexId = VertexId(0, InnerVal.withStr("dummy", schemaVersion))
+      val srcVertex = Vertex(vertexId)
+      val tgtVertex = srcVertex
 
-    val snapshotEdge =
-      Option(Edge(srcVertex, tgtVertex, labelWithDirV2, op = GraphUtil.operations("delete"), propsWithTs = oldPropsWithTs))
+      val timestampProp = LabelMeta.timeStampSeq -> InnerValLikeWithTs(InnerVal.withLong(0, schemaVersion), 1)
+      val oldPropsWithTs = Map(
+        timestampProp,
+        LabelMeta.lastDeletedAt -> InnerValLikeWithTs(InnerVal.withLong(0, schemaVersion), 3)
+      )
 
-    val requestEdge = Edge(srcVertex, tgtVertex, labelWithDirV2, propsWithTs = propsWithTs)
-    val newVersion = 0L
-    val edgeMutate = Edge.buildMutation(snapshotEdge, requestEdge, newVersion, oldPropsWithTs, propsWithTs)
-    logger.info(edgeMutate.toLogString)
+      val propsWithTs = Map(
+        timestampProp,
+        3.toByte -> InnerValLikeWithTs(InnerVal.withLong(0, schemaVersion), 2),
+        LabelMeta.lastDeletedAt -> InnerValLikeWithTs(InnerVal.withLong(0, schemaVersion), 3)
+      )
 
-    assert(edgeMutate.newSnapshotEdge.nonEmpty)
-    assert(edgeMutate.edgesToInsert.isEmpty)
-    assert(edgeMutate.edgesToDelete.isEmpty)
-  }
+      val snapshotEdge =
+        Option(Edge(srcVertex, tgtVertex, labelWithDirV2, op = GraphUtil.operations("delete"), propsWithTs = oldPropsWithTs))
 
-  test("buildMutation: All props newer than snapshotEdge's LastDeletedAt") {
-    val schemaVersion = "v2"
+      val requestEdge = Edge(srcVertex, tgtVertex, labelWithDirV2, propsWithTs = propsWithTs)
+      val newVersion = 0L
+      val edgeMutate = Edge.buildMutation(snapshotEdge, requestEdge, newVersion, oldPropsWithTs, propsWithTs)
+      logger.info(edgeMutate.toLogString)
+
+      assert(edgeMutate.newSnapshotEdge.nonEmpty)
+      assert(edgeMutate.edgesToInsert.isEmpty)
+      assert(edgeMutate.edgesToDelete.isEmpty)
+    }
+
+    test("buildMutation: All props newer than snapshotEdge's LastDeletedAt") {
+      val schemaVersion = "v2"
+      val vertexId = VertexId(0, InnerVal.withStr("dummy", schemaVersion))
+      val srcVertex = Vertex(vertexId)
+      val tgtVertex = srcVertex
+
+      val timestampProp = LabelMeta.timeStampSeq -> InnerValLikeWithTs(InnerVal.withLong(0, schemaVersion), 1)
+      val oldPropsWithTs = Map(
+        timestampProp,
+        LabelMeta.lastDeletedAt -> InnerValLikeWithTs(InnerVal.withLong(0, schemaVersion), 3)
+      )
+
+      val propsWithTs = Map(
+        timestampProp,
+        3.toByte -> InnerValLikeWithTs(InnerVal.withLong(0, schemaVersion), 4),
+        LabelMeta.lastDeletedAt -> InnerValLikeWithTs(InnerVal.withLong(0, schemaVersion), 3)
+      )
+
+      val snapshotEdge =
+        Option(Edge(srcVertex, tgtVertex, labelWithDirV2, op = GraphUtil.operations("delete"), propsWithTs = oldPropsWithTs))
+
+      val requestEdge = Edge(srcVertex, tgtVertex, labelWithDirV2, propsWithTs = propsWithTs)
+      val newVersion = 0L
+      val edgeMutate = Edge.buildMutation(snapshotEdge, requestEdge, newVersion, oldPropsWithTs, propsWithTs)
+      logger.info(edgeMutate.toLogString)
+
+      assert(edgeMutate.newSnapshotEdge.nonEmpty)
+      assert(edgeMutate.edgesToInsert.nonEmpty)
+      assert(edgeMutate.edgesToDelete.isEmpty)
+    }
+
+  test("toKeyValues/ fromKeyValues: Redis snapshot edge serializer/ deserializer") {
+    /**
+     * service: _test_service_v3
+     * src col: user_id_v3
+     * type: string
+     * tgt col: user_id_v3
+     * type: string
+     * label: _test_label_v3
+     * porps:
+     * Prop("affinity_score", "0.0", DOUBLE),
+     * Prop("is_blocked", "false", BOOLEAN),
+     * Prop("time", "0", INT),
+     * Prop("weight", "0", INT),
+     * Prop("is_hidden", "true", BOOLEAN),
+     * Prop("phone_number", "xxx-xxx-xxxx", STRING),
+     * Prop("score", "0.1", FLOAT),
+     * Prop("age", "10", INT)
+     * idx props:
+     * Index("_PK", Seq("_timestamp", "affinity_score"))
+     */
+
+    val schemaVersion = "v3"
     val vertexId = VertexId(0, InnerVal.withStr("dummy", schemaVersion))
     val srcVertex = Vertex(vertexId)
     val tgtVertex = srcVertex
@@ -158,18 +215,75 @@ class EdgeTest extends FunSuite with TestCommon with TestCommonWithModels {
       3.toByte -> InnerValLikeWithTs(InnerVal.withLong(0, schemaVersion), 4),
       LabelMeta.lastDeletedAt -> InnerValLikeWithTs(InnerVal.withLong(0, schemaVersion), 3)
     )
-
     val snapshotEdge =
-      Option(Edge(srcVertex, tgtVertex, labelWithDirV2, op = GraphUtil.operations("delete"), propsWithTs = oldPropsWithTs))
+      Edge(srcVertex,
+        tgtVertex,
+        labelWithDirV3,
+        op = GraphUtil.operations("insert"),
+        propsWithTs = oldPropsWithTs).toSnapshotEdge
 
-    val requestEdge = Edge(srcVertex, tgtVertex, labelWithDirV2, propsWithTs = propsWithTs)
-    val newVersion = 0L
-    val edgeMutate = Edge.buildMutation(snapshotEdge, requestEdge, newVersion, oldPropsWithTs, propsWithTs)
-    logger.info(edgeMutate.toLogString)
+    val redisSnapshotEdgeSerializable = new RedisSnapshotEdgeSerializable(snapshotEdge)
+    val redisSnapshotEdgeDeserializable = new RedisSnapshotEdgeDeserializable
 
-    assert(edgeMutate.newSnapshotEdge.nonEmpty)
-    assert(edgeMutate.edgesToInsert.nonEmpty)
-    assert(edgeMutate.edgesToDelete.isEmpty)
+    val vertexInnerIdBytes = GraphUtil.bytesToHexString(vertexId.innerId.bytes)
+    val labelWithDirBytes = GraphUtil.bytesToHexString(snapshotEdge.labelWithDir.bytes)
+    val labelIndexSeqWithIsInvertedBytes = GraphUtil.bytesToHexString(labelOrderSeqWithIsInverted(LabelIndex.DefaultSeq, isInverted = true))
+    logger.error(">>>>>>>>>> ROW")
+    logger.error(s">>> src vertex innerId: $vertexInnerIdBytes")
+    logger.error(s">>> tgt vertex innerId: $vertexInnerIdBytes")
+    logger.error(s">>> label with dir: $labelWithDirBytes")
+    logger.error(s">>> labelIndexSeqWithIsInvertedBytes?????: $labelIndexSeqWithIsInvertedBytes")
+    logger.error("")
+    logger.error(">>>>>>>>>> VALUE")
+    logger.error(s">>> value: ${GraphUtil.bytesToHexString(Bytes.add(redisSnapshotEdgeSerializable.statusCodeWithOp(snapshotEdge.statusCode, snapshotEdge.op), propsToKeyValuesWithTs(snapshotEdge.props.toList)))}")
+
+    val kv = redisSnapshotEdgeSerializable.toKeyValues
+    kv.foreach { k =>
+      logger.error(s">>> edge: ${k.toHexLogString}")
+    }
+
+    val sse = redisSnapshotEdgeDeserializable.fromKeyValues[SKeyValue](QueryParam(labelWithDirV3), kv, schemaVersion, Some(snapshotEdge))
+    logger.error("")
+    logger.error(">>>>>>>>>> SNAPSHOT EDGE")
+    logger.error(s">>> fetched sse: ${sse.toLogString()}")
+    logger.error(s">>> org sse: ${snapshotEdge.toLogString()}")
+
+    assert(sse.toLogString.equals(snapshotEdge.toLogString))
+  }
+
+  test("toKeyValues/ fromKeyValues: Redis vertex serializer/ deserializer") {
+
+    val schemaVersion = "v3"
+    val vertexId = VertexId(6, InnerVal.withStr("dummy", schemaVersion))
+    val srcVertex = Vertex(vertexId)
+    val redisVertexSerializable = new RedisVertexSerializable(srcVertex)
+    val redisVertexDeserializable = new RedisVertexDeserializable
+
+    val row = GraphUtil.bytesToHexString(srcVertex.id.bytes.takeRight(srcVertex.id.bytes.length-2))
+    logger.error(s">>> row: $row")
+
+
+    def toLogString(vtx: Vertex): String = {
+      val (serviceName, columnName) = (serviceV3, columnV3)
+
+      if (vtx.propsWithName.nonEmpty)
+        Seq(ts, GraphUtil.fromOp(op), "v", vtx.id.innerId, serviceName, columnName, Json.toJson(vtx.propsWithName)).mkString("\t")
+      else
+        Seq(ts, GraphUtil.fromOp(op), "v", vtx.id.innerId, serviceName, columnName).mkString("\t")
+    }
+
+    val kv = redisVertexSerializable.toKeyValues
+
+    kv.foreach { k =>
+      logger.error(s">>> vertex: ${k.toHexLogString}")
+    }
+    val vtx = redisVertexDeserializable.fromKeyValues[SKeyValue](QueryParam.Empty, kv, schemaVersion, Some(srcVertex))
+    logger.error("")
+    logger.error(">>>>>>>>>> VERTEX")
+    logger.error(s">>> fetched vtx: ${toLogString(vtx)}")
+    logger.error(s">>> org vtx: ${toLogString(srcVertex)}")
+
+    assert(toLogString(vtx).equals(toLogString(srcVertex)))
   }
 }
 

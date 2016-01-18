@@ -40,23 +40,30 @@ trait TestCommonWithModels {
 
   val serviceName = "_test_service"
   val serviceNameV2 = "_test_service_v2"
+  val serviceNameV3 = "_test_service_v3"
   val columnName = "user_id"
   val columnNameV2 = "user_id_v2"
+  val columnNameV3 = "user_id_v3"
   val columnType = "long"
   val columnTypeV2 = "long"
+  val columnTypeV3 = "long"
 
   val tgtColumnName = "itme_id"
   val tgtColumnNameV2 = "item_id_v2"
+  val tgtColumnNameV3 = "item_id_v3"
   val tgtColumnType = "string"
   val tgtColumnTypeV2 = "string"
+  val tgtColumnTypeV3 = "string"
 
   val hTableName = "_test_cases"
   val preSplitSize = 0
   val labelName = "_test_label"
   val labelNameV2 = "_test_label_v2"
+  val labelNameV3 = "_test_label_v3"
 
   val undirectedLabelName = "_test_label_undirected"
   val undirectedLabelNameV2 = "_test_label_undirected_v2"
+  val undirectedLabelNameV3 = "_test_label_undirected_v3"
 
   val testProps = Seq(
     Prop("affinity_score", "0.0", DOUBLE),
@@ -77,20 +84,24 @@ trait TestCommonWithModels {
     implicit val session = AutoSession
     Management.createService(serviceName, cluster, hTableName, preSplitSize, hTableTTL = None, "gz")
     Management.createService(serviceNameV2, cluster, hTableName, preSplitSize, hTableTTL = None, "gz")
+    Management.createService(serviceNameV3, cluster, hTableName, preSplitSize, hTableTTL = None, "gz")
   }
 
   def deleteTestService() = {
     implicit val session = AutoSession
     Management.deleteService(serviceName)
     Management.deleteService(serviceNameV2)
+    Management.deleteService(serviceNameV3)
   }
 
   def deleteTestLabel() = {
     implicit val session = AutoSession
     Management.deleteLabel(labelName)
     Management.deleteLabel(labelNameV2)
+    Management.deleteLabel(labelNameV3)
     Management.deleteLabel(undirectedLabelName)
     Management.deleteLabel(undirectedLabelNameV2)
+    Management.deleteLabel(undirectedLabelNameV3)
   }
 
   def createTestLabel() = {
@@ -101,32 +112,48 @@ trait TestCommonWithModels {
     Management.createLabel(labelNameV2, serviceNameV2, columnNameV2, columnTypeV2, serviceNameV2, tgtColumnNameV2, tgtColumnTypeV2,
       isDirected = true, serviceNameV2, testIdxProps, testProps, consistencyLevel, Some(hTableName), hTableTTL, VERSION2, false, "lg4")
 
+    Management.createLabel(labelNameV3, serviceNameV3, columnNameV3, columnTypeV3, serviceNameV3, tgtColumnNameV3, tgtColumnTypeV3,
+      isDirected = true, serviceNameV3, testIdxProps, testProps, consistencyLevel, Some(hTableName), hTableTTL, VERSION3, false, "lg4")
+
     Management.createLabel(undirectedLabelName, serviceName, columnName, columnType, serviceName, tgtColumnName, tgtColumnType,
       isDirected = false, serviceName, testIdxProps, testProps, consistencyLevel, Some(hTableName), hTableTTL, VERSION1, false, "lg4")
 
     Management.createLabel(undirectedLabelNameV2, serviceNameV2, columnNameV2, columnTypeV2, serviceNameV2, tgtColumnNameV2, tgtColumnTypeV2,
       isDirected = false, serviceName, testIdxProps, testProps, consistencyLevel, Some(hTableName), hTableTTL, VERSION2, false, "lg4")
+
+    Management.createLabel(undirectedLabelNameV3, serviceNameV3, columnNameV3, columnTypeV3, serviceNameV3, tgtColumnNameV3, tgtColumnTypeV3,
+      isDirected = false, serviceName, testIdxProps, testProps, consistencyLevel, Some(hTableName), hTableTTL, VERSION3, false, "lg4")
   }
 
   def service = Service.findByName(serviceName, useCache = false).get
 
   def serviceV2 = Service.findByName(serviceNameV2, useCache = false).get
 
+  def serviceV3 = Service.findByName(serviceNameV3, useCache = false).get
+
   def column = ServiceColumn.find(service.id.get, columnName, useCache = false).get
 
   def columnV2 = ServiceColumn.find(serviceV2.id.get, columnNameV2, useCache = false).get
+
+  def columnV3 = ServiceColumn.find(serviceV3.id.get, columnNameV3, useCache = false).get
 
   def tgtColumn = ServiceColumn.find(service.id.get, tgtColumnName, useCache = false).get
 
   def tgtColumnV2 = ServiceColumn.find(serviceV2.id.get, tgtColumnNameV2, useCache = false).get
 
+  def tgtColumnV3 = ServiceColumn.find(serviceV3.id.get, tgtColumnNameV3, useCache = false).get
+
   def label = Label.findByName(labelName, useCache = false).get
 
   def labelV2 = Label.findByName(labelNameV2, useCache = false).get
 
+  def labelV3 = Label.findByName(labelNameV3, useCache = false).get
+
   def undirectedLabel = Label.findByName(undirectedLabelName, useCache = false).get
 
   def undirectedLabelV2 = Label.findByName(undirectedLabelNameV2, useCache = false).get
+
+  def undirectedLabelV3 = Label.findByName(undirectedLabelNameV3, useCache = false).get
 
   def dir = GraphUtil.directions("out")
 
@@ -138,7 +165,11 @@ trait TestCommonWithModels {
 
   def labelWithDirV2 = LabelWithDirection(labelV2.id.get, dir)
 
+  def labelWithDirV3 = LabelWithDirection(labelV3.id.get, dir)
+
   def queryParam = QueryParam(labelWithDir)
 
   def queryParamV2 = QueryParam(labelWithDirV2)
+
+  def queryParamV3 = QueryParam(labelWithDirV3)
 }

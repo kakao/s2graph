@@ -1,8 +1,8 @@
 package com.kakao.s2graph.core.storage.redis
 
-import com.kakao.s2graph.core.types.{InnerVal, InnerValLike, VertexId}
-import com.kakao.s2graph.core.{QueryParam, Vertex}
 import com.kakao.s2graph.core.storage.{CanSKeyValue, StorageDeserializable}
+import com.kakao.s2graph.core.types.{InnerVal, InnerValLike, VertexId}
+import com.kakao.s2graph.core.{GraphUtil, QueryParam, Vertex}
 import org.apache.hadoop.hbase.util.Bytes
 
 import scala.collection.mutable.ListBuffer
@@ -20,7 +20,7 @@ class RedisVertexDeserializable extends StorageDeserializable[Vertex]{
     val kvs = _kvs.map { kv => implicitly[CanSKeyValue[T]].toSKeyValue(kv) }
 
     val kv = kvs.head
-    val (vertexId, _) = VertexId.fromBytes(kv.row, 0, kv.row.length, version)
+    val (vertexId, _) = VertexId.fromBytes(kv.row, -GraphUtil.bytesForMurMurHash, kv.row.length, version) // no hash bytes => offset: -2
 
     var maxTs = Long.MinValue
     val propsMap = new collection.mutable.HashMap[Int, InnerValLike]
