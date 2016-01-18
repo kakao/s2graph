@@ -82,7 +82,8 @@ class RedisStorage(val config: Config, vertexCache: Cache[Integer, Option[Vertex
         )
         if (get.isIncludeDegree) {
           val degreeBytes = jedis.get(get.degreeEdgeKey)
-          result + SKeyValue(Array.empty[Byte], get.key, Array.empty[Byte], Array.empty[Byte], degreeBytes, 0L)
+          val zeroLenBytes = Array.fill[Byte](1)(0.toByte)
+          result + SKeyValue(Array.empty[Byte], get.key, Array.empty[Byte], Array.empty[Byte], Bytes.add(zeroLenBytes, degreeBytes), 0L)
         } else result
       } match {
         case Success(v) =>
@@ -195,7 +196,10 @@ class RedisStorage(val config: Config, vertexCache: Cache[Integer, Option[Vertex
       jedis.watch(req.key)
 
       // TODO Do we need to add transaction - multi?
-      jedis.incrBy(req.degreeEdgeKey, req.delta)
+      if (req.isDegree)
+        jedis.incrBy(req.degreeEdgeKey, req.delta)
+      else
+        jedis.incrBy(req.key, req.delta)
 
       jedis.unwatch()
       true
