@@ -3,7 +3,7 @@ package com.kakao.s2graph.core
 import com.kakao.s2graph.core.mysqls.{LabelIndex, LabelMeta}
 import com.kakao.s2graph.core.storage.SKeyValue
 import com.kakao.s2graph.core.storage.StorageSerializable._
-import com.kakao.s2graph.core.storage.redis.{RedisSnapshotEdgeDeserializable, RedisSnapshotEdgeSerializable, RedisVertexDeserializable, RedisVertexSerializable}
+import com.kakao.s2graph.core.storage.redis._
 import com.kakao.s2graph.core.types.{InnerVal, InnerValLikeWithTs, VertexId}
 import com.kakao.s2graph.core.utils.logger
 import org.apache.hadoop.hbase.util.Bytes
@@ -12,8 +12,6 @@ import play.api.libs.json.Json
 
 class EdgeTest extends FunSuite with TestCommon with TestCommonWithModels {
   initTests()
-
-
 
     test("toLogString") {
       val testLabelName = labelNameV2
@@ -178,6 +176,46 @@ class EdgeTest extends FunSuite with TestCommon with TestCommonWithModels {
       assert(edgeMutate.edgesToDelete.isEmpty)
     }
 
+  test("RedisIndexEdgeSerializable test") {
+    val testLabelName = "s2graph_label_test_2"
+    val timestamp = 1l
+    val (from, to) = ("101", "10")
+
+    val props ="""{"time": 10, "weight":1, "is_hidden": false, "is_blocked": true}"""
+    val direction = "out"
+    val operation = "insert"
+
+    val edge = Management.toEdge(timestamp, operation, from, to, testLabelName, direction, props)
+    val label = edge.labelWithDir
+
+    val indexEdges = edge.edgesWithIndexValid
+    val indexEdge = indexEdges.head
+    val redisIndexEdgeSerializable = new RedisIndexEdgeSerializable(indexEdge)
+
+    val serializedKVs = redisIndexEdgeSerializable.toKeyValues
+
+    val redisDeserializable = new RedisIndexEdgeDeserializable
+
+    val q:QueryParam = new QueryParam(label, timestamp+1)
+
+    val deserialized = redisDeserializable.fromKeyValues(q, serializedKVs, indexEdge.schemaVer, None)
+
+    assert(indexEdge.srcVertex.innerId === deserialized.srcVertex.innerId)
+    assert(indexEdge.tgtVertex.innerId === deserialized.tgtVertex.innerId)
+
+    assert(indexEdge.label === deserialized.label)
+    assert(indexEdge.labelIndex === deserialized.labelIndex)
+
+    assert(indexEdge.propsWithName === deserialized.propsWithName)
+    assert(indexEdge.props === deserialized.props)
+    assert(indexEdge.propsWithTs === deserialized.propsWithTs)
+    assert(indexEdge.labelIndexMetaSeqs === deserialized.labelIndexMetaSeqs)
+    assert(indexEdge.orders === deserialized.orders)
+    assert(indexEdge.metas === deserialized.metas)
+
+    assert(indexEdge.schemaVer === deserialized.schemaVer)
+  }
+
   test("toKeyValues/ fromKeyValues: Redis snapshot edge serializer/ deserializer") {
     /**
      * service: _test_service_v3
@@ -285,6 +323,8 @@ class EdgeTest extends FunSuite with TestCommon with TestCommonWithModels {
 
     assert(toLogString(vtx).equals(toLogString(srcVertex)))
   }
+
+
 }
 
 //import com.kakao.s2graph.core.types._
