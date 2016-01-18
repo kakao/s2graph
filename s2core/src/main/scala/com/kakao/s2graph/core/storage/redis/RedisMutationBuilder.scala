@@ -13,8 +13,25 @@ class RedisMutationBuilder(storage: RedisStorage)(implicit ec: ExecutionContext)
   def put(kvs: Seq[SKeyValue]): Seq[RedisRPC] =
     kvs.map { kv => new RedisPutRequest(kv.row, kv.qualifier, kv.value, kv.timestamp) }
 
+  def toHex(b: Array[Byte]): String = {
+    val tmp = b.map("%02x".format(_)).mkString("\\x")
+    if ( tmp.isEmpty ) "" else "\\x" + tmp
+  }
+
+  def incrementCount(kvs: Seq[SKeyValue]): Seq[RedisRPC] =
+    kvs.map { kv =>
+      println(s">> [incrementCount] len: ${kv.value.length} value : ${toHex(kv.value)}")
+      val offset = kv.value.length - 8
+      new RedisAtomicIncrementRequest(kv.row, kv.value, Bytes.toLong(kv.value, offset, 8), isDegree = false)
+    }
+
   def increment(kvs: Seq[SKeyValue]): Seq[RedisRPC] =
-    kvs.map { kv => new RedisAtomicIncrementRequest(kv.row, kv.value, Bytes.toLong(kv.value)) }
+    kvs.map { kv =>
+      println(s">> [increment] len: ${kv.value.length} value : ${toHex(kv.value)}")
+      val offset = kv.value.length - 8
+      new RedisAtomicIncrementRequest(kv.row, kv.value, Bytes.toLong(kv.value, offset, 8), isDegree = true)
+    }
+
 
   def delete(kvs: Seq[SKeyValue]): Seq[RedisRPC] =
     kvs.map { kv =>
@@ -47,6 +64,7 @@ class RedisMutationBuilder(storage: RedisStorage)(implicit ec: ExecutionContext)
         List.empty[RedisAtomicIncrementRequest]
       case (true, false) =>
 
+        println(s">> [increments] edgesToInsert ")
         /** no edges to delete but there is new edges to insert so increase degree by 1 */
         edgeMutate.edgesToInsert.flatMap { e => buildIncrementsAsync(e) }
       case (false, true) =>
@@ -86,7 +104,14 @@ class RedisMutationBuilder(storage: RedisStorage)(implicit ec: ExecutionContext)
 
   def snapshotEdgeMutations(edgeMutate: EdgeMutate): Seq[RedisRPC] = ???
 
-  def buildIncrementsCountAsync(indexedEdge: IndexEdge, amount: Long): Seq[RedisRPC] = ???
+  def buildIncrementsCountAsync(indexedEdge: IndexEdge, amount: Long): Seq[RedisRPC] =
+    storage.indexEdgeSerializer(indexedEdge).toKeyValues.headOption match {
+      case None => Nil
+      case Some(kv) =>
+        val oneLenBytes = Array.fill[Byte](1)(1.toByte)
+        val copiedKV = kv.copy(value = Bytes.add(oneLenBytes, Bytes.toBytes(amount)))
+        incrementCount(Seq(copiedKV))
+    }
 
   def buildPutsAsync(indexedEdge: IndexEdge): Seq[RedisRPC] =
     put(storage.indexEdgeSerializer(indexedEdge).toKeyValues)

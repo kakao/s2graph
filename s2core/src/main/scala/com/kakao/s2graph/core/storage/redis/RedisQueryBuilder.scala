@@ -73,7 +73,7 @@ class RedisQueryBuilder(storage: RedisStorage)(implicit ec: ExecutionContext)
     val rowkey = kv.row.takeRight(kv.row.length - 2)
 
     // 1. RedisGet instance initialize
-    val get = new RedisGetRequest(rowkey)
+    val get = new RedisGetRequest(rowkey, isIncludeDegree = !tgtVertexIdOpt.isDefined)
 
     // 2. set filter and min/max value's key build
     val (minTs, maxTs) = queryParam.duration.getOrElse(-1L -> -1L)

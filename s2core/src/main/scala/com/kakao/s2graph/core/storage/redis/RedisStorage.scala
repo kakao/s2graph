@@ -7,6 +7,7 @@ import com.kakao.s2graph.core.mysqls.Label
 import com.kakao.s2graph.core.storage._
 import com.kakao.s2graph.core.utils.{AsyncRedisClient, logger}
 import com.typesafe.config.Config
+import org.apache.hadoop.hbase.util.Bytes
 
 import scala.collection.JavaConversions._
 import scala.concurrent.{ExecutionContext, Future}
@@ -76,9 +77,13 @@ class RedisStorage(val config: Config, vertexCache: Cache[Integer, Option[Vertex
       // send rpc call to Redis instance
       client.doBlockWithKey[Set[SKeyValue]]("" /* sharding key */) { jedis =>
         logger.info(s">> jedis gogo; key : ${toHex(get.key)}, min : ${toHex(get.min)}, max : ${toHex(get.max)}, offset :${get.offset}, count : ${get.count}")
-        jedis.zrangeByLex(get.key, get.min, get.max, get.offset, get.count).toSet[Array[Byte]].map(v =>
+        val result = jedis.zrangeByLex(get.key, get.min, get.max, get.offset, get.count).toSet[Array[Byte]].map(v =>
           SKeyValue(Array.empty[Byte], get.key, Array.empty[Byte], Array.empty[Byte], v, 0L)
         )
+        if (get.isIncludeDegree) {
+          val degreeBytes = jedis.get(get.degreeEdgeKey)
+          result + SKeyValue(Array.empty[Byte], get.key, Array.empty[Byte], Array.empty[Byte], degreeBytes, 0L)
+        } else result
       } match {
         case Success(v) =>
           logger.error(s">> get success!! $v")
@@ -93,13 +98,18 @@ class RedisStorage(val config: Config, vertexCache: Cache[Integer, Option[Vertex
   private def writeToStorage(rpc: RedisRPC): Future[Boolean] = {
     Future[Boolean] {
       client.doBlockWithKey[Boolean]("" /* sharding key */) { jedis =>
+        println(s">> [writeToStorage] ")
         val write = rpc match {
           case d: RedisDeleteRequest => if (jedis.zrem(d.key, d.value) == 1) true else false
           case p: RedisPutRequest if p.qualifier.length > 0 => // Edge put operation
+            println(s">> [writeToStorage] edge put : $p")
             if (jedis.zadd(p.key, RedisZsetScore, p.value) == 1) true else false
           case p: RedisPutRequest if p.qualifier.length == 0 =>  // Vertex put operation
+            println(s">> [writeToStorage] vertex put : $p")
             if (jedis.zadd(p.key, RedisZsetScore, p.qualifier ++ p.value) == 1) true else false
-          case i: RedisAtomicIncrementRequest => atomicIncrement(i)
+          case i: RedisAtomicIncrementRequest =>
+            println(s">> [writeToStorage] Atomic increment : $i")
+            atomicIncrement(i)
         }
         write
       } match {
@@ -149,13 +159,11 @@ class RedisStorage(val config: Config, vertexCache: Cache[Integer, Option[Vertex
 //          } else false
 //        } else false
         if ( oldBytes.length == 0 ) {
-          logger.error(s">> oldBytes length 0")
           t.zadd(putRequest.key, RedisZsetScore, putRequest.value)
         } else {
-          logger.error(s">> some oldBytes")
-          val keys = List[Array[Byte]](putRequest.key).map("%02x".format(_)).mkString("\\x").map("\\x"+_)
-          val minMax = "[\\x" + oldBytes.map("%02x".format(_)).mkString("\\x")
-          val argv = minMax +: List[Array[Byte]](oldBytes, putRequest.value).map("%02x".format(_)).mkString("\\x").map("\\x"+_) :+ s"$RedisZsetScore"
+          val keys = List[String](GraphUtil.bytesToHexString(putRequest.key))
+          val minMax = "[" + GraphUtil.bytesToHexString(oldBytes)
+          val argv = List[String](minMax, GraphUtil.bytesToHexString(oldBytes), GraphUtil.bytesToHexString(putRequest.value), GraphUtil.bytesToHexString(Bytes.toBytes(RedisZsetScore)))
 
           t.eval(script, keys, argv)
         }
@@ -174,6 +182,7 @@ class RedisStorage(val config: Config, vertexCache: Cache[Integer, Option[Vertex
           logger.error(s">> success compareAndSet : $v")
           v
         case Failure(e) =>
+          e.printStackTrace()
           logger.error(s">> failure compareAndSet : $e")
           false
       }
@@ -181,8 +190,24 @@ class RedisStorage(val config: Config, vertexCache: Cache[Integer, Option[Vertex
   }
 
   def atomicIncrement(req: RedisAtomicIncrementRequest): Boolean = {
-    // TODO: Implement get -> increment -> put.. with transaction (How will we handle property information?)
-    false
+    client.doBlockWithKey[Boolean]("" /* shard key */) { jedis =>
+      println(s">> [atomicIncrement] key : ${GraphUtil.bytesToHexString(req.key)}, value : ${GraphUtil.bytesToHexString(req.value)}, delta : ${req.delta}")
+      jedis.watch(req.key)
+
+      // TODO Do we need to add transaction - multi?
+      jedis.incrBy(req.degreeEdgeKey, req.delta)
+
+      jedis.unwatch()
+      true
+    } match {
+      case Success(v) =>
+        logger.error(s">> get success!! $v")
+        true
+      case Failure(e) =>
+        logger.error(s">> get fail!! $e")
+        false
+
+    }
   }
 
 
@@ -235,6 +260,8 @@ class RedisStorage(val config: Config, vertexCache: Cache[Integer, Option[Vertex
     val _queryParam = queryParam.tgtVertexInnerIdOpt(Option(edge.tgtVertex.innerId))
     val q = Query.toQuery(Seq(edge.srcVertex), _queryParam)
     val queryRequest = QueryRequest(q, 0, edge.srcVertex, _queryParam)
+
+    println(s">> [fetchSanps")
 
 
     get(queryBuilder.buildRequest(queryRequest)) map { s =>
@@ -390,6 +417,7 @@ class RedisStorage(val config: Config, vertexCache: Cache[Integer, Option[Vertex
       val releaseLockEdgePut = toPutRequest(releaseLockEdge)
       val lockEdgePut = toPutRequest(lockEdge)
 
+      println(s">> [releaseLock] start compareAndSet")
       compareAndSet(releaseLockEdgePut, lockEdgePut.value).recoverWith {
         case ex: Exception =>
           logger.error(s"ReleaseLock RPC Failed.")
