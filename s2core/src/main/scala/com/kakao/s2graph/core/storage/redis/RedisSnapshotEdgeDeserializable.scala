@@ -43,13 +43,14 @@ class RedisSnapshotEdgeDeserializable extends RDeserializable[SnapshotEdge]  {
     /** rowKey */
     def parseRowV3(kv: SKeyValue, version: String) = {
       var pos = 0
-      val (srcIdAndTgtId, srcIdAndTgtIdLen) = SourceAndTargetVertexIdPair.fromBytes(paddingHashBytes(kv.row), pos, kv.row.length, version)
-      pos += srcIdAndTgtIdLen
-      val labelWithDir = LabelWithDirection(Bytes.toInt(kv.row, pos, 4))
+      val newRow = paddingHashBytes(kv.row)
+      val (srcIdAndTgtId, srcIdAndTgtIdBytesLen) = SourceAndTargetVertexIdPair.fromBytes(newRow, pos, newRow.length, version)
+      pos += srcIdAndTgtIdBytesLen
+      val labelWithDir = LabelWithDirection(Bytes.toInt(newRow, pos, 4))
       pos += 4
-      val (labelIdxSeq, isInverted) = bytesToLabelIndexSeqWithIsInverted(kv.row, pos)
+      val (labelIdxSeq, isInverted) = bytesToLabelIndexSeqWithIsInverted(newRow, pos)
 
-      val rowLen = srcIdAndTgtIdLen + 4 + 1
+      val rowLen = srcIdAndTgtIdBytesLen + 4 + 1
       (srcIdAndTgtId.srcInnerId, srcIdAndTgtId.tgtInnerId, labelWithDir, labelIdxSeq, isInverted, rowLen)
 
     }

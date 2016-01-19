@@ -70,7 +70,7 @@ class RedisQueryBuilder(storage: RedisStorage)(implicit ec: ExecutionContext)
     }
 
     // Redis supports client-side sharding and does not require hash key so remove heading hash key(2 bytes)
-    val rowkey = kv.row.takeRight(kv.row.length - 2)
+    val rowkey = kv.row
 
     // 1. RedisGet instance initialize
     val get = new RedisGetRequest(rowkey, isIncludeDegree = !tgtVertexIdOpt.isDefined)
@@ -83,7 +83,7 @@ class RedisQueryBuilder(storage: RedisStorage)(implicit ec: ExecutionContext)
       else
         ("-".getBytes, "+".getBytes)
 
-    logger.error(s">>> min : $min , max : $max")
+    logger.error(s">>> min : ${GraphUtil.bytesToHexString(min)} , max : ${GraphUtil.bytesToHexString(max)}")
 
     get.setCount(queryParam.limit)
       .setOffset(queryParam.offset)
