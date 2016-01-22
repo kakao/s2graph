@@ -2,6 +2,7 @@ package com.kakao.s2graph
 
 import com.kakao.s2graph.client.{BulkWithWaitRequest, GetEdgesRequest, GraphRestClient}
 import com.kakao.s2graph.core.mysqls.{Etl, Model, Service}
+import com.kakao.s2graph.core.utils.Configuration._
 import com.kakao.s2graph.core.{Graph, GraphConfig, Management}
 import com.typesafe.config.ConfigFactory
 import org.scalatest.{BeforeAndAfterAll, FlatSpec, Matchers}
@@ -25,10 +26,12 @@ class EdgeTransformSpec extends FlatSpec with Matchers with BeforeAndAfterAll {
   val graphConfig = new GraphConfig(config)
   Model(config)
 
-  val graphUrl = config.getString("s2graph.url")
+  val graphUrl = config.getOrElse("s2graph.url", "http://localhost:9000")
+  val graphReadOnlyUrl = config.getOrElse("s2graph.read-only.url", graphUrl)
   lazy val _s2graph = new Graph(config)
   lazy val _rest = new GraphRestClient(client, graphUrl)
-  lazy val _edgeTransform = new EdgeTransform(_rest)
+  lazy val _restReadOnly = new GraphRestClient(client, graphReadOnlyUrl)
+  lazy val _edgeTransform = new EdgeTransform(_rest, _restReadOnly)
 
   val logger = LoggerFactory.getLogger(getClass)
 

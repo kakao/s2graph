@@ -13,7 +13,7 @@ import scala.util.Try
 /**
   * Created by hsleep(honeysleep@gmail.com) on 2015. 12. 8..
   */
-class EdgeTransform(rest: GraphRestClient)(implicit ec: ExecutionContext) {
+class EdgeTransform(rest: GraphRestClient, readOnlyRest: GraphRestClient)(implicit ec: ExecutionContext) {
   val logger = LoggerFactory.getLogger(getClass)
 
   def transformEdge(edge: Edge): Future[Seq[Edge]] = {
@@ -129,7 +129,7 @@ class EdgeTransform(rest: GraphRestClient)(implicit ec: ExecutionContext) {
       service <- Try { Service.findById(experiment.serviceId) }.toOption
     } yield ExperimentRequest(service.accessToken, experiment.name, uuid, payload)
   } match {
-    case Some(req) => rest.post(req).map(_.json)
+    case Some(req) => readOnlyRest.post(req).map(_.json)
     case None => Future.failed(new RuntimeException("cannot find experiment"))
   }
 

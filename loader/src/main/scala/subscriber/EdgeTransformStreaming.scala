@@ -45,8 +45,12 @@ object EdgeTransformStreaming extends SparkApp {
 
   lazy val builder = new com.ning.http.client.AsyncHttpClientConfig.Builder()
   lazy val client = new play.api.libs.ws.ning.NingWSClient(builder.build)
-  lazy val rest = new GraphRestClient(client, config.getOrElse("s2graph.url", "http://localhost"))
-  lazy val transformer = new EdgeTransform(rest)
+
+  val graphUrl = config.getOrElse("s2graph.url", "http://localhost")
+  val graphReadOnlyUrl = config.getOrElse("s2graph.read-only.url", graphUrl)
+  lazy val rest = new GraphRestClient(client, graphUrl)
+  lazy val readOnlyRest = new GraphRestClient(client, graphReadOnlyUrl)
+  lazy val transformer = new EdgeTransform(rest, readOnlyRest)
   lazy val streamHelper = getStreamHelper(kafkaParam)
 
   // should implement in derived class
