@@ -7,7 +7,8 @@ import org.scalatest.{FunSuite, Matchers}
 
 
 class IndexEdgeTest extends FunSuite with Matchers with TestCommonWithModels {
-  test("") {
+  initTests()
+  test("test serializer/deserializer for index edge.") {
     val from = InnerVal.withLong(1, label.schemaVersion)
     val to = InnerVal.withLong(101, label.schemaVersion)
     val vertexId = SourceVertexId(HBaseType.DEFAULT_COL_ID, from)

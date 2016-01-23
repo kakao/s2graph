@@ -2,7 +2,7 @@ package controllers
 
 import actors.QueueActor
 import com.kakao.s2graph.core._
-import com.kakao.s2graph.core.mysqls.Label
+import com.kakao.s2graph.core.mysqls.{Label}
 import com.kakao.s2graph.core.rest.RequestParser
 import com.kakao.s2graph.core.utils.logger
 import config.Config
@@ -21,16 +21,22 @@ object EdgeController extends Controller {
 
   private val s2: Graph = com.kakao.s2graph.rest.Global.s2graph
   private val requestParser: RequestParser = com.kakao.s2graph.rest.Global.s2parser
+  private def jsToStr(js: JsValue): String = js match {
+    case JsString(s) => s
+    case _ => js.toString()
+  }
 
   def toTsv(jsValue: JsValue, op: String): String = {
-    val ts = jsValue \ "timestamp"
-    val from = jsValue \ "from"
-    val to = jsValue \ "to"
-    val label = jsValue \ "label"
-    val props = jsValue \ "props"
-    val direction = (jsValue \ "direction").asOpt[String].getOrElse("out")
+    val ts = jsToStr(jsValue \ "timestamp")
+    val from = jsToStr(jsValue \ "from")
+    val to = jsToStr(jsValue \ "to")
+    val label = jsToStr(jsValue \ "label")
+    val props = (jsValue \ "props").asOpt[JsObject].getOrElse(Json.obj())
 
-    Seq(ts, op, "e", from, to, label, props, direction).mkString("\t")
+    (jsValue \ "direction").asOpt[String] match {
+      case None => Seq(ts, op, "e", from, to, label, props).mkString("\t")
+      case Some(dir) => Seq(ts, op, "e", from, to, label, props, dir).mkString("\t")
+    }
   }
 
   def tryMutates(jsValue: JsValue, operation: String, withWait: Boolean = false): Future[Result] = {
@@ -39,13 +45,13 @@ object EdgeController extends Controller {
     else {
       try {
         logger.debug(s"$jsValue")
-        val edges = requestParser.toEdges(jsValue, operation)
+        val (edges, jsOrgs) = requestParser.toEdgesWithOrg(jsValue, operation)
 
-        for (edge <- edges) {
+        for ((edge, orgJs) <- edges.zip(jsOrgs)) {
           if (edge.isAsync)
-            ExceptionHandler.enqueue(toKafkaMessage(Config.KAFKA_LOG_TOPIC_ASYNC, edge, Option(toTsv(jsValue, operation))))
+            ExceptionHandler.enqueue(toKafkaMessage(Config.KAFKA_LOG_TOPIC_ASYNC, edge, Option(toTsv(orgJs, operation))))
           else
-            ExceptionHandler.enqueue(toKafkaMessage(Config.KAFKA_LOG_TOPIC, edge, Option(toTsv(jsValue, operation))))
+            ExceptionHandler.enqueue(toKafkaMessage(Config.KAFKA_LOG_TOPIC, edge, Option(toTsv(orgJs, operation))))
         }
 
         val edgesToStore = edges.filterNot(e => e.isAsync)
@@ -98,8 +104,6 @@ object EdgeController extends Controller {
         val rets = elementsToStore.map { element => QueueActor.router ! element; true }
         Future.successful(jsonResponse(Json.toJson(rets)))
       }
-
-
     } catch {
       case e: GraphExceptions.JsonParseException => Future.successful(BadRequest(s"$e"))
       case e: Throwable =>
@@ -148,10 +152,15 @@ object EdgeController extends Controller {
     tryMutates(request.body, "increment")
   }
 
+  def incrementsWithWait() = withHeaderAsync(jsonParser) { request =>
+    tryMutates(request.body, "increment", withWait = true)
+  }
+
   def incrementCounts() = withHeaderAsync(jsonParser) { request =>
     val jsValue = request.body
     val edges = requestParser.toEdges(jsValue, "incrementCount")
-    s2.incrementCounts(edges).map { results =>
+
+    s2.incrementCounts(edges, withWait = true).map { results =>
       val json = results.map { case (isSuccess, resultCount) =>
         Json.obj("success" -> isSuccess, "result" -> resultCount)
       }
@@ -161,7 +170,8 @@ object EdgeController extends Controller {
   }
 
   def deleteAll() = withHeaderAsync(jsonParser) { request =>
-    deleteAllInner(request.body, withWait = false)
+//    deleteAllInner(request.body, withWait = false)
+    deleteAllInner(request.body, withWait = true)
   }
 
   def deleteAllInner(jsValue: JsValue, withWait: Boolean) = {
@@ -172,7 +182,7 @@ object EdgeController extends Controller {
         id <- ids
         label <- labels
       } yield {
-        val tsv = Seq(ts, "deleteAll", "e", id, id, label.label, "{}", direction).mkString("\t")
+        val tsv = Seq(ts, "deleteAll", "e", jsToStr(id), jsToStr(id), label.label, "{}", direction).mkString("\t")
         val topic = topicOpt.getOrElse {
           if (label.isAsync) Config.KAFKA_LOG_TOPIC_ASYNC else Config.KAFKA_LOG_TOPIC
         }

@@ -73,6 +73,7 @@ class RequestParser(config: Config) extends JSONParser {
       if (minTs > maxTs) {
         throw new RuntimeException("Duration error. Timestamp of From cannot be larger than To.")
       }
+
       (minTs, maxTs)
     }
   }
@@ -351,6 +352,13 @@ class RequestParser(config: Config) extends JSONParser {
 
   }
 
+  def toEdgesWithOrg(jsValue: JsValue, operation: String): (List[Edge], List[JsValue]) = {
+    val jsValues = toJsValues(jsValue)
+    val edges = jsValues.map(toEdge(_, operation))
+
+    (edges, jsValues)
+  }
+
   def toEdges(jsValue: JsValue, operation: String): List[Edge] = {
     toJsValues(jsValue).map(toEdge(_, operation))
   }
@@ -490,7 +498,6 @@ class RequestParser(config: Config) extends JSONParser {
       }
       (src, tgt, QueryParam(LabelWithDirection(label.id.get, dir)))
     }
-
     (quads, isReverted)
   }
 
