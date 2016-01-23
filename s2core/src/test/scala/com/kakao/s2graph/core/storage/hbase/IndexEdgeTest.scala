@@ -8,23 +8,24 @@ import org.scalatest.{FunSuite, Matchers}
 
 class IndexEdgeTest extends FunSuite with Matchers with TestCommonWithModels {
   initTests()
+
   /** note that props have to be properly set up for equals */
   test("test serializer/deserializer for index edge.") {
     val ts = System.currentTimeMillis()
-    val from = InnerVal.withLong(1, label.schemaVersion)
-    val to = InnerVal.withLong(101, label.schemaVersion)
+    val from = InnerVal.withLong(1, labelV4.schemaVersion)
+    val to = InnerVal.withLong(101, labelV4.schemaVersion)
     val vertexId = SourceVertexId(HBaseType.DEFAULT_COL_ID, from)
     val tgtVertexId = TargetVertexId(HBaseType.DEFAULT_COL_ID, to)
     val vertex = Vertex(vertexId, ts)
     val tgtVertex = Vertex(tgtVertexId, ts)
-    val labelWithDir = LabelWithDirection(label.id.get, 0)
+    val labelWithDir = LabelWithDirection(labelV4.id.get, 0)
 
-    val tsInnerVal = InnerVal.withLong(ts, label.schemaVersion)
+    val tsInnerVal = InnerVal.withLong(ts, labelV4.schemaVersion)
     val props = Map(LabelMeta.timeStampSeq -> tsInnerVal,
-      1.toByte -> InnerVal.withDouble(2.1, label.schemaVersion))
+      1.toByte -> InnerVal.withDouble(2.1, labelV4.schemaVersion))
     val indexEdge = IndexEdge(vertex, tgtVertex, labelWithDir, 0, ts, LabelIndex.DefaultSeq, props)
     val _indexEdge = graph.storage.indexEdgeDeserializer.fromKeyValues(queryParam,
-      graph.storage.indexEdgeSerializer(indexEdge).toKeyValues, label.schemaVersion, None)
+      graph.storage.indexEdgeSerializer(indexEdge).toKeyValues, labelV4.schemaVersion, None)
     println(indexEdge)
     println(_indexEdge)
     indexEdge should be(_indexEdge)
@@ -33,22 +34,22 @@ class IndexEdgeTest extends FunSuite with Matchers with TestCommonWithModels {
 
   test("test serializer/deserializer for degree edge.") {
     val ts = System.currentTimeMillis()
-    val from = InnerVal.withLong(1, label.schemaVersion)
-    val to = InnerVal.withStr("0", label.schemaVersion)
+    val from = InnerVal.withLong(1, labelV4.schemaVersion)
+    val to = InnerVal.withStr("0", labelV4.schemaVersion)
     val vertexId = SourceVertexId(HBaseType.DEFAULT_COL_ID, from)
     val tgtVertexId = TargetVertexId(HBaseType.DEFAULT_COL_ID, to)
     val vertex = Vertex(vertexId, ts)
     val tgtVertex = Vertex(tgtVertexId, ts)
-    val labelWithDir = LabelWithDirection(label.id.get, 0)
+    val labelWithDir = LabelWithDirection(labelV4.id.get, 0)
 
-    val tsInnerVal = InnerVal.withLong(ts, label.schemaVersion)
+    val tsInnerVal = InnerVal.withLong(ts, labelV4.schemaVersion)
     val props = Map(
-      LabelMeta.degreeSeq -> InnerVal.withLong(10, label.schemaVersion),
+      LabelMeta.degreeSeq -> InnerVal.withLong(10, labelV4.schemaVersion),
       LabelMeta.timeStampSeq -> tsInnerVal)
 
     val indexEdge = IndexEdge(vertex, tgtVertex, labelWithDir, 0, ts, LabelIndex.DefaultSeq, props)
     val _indexEdge = graph.storage.indexEdgeDeserializer.fromKeyValues(queryParam,
-      graph.storage.indexEdgeSerializer(indexEdge).toKeyValues, label.schemaVersion, None)
+      graph.storage.indexEdgeSerializer(indexEdge).toKeyValues, labelV4.schemaVersion, None)
     println(indexEdge)
     println(_indexEdge)
     indexEdge should be(_indexEdge)
@@ -57,22 +58,22 @@ class IndexEdgeTest extends FunSuite with Matchers with TestCommonWithModels {
 
   test("test serializer/deserializer for incrementCount index edge.") {
     val ts = System.currentTimeMillis()
-    val from = InnerVal.withLong(1, label.schemaVersion)
-    val to = InnerVal.withLong(101, label.schemaVersion)
+    val from = InnerVal.withLong(1, labelV4.schemaVersion)
+    val to = InnerVal.withLong(101, labelV4.schemaVersion)
     val vertexId = SourceVertexId(HBaseType.DEFAULT_COL_ID, from)
     val tgtVertexId = TargetVertexId(HBaseType.DEFAULT_COL_ID, to)
     val vertex = Vertex(vertexId, ts)
     val tgtVertex = Vertex(tgtVertexId, ts)
-    val labelWithDir = LabelWithDirection(label.id.get, 0)
+    val labelWithDir = LabelWithDirection(labelV4.id.get, 0)
 
-    val tsInnerVal = InnerVal.withLong(ts, label.schemaVersion)
+    val tsInnerVal = InnerVal.withLong(ts, labelV4.schemaVersion)
     val props = Map(LabelMeta.timeStampSeq -> tsInnerVal,
-      1.toByte -> InnerVal.withDouble(2.1, label.schemaVersion),
-      LabelMeta.countSeq -> InnerVal.withLong(10, label.schemaVersion))
-    
+      1.toByte -> InnerVal.withDouble(2.1, labelV4.schemaVersion),
+      LabelMeta.countSeq -> InnerVal.withLong(10, labelV4.schemaVersion))
+
     val indexEdge = IndexEdge(vertex, tgtVertex, labelWithDir, 0, ts, LabelIndex.DefaultSeq, props)
     val _indexEdge = graph.storage.indexEdgeDeserializer.fromKeyValues(queryParam,
-      graph.storage.indexEdgeSerializer(indexEdge).toKeyValues, label.schemaVersion, None)
+      graph.storage.indexEdgeSerializer(indexEdge).toKeyValues, labelV4.schemaVersion, None)
     println(indexEdge)
     println(_indexEdge)
     indexEdge should be(_indexEdge)

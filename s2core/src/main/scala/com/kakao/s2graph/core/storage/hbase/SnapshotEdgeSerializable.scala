@@ -27,8 +27,8 @@ class SnapshotEdgeSerializable(snapshotEdge: SnapshotEdge) extends HSerializable
 
   override def toKeyValues: Seq[SKeyValue] = {
     label.schemaVersion match {
-      case HBaseType.VERSION3 => toKeyValuesInnerV3
-      case _ => toKeyValuesInner
+      case HBaseType.VERSION1 | HBaseType.VERSION2 => toKeyValuesInner
+      case _ => toKeyValuesInnerV3
     }
   }
 

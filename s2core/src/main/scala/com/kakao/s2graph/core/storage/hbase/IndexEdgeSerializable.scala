@@ -21,7 +21,7 @@ case class IndexEdgeSerializable(indexEdge: IndexEdge) extends HSerializable[Ind
   /** version 1 and version 2 share same code for serialize row key part */
   override def toKeyValues: Seq[SKeyValue] = {
     label.schemaVersion match {
-      case HBaseType.VERSION3 => toKeyValuesInnerRow
+      case HBaseType.VERSION4 => toKeyValuesInnerRow
       case _ => toKeyValuesInner
     }
   }
@@ -74,8 +74,9 @@ case class IndexEdgeSerializable(indexEdge: IndexEdge) extends HSerializable[Ind
           case Some(vId) => idxPropsBytes
         }
 
-    val rowBytes = Bytes.add(row, qualifier)
-    val qualifierBytes = Array.fill(1)(indexEdge.op)
+    val rowBytes = Bytes.add(row, Array.fill(1)(indexEdge.op), qualifier)
+//    val qualifierBytes = Array.fill(1)(indexEdge.op)
+    val qualifierBytes = Array.empty[Byte]
 
     val value =
       if (indexEdge.degreeEdge)

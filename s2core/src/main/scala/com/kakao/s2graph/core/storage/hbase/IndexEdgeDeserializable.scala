@@ -62,7 +62,7 @@ class IndexEdgeDeserializable extends HDeserializable[IndexEdge] {
                                               version: String,
                                               cacheElementOpt: Option[IndexEdge] = None): IndexEdge = {
     version match {
-      case HBaseType.VERSION3 => fromKeyValuesInnerRow(queryParam, _kvs, version, cacheElementOpt)
+      case HBaseType.VERSION4 => fromKeyValuesInnerRow(queryParam, _kvs, version, cacheElementOpt)
       case _ => fromKeyValuesInner(queryParam, _kvs, version, cacheElementOpt)
     }
   }
@@ -140,7 +140,8 @@ class IndexEdgeDeserializable extends HDeserializable[IndexEdge] {
     pos += 4
     val (labelIdxSeq, isInverted) = bytesToLabelIndexSeqWithIsInverted(kv.row, pos)
     pos += 1
-
+    val op = kv.row(pos)
+    pos += 1
     if (pos == kv.row.length) {
       // degree
       val degreeVal = Bytes.toLong(kv.value)
@@ -148,7 +149,6 @@ class IndexEdgeDeserializable extends HDeserializable[IndexEdge] {
       val props = Map(LabelMeta.timeStampSeq -> InnerVal.withLong(ts, version),
         LabelMeta.degreeSeq -> InnerVal.withLong(degreeVal, version))
       val tgtVertexId = VertexId(HBaseType.DEFAULT_COL_ID, InnerVal.withStr("0", version))
-      val op = GraphUtil.operations("insert")
       IndexEdge(Vertex(srcVertexId, ts), Vertex(tgtVertexId, ts), labelWithDir, op, ts, labelIdxSeq, props)
     } else {
       // not degree edge
@@ -173,8 +173,6 @@ class IndexEdgeDeserializable extends HDeserializable[IndexEdge] {
           case None => tgtVertexIdRaw
           case Some(vId) => TargetVertexId(HBaseType.DEFAULT_COL_ID, vId)
         }
-
-      val op = kv.qualifier.head
 
       val (props, _) = if (op == GraphUtil.operations("incrementCount")) {
         val countVal = Bytes.toLong(kv.value)
