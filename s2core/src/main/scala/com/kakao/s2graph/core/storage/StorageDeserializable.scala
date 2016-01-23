@@ -78,5 +78,8 @@ object StorageDeserializable {
 }
 
 trait StorageDeserializable[E] {
-  def fromKeyValues[T: CanSKeyValue](queryParam: QueryParam, kvs: Seq[T], version: String, cacheElementOpt: Option[E]): E
+  def fromKeyValues[T: CanSKeyValue](queryParam: QueryParam,
+                                     kvs: Seq[T],
+                                     version: String,
+                                     cacheElementOpt: Option[E]): E
 }
