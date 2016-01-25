@@ -159,36 +159,40 @@ class AsynchbaseStorage(override val config: Config, vertexCache: Cache[Integer,
     Future.sequence(Seq(edgeFuture, vertexFuture)).map(_.forall(identity))
   }
 
-  override def mutateEdges(edges: Seq[Edge], withWait: Boolean): Future[Seq[Boolean]] = {
-    val edgeGrouped = edges.groupBy { edge => (edge.label, edge.srcVertex.innerId, edge.tgtVertex.innerId) } toSeq
+  override def mutateEdges(_edges: Seq[Edge], withWait: Boolean): Future[Seq[Boolean]] = {
+    val (deleteAllEdges, edges) = _edges.partition(_.op == GraphUtil.operations("deleteAll"))
 
-    val ret = edgeGrouped.map { case ((label, srcId, tgtId), edges) =>
+    // process deleteAll op
+    val deleteAllFutures = deleteAllEdges.map { edge =>
+      deleteAllAdjacentEdges(Seq(edge.srcVertex), Seq(edge.label), edge.labelWithDir.dir, edge.ts)
+    }
+
+    // process other op
+    val grouped = edges.groupBy { edge => (edge.label, edge.srcVertex.innerId, edge.tgtVertex.innerId) } toSeq
+    val mutateEdges = grouped.map { case ((label, srcId, tgtId), edges) =>
       val head = edges.head
 
-      if (head.op == GraphUtil.operations("deleteAll")) {
-        val deleteAllFutures = edges.map { edge =>
-          deleteAllAdjacentEdges(Seq(edge.srcVertex), Seq(edge.label), edge.labelWithDir.dir, edge.ts)
-        }
-        Future.sequence(deleteAllFutures).map(_.forall(identity))
+      val strongConsistency = edges.head.label.consistencyLevel == "strong"
+      if (strongConsistency) {
+        val edgeFuture = mutateEdgesInner(edges, strongConsistency, withWait)(Edge.buildOperation)
+
+        //TODO: decide what we will do on failure on vertex put
+        val vertexFuture = writeAsyncSimple(head.label.hbaseZkAddr,
+          mutationBuilder.buildVertexPutsAsync(head), withWait)
+        Future.sequence(Seq(edgeFuture, vertexFuture)).map(_.forall(identity))
       } else {
-        val strongConsistency = head.label.consistencyLevel == "strong"
-
-        if (strongConsistency) {
-          val edgeFuture = mutateEdgesInner(edges, strongConsistency, withWait)(Edge.buildOperation)
-
-          //TODO: decide what we will do on failure on vertex put
-          val vertexFuture = writeAsyncSimple(head.label.hbaseZkAddr,
-            mutationBuilder.buildVertexPutsAsync(head), withWait)
-          Future.sequence(Seq(edgeFuture, vertexFuture)).map(_.forall(identity))
-        } else {
-          Future.sequence(edges.map { edge =>
-            mutateEdge(edge, withWait = withWait)
-          }).map(_.forall(identity))
-        }
+        Future.sequence(edges.map { edge =>
+          mutateEdge(edge, withWait = withWait)
+        }).map(_.forall(identity))
       }
     }
 
-    Future.sequence(ret)
+    val opRes = for {
+      deleteRet <- Future.sequence(deleteAllFutures)
+      mutateRet <- Future.sequence(mutateEdges)
+    } yield deleteRet ++ mutateRet
+
+    opRes
   }
 
   def mutateVertex(vertex: Vertex, withWait: Boolean): Future[Boolean] = {
