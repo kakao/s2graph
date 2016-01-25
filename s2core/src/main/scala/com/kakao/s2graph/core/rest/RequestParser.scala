@@ -261,7 +261,7 @@ class RequestParser(config: Config) extends JSONParser {
       val limit = {
         parse[Option[Int]](labelGroup, "limit") match {
           case None => defaultLimit
-          case Some(l) if l < 0 => Int.MaxValue
+          case Some(l) if l < 0 => Int.MaxValue - 1 // prevent overflow
           case Some(l) if l >= 0 =>
             val default = hardLimit
             Math.min(l, default)

@@ -150,35 +150,36 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
          */
         val indexEdgeOpt = edge.edgesWithIndex.filter(edgeWithIndex => edgeWithIndex.labelIndex.seq == queryParam.labelOrderSeq).headOption
         val indexEdge = indexEdgeOpt.getOrElse(throw new RuntimeException(s"Can`t find index for query $queryParam"))
-        val idxPropsMap = indexEdge.orders.toMap
-        val idxPropsBytes = propsToBytes(indexEdge.orders)
+//        val idxPropsMap = indexEdge.orders.toMap
+//        val idxPropsBytes = propsToBytes(indexEdge.orders)
 
         val srcIdBytes = VertexId.toSourceVertexId(indexEdge.srcVertex.id).bytes
         val labelWithDirBytes = indexEdge.labelWithDir.bytes
         val labelIndexSeqWithIsInvertedBytes = StorageSerializable.labelOrderSeqWithIsInverted(indexEdge.labelIndexSeq, isInverted = false)
+//        val labelIndexSeqWithIsInvertedStopBytes =  StorageSerializable.labelOrderSeqWithIsInverted(indexEdge.labelIndexSeq, isInverted = true)
+        val baseKey = Bytes.add(srcIdBytes, labelWithDirBytes, Bytes.add(labelIndexSeqWithIsInvertedBytes, Array.fill(1)(edge.op)))
+        val (startKey, stopKey) =
+          if (queryParam.columnRangeFilter != null) {
+            // interval is set.
+            (Bytes.add(baseKey, queryParam.columnRangeFilterMinBytes), Bytes.add(baseKey, queryParam.columnRangeFilterMaxBytes))
+          } else {
+            /**
+             * note: since propsToBytes encode size of property map at first byte, we are sure about max value here
+             */
+            (baseKey, Bytes.add(baseKey, Array.fill(1)(-1)))
+          }
+//        logger.debug(s"[StartKey]: ${startKey.toList}")
+//        logger.debug(s"[StopKey]: ${stopKey.toList}")
 
-        val row = Bytes.add(srcIdBytes, labelWithDirBytes, labelIndexSeqWithIsInvertedBytes)
-        //    logger.error(s"${row.toList}\n${srcIdBytes.toList}\n${labelWithDirBytes.toList}\n${labelIndexSeqWithIsInvertedBytes.toList}")
-        val tgtIdBytes = VertexId.toTargetVertexId(indexEdge.tgtVertex.id).bytes
-        val qualifier =
-          if (indexEdge.degreeEdge) Array.empty[Byte]
-          else
-            idxPropsMap.get(LabelMeta.toSeq) match {
-              case None => Bytes.add(idxPropsBytes, tgtIdBytes)
-              case Some(vId) => idxPropsBytes
-            }
-//        val rowBytes = Bytes.add(row, Array.fill(1)(indexEdge.op), qualifier)
-        val rowBytes = Bytes.add(row, Array.fill(1)(indexEdge.op))
-        val stopKey = Bytes.add(srcIdBytes, labelWithDirBytes, StorageSerializable.labelOrderSeqWithIsInverted(indexEdge.labelIndexSeq, isInverted = true))
-
-        //          logger.error(s"${rowBytes.toList}")
-        //          logger.error(s"${stopKey.toList}")
-        scanner.setStartKey(rowBytes)
+        scanner.setStartKey(startKey)
         scanner.setStopKey(stopKey)
 
+        if (queryParam.limit == Int.MinValue) logger.debug(s"MinValue: $queryParam")
 
         scanner.setMaxVersions(1)
         scanner.setMaxNumRows(queryParam.limit)
+        scanner.setMaxTimestamp(maxTs)
+        scanner.setMinTimestamp(minTs)
 
         // SET option for this rpc properly.
         scanner
@@ -200,62 +201,6 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
         get
     }
   }
-//  private def buildRequestInner(queryRequest: QueryRequest): AnyRef = {
-//    val srcVertex = queryRequest.vertex
-//    //    val tgtVertexOpt = queryRequest.tgtVertexOpt
-//    val edgeCf = HSerializable.edgeCf
-//    val queryParam = queryRequest.queryParam
-//    val tgtVertexIdOpt = queryParam.tgtVertexInnerIdOpt
-//    val label = queryParam.label
-//    val labelWithDir = queryParam.labelWithDir
-//    val (srcColumn, tgtColumn) = label.srcTgtColumn(labelWithDir.dir)
-//    val (srcInnerId, tgtInnerId) = tgtVertexIdOpt match {
-//      case Some(tgtVertexId) => // _to is given.
-//        /** we use toSnapshotEdge so dont need to swap src, tgt */
-//        val src = InnerVal.convertVersion(srcVertex.innerId, srcColumn.columnType, label.schemaVersion)
-//        val tgt = InnerVal.convertVersion(tgtVertexId, tgtColumn.columnType, label.schemaVersion)
-//        (src, tgt)
-//      case None =>
-//        val src = InnerVal.convertVersion(srcVertex.innerId, srcColumn.columnType, label.schemaVersion)
-//        (src, src)
-//    }
-//
-//    val (srcVId, tgtVId) = (SourceVertexId(srcColumn.id.get, srcInnerId), TargetVertexId(tgtColumn.id.get, tgtInnerId))
-//    val (srcV, tgtV) = (Vertex(srcVId), Vertex(tgtVId))
-//    val currentTs = System.currentTimeMillis()
-//    val propsWithTs = Map(LabelMeta.timeStampSeq -> InnerValLikeWithTs(InnerVal.withLong(currentTs, label.schemaVersion), currentTs)).toMap
-//    val edge = Edge(srcV, tgtV, labelWithDir, propsWithTs = propsWithTs)
-//
-//    val get = if (tgtVertexIdOpt.isDefined) {
-//      val snapshotEdge = edge.toSnapshotEdge
-//      val kv = storage.snapshotEdgeSerializer(snapshotEdge).toKeyValues.head
-//      new GetRequest(label.hbaseTableName.getBytes, kv.row, edgeCf, kv.qualifier)
-//    } else {
-//      val indexedEdgeOpt = edge.edgesWithIndex.find(e => e.labelIndexSeq == queryParam.labelOrderSeq)
-//      assert(indexedEdgeOpt.isDefined)
-//
-//      val indexedEdge = indexedEdgeOpt.get
-//      val kv = storage.indexEdgeSerializer(indexedEdge).toKeyValues.head
-//      val table = label.hbaseTableName.getBytes
-//      val rowKey = kv.row
-//      val cf = edgeCf
-//      new GetRequest(table, rowKey, cf)
-//    }
-//
-//    val (minTs, maxTs) = queryParam.duration.getOrElse((0L, Long.MaxValue))
-//
-//    get.maxVersions(1)
-//    get.setFailfast(true)
-//    get.setMaxResultsPerColumnFamily(queryParam.limit)
-//    get.setRowOffsetPerColumnFamily(queryParam.offset)
-//    get.setMinTimestamp(minTs)
-//    get.setMaxTimestamp(maxTs)
-//    get.setTimeout(queryParam.rpcTimeoutInMillis)
-//
-//    if (queryParam.columnRangeFilter != null) get.setFilter(queryParam.columnRangeFilter)
-//
-//    get
-//  }
 
   override def getEdge(srcVertex: Vertex, tgtVertex: Vertex, queryParam: QueryParam, isInnerCall: Boolean): Deferred[QueryRequestWithResult] = {
     //TODO:
@@ -336,35 +281,31 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
     val queryParam = queryRequest.queryParam
     val cacheTTL = queryParam.cacheTTLInMillis
     val request = buildRequest(queryRequest)
-    val defer =
-      if (cacheTTL <= 0) fetchInner(request)
-      else {
-        val cacheKeyBytes = Bytes.add(queryRequest.query.cacheKeyBytes, toCacheKeyBytes(request))
-        val cacheKey = queryParam.toCacheKey(cacheKeyBytes)
 
-        val cacheVal = futureCache.getIfPresent(cacheKey)
-        cacheVal match {
-          case null =>
-            // here there is no promise set up for this cacheKey so we need to set promise on future cache.
-            val promise = new Deferred[QueryRequestWithResult]()
-            val now = System.currentTimeMillis()
-            val (cachedAt, defer) = futureCache.asMap().putIfAbsent(cacheKey, (now, promise)) match {
-              case null =>
-                fetchInner(request) withCallback { queryRequestWithResult =>
-                  promise.callback(queryRequestWithResult)
-                  queryRequestWithResult
-                }
-                (now, promise)
-              case oldVal => oldVal
-            }
-            checkAndExpire(request, cacheKey, cacheTTL, cachedAt, defer)
-          case (cachedAt, defer) =>
-            checkAndExpire(request, cacheKey, cacheTTL, cachedAt, defer)
-        }
+    if (cacheTTL <= 0) fetchInner(request)
+    else {
+      val cacheKeyBytes = Bytes.add(queryRequest.query.cacheKeyBytes, toCacheKeyBytes(request))
+      val cacheKey = queryParam.toCacheKey(cacheKeyBytes)
+
+      val cacheVal = futureCache.getIfPresent(cacheKey)
+      cacheVal match {
+        case null =>
+          // here there is no promise set up for this cacheKey so we need to set promise on future cache.
+          val promise = new Deferred[QueryRequestWithResult]()
+          val now = System.currentTimeMillis()
+          val (cachedAt, defer) = futureCache.asMap().putIfAbsent(cacheKey, (now, promise)) match {
+            case null =>
+              fetchInner(request) withCallback { queryRequestWithResult =>
+                promise.callback(queryRequestWithResult)
+                queryRequestWithResult
+              }
+              (now, promise)
+            case oldVal => oldVal
+          }
+          checkAndExpire(request, cacheKey, cacheTTL, cachedAt, defer)
+        case (cachedAt, defer) =>
+          checkAndExpire(request, cacheKey, cacheTTL, cachedAt, defer)
       }
-
-    defer.withCallback { queryRequestWithResult =>
-      queryRequestWithResult.copy(queryRequest = queryRequest)
     }
   }
 

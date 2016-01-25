@@ -3,7 +3,6 @@ package com.kakao.s2graph.core.storage.hbase
 import com.kakao.s2graph.core.mysqls.LabelMeta
 import com.kakao.s2graph.core.storage.{StorageSerializable, SKeyValue}
 import com.kakao.s2graph.core.types.{HBaseType, VertexId}
-import com.kakao.s2graph.core.utils.logger
 import com.kakao.s2graph.core.{GraphUtil, IndexEdge}
 import org.apache.hadoop.hbase.util.Bytes
 

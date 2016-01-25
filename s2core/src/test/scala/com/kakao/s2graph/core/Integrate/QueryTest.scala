@@ -193,32 +193,32 @@ class QueryTest extends IntegrateCommon with BeforeAndAfterEach {
     result = getEdgesSync(queryIndex(Seq(0), "idx_2"))
     ((result \ "results").as[List[JsValue]].head \\ "weight").head should be(JsNumber(30))
   }
-
-  //    "checkEdges" in {
-  //      running(FakeApplication()) {
-  //        val json = Json.parse( s"""
-  //         [{"from": 0, "to": 1, "label": "$testLabelName"},
-  //          {"from": 0, "to": 2, "label": "$testLabelName"}]
-  //        """)
-  //
-  //        def checkEdges(queryJson: JsValue): JsValue = {
-  //          val ret = route(FakeRequest(POST, "/graphs/checkEdges").withJsonBody(queryJson)).get
-  //          contentAsJson(ret)
-  //        }
-  //
-  //        val res = checkEdges(json)
-  //        val typeRes = res.isInstanceOf[JsArray]
-  //        typeRes must equalTo(true)
-  //
-  //        val fst = res.as[Seq[JsValue]].head \ "to"
-  //        fst.as[Int] must equalTo(1)
-  //
-  //        val snd = res.as[Seq[JsValue]].last \ "to"
-  //        snd.as[Int] must equalTo(2)
-  //      }
-  //    }
-
-
+//
+//  //    "checkEdges" in {
+//  //      running(FakeApplication()) {
+//  //        val json = Json.parse( s"""
+//  //         [{"from": 0, "to": 1, "label": "$testLabelName"},
+//  //          {"from": 0, "to": 2, "label": "$testLabelName"}]
+//  //        """)
+//  //
+//  //        def checkEdges(queryJson: JsValue): JsValue = {
+//  //          val ret = route(FakeRequest(POST, "/graphs/checkEdges").withJsonBody(queryJson)).get
+//  //          contentAsJson(ret)
+//  //        }
+//  //
+//  //        val res = checkEdges(json)
+//  //        val typeRes = res.isInstanceOf[JsArray]
+//  //        typeRes must equalTo(true)
+//  //
+//  //        val fst = res.as[Seq[JsValue]].head \ "to"
+//  //        fst.as[Int] must equalTo(1)
+//  //
+//  //        val snd = res.as[Seq[JsValue]].last \ "to"
+//  //        snd.as[Int] must equalTo(2)
+//  //      }
+//  //    }
+//
+//
   test("duration") {
     def queryDuration(ids: Seq[Int], from: Int, to: Int) = {
       val $from = Json.arr(
@@ -351,6 +351,11 @@ class QueryTest extends IntegrateCommon with BeforeAndAfterEach {
     (edges(0) \ "to").as[Long] should be(4)
     (edges(1) \ "to").as[Long] should be(3)
 
+    /**
+     * pagination
+     * this test cases will be broken with v4.
+     */
+     
     result = getEdgesSync(querySingle(src, offset = 1, limit = 2))
 
     edges = (result \ "results").as[List[JsValue]]
