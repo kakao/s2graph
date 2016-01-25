@@ -126,7 +126,8 @@ class IndexEdgeDeserializable extends HDeserializable[IndexEdge] {
     IndexEdge(Vertex(srcVertexId, ts), Vertex(tgtVertexId, ts), labelWithDir, op, ts, labelIdxSeq, mergedProps)
 
   }
-  def fromKeyValuesInnerRow[T: CanSKeyValue](queryParam: QueryParam, _kvs: Seq[T], version: String, cacheElementOpt: Option[IndexEdge] = None): IndexEdge = {
+  def fromKeyValuesInnerRow[T: CanSKeyValue](queryParam: QueryParam,
+                                             _kvs: Seq[T], version: String, cacheElementOpt: Option[IndexEdge] = None): IndexEdge = {
     assert(_kvs.size == 1)
 
     val kvs = _kvs.map { kv => implicitly[CanSKeyValue[T]].toSKeyValue(kv) }
@@ -142,6 +143,19 @@ class IndexEdgeDeserializable extends HDeserializable[IndexEdge] {
     pos += 1
     val op = kv.row(pos)
     pos += 1
+    val msg = Seq(
+      pos,
+      kv.row.length,
+      srcVertexId, srcIdLen,
+      labelWithDir,
+      labelIdxSeq, isInverted,
+      op,
+      kv.row.toList,
+      kv.cf.toList,
+      kv.qualifier.toList,
+      kv.value.toList
+    )
+    logger.error(s"${msg.mkString("\n")}")
     if (pos == kv.row.length) {
       // degree
       val degreeVal = Bytes.toLong(kv.value)

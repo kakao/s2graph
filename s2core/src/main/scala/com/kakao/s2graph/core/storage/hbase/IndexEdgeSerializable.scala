@@ -65,12 +65,12 @@ case class IndexEdgeSerializable(indexEdge: IndexEdge) extends HSerializable[Ind
 
     val row = Bytes.add(srcIdBytes, labelWithDirBytes, labelIndexSeqWithIsInvertedBytes)
     //    logger.error(s"${row.toList}\n${srcIdBytes.toList}\n${labelWithDirBytes.toList}\n${labelIndexSeqWithIsInvertedBytes.toList}")
-    val tgtIdBytes = VertexId.toTargetVertexId(indexEdge.tgtVertex.id).bytes
+
     val qualifier =
       if (indexEdge.degreeEdge) Array.empty[Byte]
       else
         idxPropsMap.get(LabelMeta.toSeq) match {
-          case None => Bytes.add(idxPropsBytes, tgtIdBytes)
+          case None => Bytes.add(idxPropsBytes, VertexId.toTargetVertexId(indexEdge.tgtVertex.id).bytes)
           case Some(vId) => idxPropsBytes
         }
 
@@ -87,6 +87,7 @@ case class IndexEdgeSerializable(indexEdge: IndexEdge) extends HSerializable[Ind
 
     val kv = SKeyValue(table, rowBytes, cf, qualifierBytes, value, indexEdge.version)
 
+    logger.error(s"${kv.row.toList}, ${kv.qualifier.toList}, ${kv.value.toList}")
     Seq(kv)
   }
 }

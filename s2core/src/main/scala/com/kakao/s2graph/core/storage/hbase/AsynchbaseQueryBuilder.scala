@@ -6,12 +6,13 @@ import com.google.common.cache.CacheBuilder
 import com.kakao.s2graph.core.GraphExceptions.FetchTimeoutException
 import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.mysqls.LabelMeta
-import com.kakao.s2graph.core.storage.{CanSKeyValue, SKeyValue, QueryBuilder}
+import com.kakao.s2graph.core.storage.StorageSerializable._
+import com.kakao.s2graph.core.storage.{StorageSerializable, CanSKeyValue, SKeyValue, QueryBuilder}
 import com.kakao.s2graph.core.types._
 import com.kakao.s2graph.core.utils.{Extensions, logger}
 import com.stumbleupon.async.Deferred
 import org.apache.hadoop.hbase.util.Bytes
-import org.hbase.async.{Scanner, KeyValue, GetRequest}
+import org.hbase.async.{RowFilter, Scanner, KeyValue, GetRequest}
 import scala.annotation.tailrec
 import scala.collection.JavaConversions._
 import scala.collection.{Map, Seq}
@@ -51,9 +52,14 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
       case getRequest: GetRequest => storage.client.get(getRequest)
       case scanner: Scanner => scanner.nextRows().withCallback { kvsLs =>
         val ls = new util.ArrayList[KeyValue]
-        kvsLs.foreach { kvs =>
-          kvs.foreach { kv =>
-            ls.add(kv)
+        if (kvsLs == null) {
+
+        } else {
+          kvsLs.foreach { kvs =>
+            if (kvs != null) kvs.foreach { kv => ls.add(kv) }
+            else {
+
+            }
           }
         }
         ls
@@ -140,8 +146,37 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
         scanner.setFamily(edgeCf)
         if (tgtVertexIdOpt.isDefined) scanner.setStartKey(kv.row)
         else {
+          /**
+           * TODO: remove this part.
+           */
+          val indexEdgeOpt = edge.edgesWithIndex.filter(edgeWithIndex => edgeWithIndex.labelIndex.seq == queryParam.labelOrderSeq).headOption
+          val indexEdge = indexEdgeOpt.getOrElse(throw new RuntimeException(s"Can`t find index for query $queryParam"))
+          val idxPropsMap = indexEdge.orders.toMap
+          val idxPropsBytes = propsToBytes(indexEdge.orders)
 
+          val srcIdBytes = VertexId.toSourceVertexId(indexEdge.srcVertex.id).bytes
+          val labelWithDirBytes = indexEdge.labelWithDir.bytes
+          val labelIndexSeqWithIsInvertedBytes = StorageSerializable.labelOrderSeqWithIsInverted(indexEdge.labelIndexSeq, isInverted = false)
+
+          val row = Bytes.add(srcIdBytes, labelWithDirBytes, labelIndexSeqWithIsInvertedBytes)
+          //    logger.error(s"${row.toList}\n${srcIdBytes.toList}\n${labelWithDirBytes.toList}\n${labelIndexSeqWithIsInvertedBytes.toList}")
+          val tgtIdBytes = VertexId.toTargetVertexId(indexEdge.tgtVertex.id).bytes
+          val qualifier =
+            if (indexEdge.degreeEdge) Array.empty[Byte]
+            else
+              idxPropsMap.get(LabelMeta.toSeq) match {
+                case None => Bytes.add(idxPropsBytes, tgtIdBytes)
+                case Some(vId) => idxPropsBytes
+              }
+          val rowBytes = Bytes.add(row, Array.fill(1)(indexEdge.op), qualifier)
+          val stopKey = Bytes.add(srcIdBytes, labelWithDirBytes, StorageSerializable.labelOrderSeqWithIsInverted(indexEdge.labelIndexSeq, isInverted = true))
+
+//          logger.error(s"${rowBytes.toList}")
+//          logger.error(s"${stopKey.toList}")
+          scanner.setStartKey(rowBytes)
+          scanner.setStopKey(stopKey)
         }
+
         scanner.setMaxVersions(1)
         scanner.setMaxNumRows(queryParam.limit)
         // SET option for this rpc properly.
