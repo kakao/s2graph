@@ -10,16 +10,18 @@ import scala.util.Try
 
 abstract class QueryBuilder[R, T](storage: Storage)(implicit ec: ExecutionContext) {
 
-  def buildRequest(queryRequest: QueryRequest): R
+//  def buildRequest(queryRequest: QueryRequest): R
 
   def getEdge(srcVertex: Vertex, tgtVertex: Vertex, queryParam: QueryParam, isInnerCall: Boolean): T
+
+  def fetchSnapshotEdge(edge: Edge): Future[(QueryParam, Option[Edge], Option[SKeyValue])]
 
   def fetch(queryRequest: QueryRequest,
             prevStepScore: Double,
             isInnerCall: Boolean,
             parentEdges: Seq[EdgeWithScore]): T
 
-  def toCacheKeyBytes(request: R): Array[Byte]
+//  def toCacheKeyBytes(request: R): Array[Byte]
 
   def fetches(queryRequestWithScoreLs: Seq[(QueryRequest, Double)],
               prevStepEdges: Map[VertexId, Seq[EdgeWithScore]]): Future[Seq[QueryRequestWithResult]]

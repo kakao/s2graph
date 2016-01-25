@@ -3,14 +3,15 @@ package com.kakao.s2graph.core.storage.hbase
 import java.util
 import java.util.concurrent.{Executors, TimeUnit}
 import com.google.common.cache.CacheBuilder
+import com.kakao.s2graph.core.GraphExceptions.FetchTimeoutException
 import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.mysqls.LabelMeta
-import com.kakao.s2graph.core.storage.QueryBuilder
+import com.kakao.s2graph.core.storage.{CanSKeyValue, SKeyValue, QueryBuilder}
 import com.kakao.s2graph.core.types._
 import com.kakao.s2graph.core.utils.{Extensions, logger}
 import com.stumbleupon.async.Deferred
 import org.apache.hadoop.hbase.util.Bytes
-import org.hbase.async.GetRequest
+import org.hbase.async.{KeyValue, GetRequest}
 import scala.annotation.tailrec
 import scala.collection.JavaConversions._
 import scala.collection.{Map, Seq}
@@ -44,8 +45,30 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
 //      logger.info(s"[FutureCache]: ${futureCache.stats()}")
 //    }
 //  }, scheduleTime, scheduleTime, TimeUnit.SECONDS)
+  override def fetchSnapshotEdge(edge: Edge): Future[(QueryParam, Option[Edge], Option[SKeyValue])] = {
+    val labelWithDir = edge.labelWithDir
+    val queryParam = QueryParam(labelWithDir)
+    val _queryParam = queryParam.tgtVertexInnerIdOpt(Option(edge.tgtVertex.innerId))
+    val q = Query.toQuery(Seq(edge.srcVertex), _queryParam)
+    val queryRequest = QueryRequest(q, 0, edge.srcVertex, _queryParam)
 
-  override def buildRequest(queryRequest: QueryRequest): GetRequest = {
+    storage.client.get(buildRequest(queryRequest)) withCallback { kvs =>
+      val (edgeOpt, kvOpt) =
+        if (kvs.isEmpty()) (None, None)
+        else {
+          val _edgeOpt = storage.toEdges(kvs, queryParam, 1.0, isInnerCall = true, parentEdges = Nil).headOption.map(_.edge)
+          val _kvOpt = kvs.headOption.map(kv => implicitly[CanSKeyValue[KeyValue]].toSKeyValue(kv))
+          (_edgeOpt, _kvOpt)
+        }
+      (queryParam, edgeOpt, kvOpt)
+    } recoverWith { ex =>
+      logger.error(s"fetchQueryParam failed. fallback return.", ex)
+      throw new FetchTimeoutException(s"${edge.toLogString}")
+    } toFuture
+  }
+
+//  override def buildRequest(queryRequest: QueryRequest): GetRequest = {
+  private def buildRequest(queryRequest: QueryRequest): GetRequest = {
     val srcVertex = queryRequest.vertex
     //    val tgtVertexOpt = queryRequest.tgtVertexOpt
     val edgeCf = HSerializable.edgeCf
@@ -215,7 +238,8 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
   }
 
 
-  override def toCacheKeyBytes(getRequest: GetRequest): Array[Byte] = {
+//  override def toCacheKeyBytes(getRequest: GetRequest): Array[Byte] = {
+  def toCacheKeyBytes(getRequest: GetRequest): Array[Byte] = {
     var bytes = getRequest.key()
     Option(getRequest.family()).foreach(family => bytes = Bytes.add(bytes, family))
     Option(getRequest.qualifiers()).foreach {

@@ -50,6 +50,7 @@ object GraphSubscriberHelper extends WithKafka {
   private val maxTryNum = 10
 
   var g: Graph = null
+  var management: Management = null
   val conns = new scala.collection.mutable.HashMap[String, Connection]()
 
   def toOption(s: String) = {
@@ -64,6 +65,7 @@ object GraphSubscriberHelper extends WithKafka {
 
     if (g == null) {
       g = new Graph(config)(ExecutionContext.Implicits.global)
+      management = new Management(g)
     }
   }
 

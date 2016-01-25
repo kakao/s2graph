@@ -7,7 +7,7 @@ import com.kakao.s2graph.core.ExceptionHandler.{Key, Val, KafkaMessage}
 import com.kakao.s2graph.core.GraphExceptions.FetchTimeoutException
 import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.mysqls.{Label, LabelMeta}
-import com.kakao.s2graph.core.storage.Storage
+import com.kakao.s2graph.core.storage.{SKeyValue, Storage}
 import com.kakao.s2graph.core.types._
 import com.kakao.s2graph.core.utils.{Extensions, logger}
 import com.stumbleupon.async.Deferred
@@ -284,26 +284,8 @@ class AsynchbaseStorage(override val config: Config, vertexCache: Cache[Integer,
     }
   }
 
-  private def fetchSnapshotEdge(edge: Edge): Future[(QueryParam, Option[Edge], Option[KeyValue])] = {
-    val labelWithDir = edge.labelWithDir
-    val queryParam = QueryParam(labelWithDir)
-    val _queryParam = queryParam.tgtVertexInnerIdOpt(Option(edge.tgtVertex.innerId))
-    val q = Query.toQuery(Seq(edge.srcVertex), _queryParam)
-    val queryRequest = QueryRequest(q, 0, edge.srcVertex, _queryParam)
-
-    client.get(queryBuilder.buildRequest(queryRequest)) withCallback { kvs =>
-      val (edgeOpt, kvOpt) =
-        if (kvs.isEmpty()) (None, None)
-        else {
-          val _edgeOpt = toEdges(kvs, queryParam, 1.0, isInnerCall = true, parentEdges = Nil).headOption.map(_.edge)
-          val _kvOpt = kvs.headOption
-          (_edgeOpt, _kvOpt)
-        }
-      (queryParam, edgeOpt, kvOpt)
-    } recoverWith { ex =>
-      logger.error(s"fetchQueryParam failed. fallback return.", ex)
-      throw new FetchTimeoutException(s"${edge.toLogString}")
-    } toFuture
+  private def fetchSnapshotEdge(edge: Edge): Future[(QueryParam, Option[Edge], Option[SKeyValue])] = {
+    queryBuilder.fetchSnapshotEdge(edge)
   }
 
 
@@ -320,7 +302,7 @@ class AsynchbaseStorage(override val config: Config, vertexCache: Cache[Integer,
     logger.debug(msg)
   }
 
-  private def buildLockEdge(snapshotEdgeOpt: Option[Edge], edge: Edge, kvOpt: Option[KeyValue]) = {
+  private def buildLockEdge(snapshotEdgeOpt: Option[Edge], edge: Edge, kvOpt: Option[SKeyValue]) = {
     val currentTs = System.currentTimeMillis()
     val lockTs = snapshotEdgeOpt match {
       case None => Option(currentTs)
@@ -330,7 +312,7 @@ class AsynchbaseStorage(override val config: Config, vertexCache: Cache[Integer,
           case Some(pendingEdge) => pendingEdge.lockTs
         }
     }
-    val newVersion = kvOpt.map(_.timestamp()).getOrElse(edge.ts) + 1
+    val newVersion = kvOpt.map(_.timestamp).getOrElse(edge.ts) + 1
     //      snapshotEdgeOpt.map(_.version).getOrElse(edge.ts) + 1
     val pendingEdge = edge.copy(version = newVersion, statusCode = 1, lockTs = lockTs)
     val base = snapshotEdgeOpt match {
@@ -486,10 +468,10 @@ class AsynchbaseStorage(override val config: Config, vertexCache: Cache[Integer,
 
   private def commitUpdate(edge: Edge,
                            statusCode: Byte)(snapshotEdgeOpt: Option[Edge],
-                                             kvOpt: Option[KeyValue],
+                                             kvOpt: Option[SKeyValue],
                                              edgeUpdate: EdgeMutate): Future[Boolean] = {
     val label = edge.label
-    def oldBytes = kvOpt.map(_.value()).getOrElse(Array.empty)
+    def oldBytes = kvOpt.map(_.value).getOrElse(Array.empty)
     //    def oldBytes = snapshotEdgeOpt.map { e =>
     //      snapshotEdgeSerializer(e.toSnapshotEdge).toKeyValues.head.value
     //    }.getOrElse(Array.empty)
