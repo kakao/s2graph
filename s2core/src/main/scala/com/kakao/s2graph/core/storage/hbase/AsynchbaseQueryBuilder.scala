@@ -11,7 +11,7 @@ import com.kakao.s2graph.core.types._
 import com.kakao.s2graph.core.utils.{Extensions, logger}
 import com.stumbleupon.async.Deferred
 import org.apache.hadoop.hbase.util.Bytes
-import org.hbase.async.{KeyValue, GetRequest}
+import org.hbase.async.{Scanner, KeyValue, GetRequest}
 import scala.annotation.tailrec
 import scala.collection.JavaConversions._
 import scala.collection.{Map, Seq}
@@ -45,6 +45,22 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
 //      logger.info(s"[FutureCache]: ${futureCache.stats()}")
 //    }
 //  }, scheduleTime, scheduleTime, TimeUnit.SECONDS)
+
+  private def fetchKeyValues(hbaseRpc: AnyRef): Deferred[util.ArrayList[KeyValue]] = {
+    hbaseRpc match {
+      case getRequest: GetRequest => storage.client.get(getRequest)
+      case scanner: Scanner => scanner.nextRows().withCallback { kvsLs =>
+        val ls = new util.ArrayList[KeyValue]
+        kvsLs.foreach { kvs =>
+          kvs.foreach { kv =>
+            ls.add(kv)
+          }
+        }
+        ls
+      }
+      case _ => Deferred.fromError(new RuntimeException(s"fetchKeyValues failed. $hbaseRpc"))
+    }
+  }
   override def fetchSnapshotEdge(edge: Edge): Future[(QueryParam, Option[Edge], Option[SKeyValue])] = {
     val labelWithDir = edge.labelWithDir
     val queryParam = QueryParam(labelWithDir)
@@ -52,7 +68,8 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
     val q = Query.toQuery(Seq(edge.srcVertex), _queryParam)
     val queryRequest = QueryRequest(q, 0, edge.srcVertex, _queryParam)
 
-    storage.client.get(buildRequest(queryRequest)) withCallback { kvs =>
+
+    fetchKeyValues(buildRequest(queryRequest)) withCallback { kvs =>
       val (edgeOpt, kvOpt) =
         if (kvs.isEmpty()) (None, None)
         else {
@@ -68,11 +85,72 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
   }
 
 //  override def buildRequest(queryRequest: QueryRequest): GetRequest = {
-  private def buildRequest(queryRequest: QueryRequest): GetRequest = {
+  private def buildRequest(queryRequest: QueryRequest): AnyRef = {
+    val label = queryRequest.queryParam.label
+    if (label.schemaVersion == HBaseType.VERSION4) buildRequestInnerV4(queryRequest)
+    else buildRequestInner(queryRequest)
+  }
+
+  private def buildRequestInnerV4(queryRequest: QueryRequest): AnyRef = {
     val srcVertex = queryRequest.vertex
     //    val tgtVertexOpt = queryRequest.tgtVertexOpt
     val edgeCf = HSerializable.edgeCf
+    val queryParam = queryRequest.queryParam
+    val tgtVertexIdOpt = queryParam.tgtVertexInnerIdOpt
+    val label = queryParam.label
+    val labelWithDir = queryParam.labelWithDir
+    val (srcColumn, tgtColumn) = label.srcTgtColumn(labelWithDir.dir)
+    val (srcInnerId, tgtInnerId) = tgtVertexIdOpt match {
+      case Some(tgtVertexId) => // _to is given.
+        /** we use toSnapshotEdge so dont need to swap src, tgt */
+        val src = InnerVal.convertVersion(srcVertex.innerId, srcColumn.columnType, label.schemaVersion)
+        val tgt = InnerVal.convertVersion(tgtVertexId, tgtColumn.columnType, label.schemaVersion)
+        (src, tgt)
+      case None =>
+        val src = InnerVal.convertVersion(srcVertex.innerId, srcColumn.columnType, label.schemaVersion)
+        (src, src)
+    }
 
+    val (srcVId, tgtVId) = (SourceVertexId(srcColumn.id.get, srcInnerId), TargetVertexId(tgtColumn.id.get, tgtInnerId))
+    val (srcV, tgtV) = (Vertex(srcVId), Vertex(tgtVId))
+    val currentTs = System.currentTimeMillis()
+    val propsWithTs = Map(LabelMeta.timeStampSeq -> InnerValLikeWithTs(InnerVal.withLong(currentTs, label.schemaVersion), currentTs)).toMap
+    val edge = Edge(srcV, tgtV, labelWithDir, propsWithTs = propsWithTs)
+
+    val get = if (tgtVertexIdOpt.isDefined) {
+      val snapshotEdge = edge.toSnapshotEdge
+      val kv = storage.snapshotEdgeSerializer(snapshotEdge).toKeyValues.head
+      new GetRequest(label.hbaseTableName.getBytes, kv.row, edgeCf, kv.qualifier)
+    } else {
+      val indexedEdgeOpt = edge.edgesWithIndex.find(e => e.labelIndexSeq == queryParam.labelOrderSeq)
+      assert(indexedEdgeOpt.isDefined)
+
+      val indexedEdge = indexedEdgeOpt.get
+      val kv = storage.indexEdgeSerializer(indexedEdge).toKeyValues.head
+      val table = label.hbaseTableName.getBytes
+      val rowKey = kv.row
+      val cf = edgeCf
+      new GetRequest(table, rowKey, cf)
+    }
+
+    val (minTs, maxTs) = queryParam.duration.getOrElse((0L, Long.MaxValue))
+
+    get.maxVersions(1)
+    get.setFailfast(true)
+    get.setMaxResultsPerColumnFamily(queryParam.limit)
+    get.setRowOffsetPerColumnFamily(queryParam.offset)
+    get.setMinTimestamp(minTs)
+    get.setMaxTimestamp(maxTs)
+    get.setTimeout(queryParam.rpcTimeoutInMillis)
+
+    if (queryParam.columnRangeFilter != null) get.setFilter(queryParam.columnRangeFilter)
+
+    get
+  }
+  private def buildRequestInner(queryRequest: QueryRequest): AnyRef = {
+    val srcVertex = queryRequest.vertex
+    //    val tgtVertexOpt = queryRequest.tgtVertexOpt
+    val edgeCf = HSerializable.edgeCf
     val queryParam = queryRequest.queryParam
     val tgtVertexIdOpt = queryParam.tgtVertexInnerIdOpt
     val label = queryParam.label
@@ -164,8 +242,8 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
 
     }
 
-    def fetchInner(request: GetRequest) = {
-      storage.client.get(request) withCallback { kvs =>
+    def fetchInner(hbaseRpc: AnyRef) = {
+      fetchKeyValues(hbaseRpc) withCallback { kvs =>
         val edgeWithScores = storage.toEdges(kvs.toSeq, queryRequest.queryParam, prevStepScore, isInnerCall, parentEdges)
         val resultEdgesWithScores = if (queryRequest.queryParam.sample >= 0 ) {
           sample(edgeWithScores, queryRequest.queryParam.sample)
@@ -176,7 +254,7 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
         QueryRequestWithResult(queryRequest, QueryResult(isFailure = true))
       }
     }
-    def checkAndExpire(request: GetRequest,
+    def checkAndExpire(hbaseRpc: AnyRef,
                        cacheKey: Long,
                        cacheTTL: Long,
                        cachedAt: Long,
@@ -189,7 +267,7 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
           case null =>
             // only one thread succeed to come here concurrently
             // initiate fetch to storage then add callback on complete to finish promise.
-            fetchInner(request) withCallback { queryRequestWithResult =>
+            fetchInner(hbaseRpc) withCallback { queryRequestWithResult =>
               newPromise.callback(queryRequestWithResult)
               queryRequestWithResult
             }
@@ -239,19 +317,26 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
 
 
 //  override def toCacheKeyBytes(getRequest: GetRequest): Array[Byte] = {
-  def toCacheKeyBytes(getRequest: GetRequest): Array[Byte] = {
-    var bytes = getRequest.key()
-    Option(getRequest.family()).foreach(family => bytes = Bytes.add(bytes, family))
-    Option(getRequest.qualifiers()).foreach {
-      qualifiers =>
-        qualifiers.filter(q => Option(q).isDefined).foreach {
-          qualifier =>
-            bytes = Bytes.add(bytes, qualifier)
-        }
+  def toCacheKeyBytes(hbaseRpc: AnyRef): Array[Byte] = {
+    hbaseRpc match {
+      case getRequest: GetRequest => getRequest.key()
+      case scanner: Scanner => scanner.getCurrentKey()
+      case _ =>
+        logger.error(s"toCacheKeyBytes failed. not supported class type. $hbaseRpc")
+        Array.empty[Byte]
     }
+//
+//    Option(getRequest.family()).foreach(family => bytes = Bytes.add(bytes, family))
+//    Option(getRequest.qualifiers()).foreach {
+//      qualifiers =>
+//        qualifiers.filter(q => Option(q).isDefined).foreach {
+//          qualifier =>
+//            bytes = Bytes.add(bytes, qualifier)
+//        }
+//    }
     //    if (getRequest.family() != null) bytes = Bytes.add(bytes, getRequest.family())
     //    if (getRequest.qualifiers() != null) getRequest.qualifiers().filter(_ != null).foreach(q => bytes = Bytes.add(bytes, q))
-    bytes
+//    bytes
   }
 
 
