@@ -38,6 +38,7 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
 //  .weakKeys()
   .maximumSize(maxSize).build[java.lang.Long, (Long, Deferred[QueryRequestWithResult])]()
 
+  val emptyKeyValues = new util.ArrayList[KeyValue]()
   //  val scheduleTime = 60L * 60
 //  val scheduleTime = 60
 //  val scheduler = Executors.newScheduledThreadPool(1)
@@ -51,20 +52,26 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
   private def fetchKeyValues(hbaseRpc: AnyRef): Deferred[util.ArrayList[KeyValue]] = {
     hbaseRpc match {
       case getRequest: GetRequest => storage.client.get(getRequest)
-      case scanner: Scanner => scanner.nextRows().withCallback { kvsLs =>
-        val ls = new util.ArrayList[KeyValue]
-        if (kvsLs == null) {
+      case scanner: Scanner =>
+        scanner.nextRows().withCallback { kvsLs =>
+          val ls = new util.ArrayList[KeyValue]
+          if (kvsLs == null) {
 
-        } else {
-          kvsLs.foreach { kvs =>
-            if (kvs != null) kvs.foreach { kv => ls.add(kv) }
-            else {
+          } else {
+            kvsLs.foreach { kvs =>
+              if (kvs != null) kvs.foreach { kv => ls.add(kv) }
+              else {
 
+              }
             }
           }
+          scanner.close()
+          ls
+        }.recoverWith { ex =>
+          logger.error(s"fetchKeyValues failed.", ex)
+          scanner.close()
+          emptyKeyValues
         }
-        ls
-      }
       case _ => Deferred.fromError(new RuntimeException(s"fetchKeyValues failed. $hbaseRpc"))
     }
   }
@@ -163,7 +170,7 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
           if (queryParam.columnRangeFilter != null) {
             // interval is set.
             val _startKey = queryParam.cursorOpt match {
-              case Some(cursor) => Base64.getDecoder.decode(cursor)
+              case Some(cursor) => Bytes.add(Base64.getDecoder.decode(cursor), Array.fill(1)(0))
               case None => Bytes.add(baseKey, queryParam.columnRangeFilterMinBytes)
             }
             (_startKey, Bytes.add(baseKey, queryParam.columnRangeFilterMaxBytes))
@@ -172,7 +179,7 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
              * note: since propsToBytes encode size of property map at first byte, we are sure about max value here
              */
             val _startKey = queryParam.cursorOpt match {
-              case Some(cursor) => Base64.getDecoder.decode(cursor)
+              case Some(cursor) => Bytes.add(Base64.getDecoder.decode(cursor), Array.fill(1)(0))
               case None => baseKey
             }
             (_startKey, Bytes.add(baseKey, Array.fill(1)(-1)))
@@ -189,7 +196,7 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
         scanner.setMaxNumRows(queryParam.limit)
         scanner.setMaxTimestamp(maxTs)
         scanner.setMinTimestamp(minTs)
-
+        scanner.setRpcTimeout(queryParam.rpcTimeoutInMillis)
         // SET option for this rpc properly.
         scanner
       case _ =>
