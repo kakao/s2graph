@@ -1,5 +1,7 @@
 package com.kakao.s2graph.core
 
+import java.util.Base64
+
 import com.kakao.s2graph.core.GraphExceptions.BadQueryException
 
 import com.kakao.s2graph.core.mysqls.{ColumnMeta, Label, ServiceColumn, LabelMeta}
@@ -163,6 +165,7 @@ object PostProcess extends JSONParser {
     val excludeIds = resultInnerIds(exclude).map(innerId => innerId -> true).toMap
 
     val degrees = ListBuffer[JsValue]()
+    val cursors = ListBuffer[JsValue]()
     val rawEdges = ListBuffer[(Map[String, JsValue], Double, (Any, Any, Any, Any))]()
 
     if (queryRequestWithResultLs.isEmpty) {
@@ -181,6 +184,23 @@ object PostProcess extends JSONParser {
       }
 
       /** build result jsons */
+      for {
+        queryRequestWithResult <- queryRequestWithResultLs
+        (queryRequest, queryResult) = QueryRequestWithResult.unapply(queryRequestWithResult).get
+        queryParam = queryRequest.queryParam
+        edgeWithScore = queryResult.edgeWithScoreLs.last
+        (edge, score) = EdgeWithScore.unapply(edgeWithScore).get
+      } {
+        // edge to json
+        val (srcColumn, _) = queryParam.label.srcTgtColumn(edge.labelWithDir.dir)
+        val fromOpt = innerValToJsValue(edge.srcVertex.id.innerId, srcColumn.columnType)
+        cursors += Json.obj(
+          "from" -> fromOpt.get,
+          "label" -> queryRequest.queryParam.label.label,
+          "direction" -> GraphUtil.fromDirection(edge.labelWithDir.dir),
+          "cursor" -> Base64.getEncoder.encodeToString(queryResult.tailCursor)
+        )
+      }
       for {
         queryRequestWithResult <- queryRequestWithResultLs
         (queryRequest, queryResult) = QueryRequestWithResult.unapply(queryRequestWithResult).get
@@ -246,6 +266,7 @@ object PostProcess extends JSONParser {
         Json.obj(
           "size" -> edges.size,
           "degrees" -> degrees,
+          "cursors" -> cursors,
           "results" -> edges,
           "impressionId" -> query.impressionId()
         )
@@ -296,6 +317,7 @@ object PostProcess extends JSONParser {
         Json.obj(
           "size" -> groupedSortedJsons.size,
           "degrees" -> degrees,
+          "cursors" -> cursors,
           "results" -> groupedSortedJsons,
           "impressionId" -> query.impressionId()
         )

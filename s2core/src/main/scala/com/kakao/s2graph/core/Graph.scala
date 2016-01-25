@@ -140,7 +140,7 @@ object Graph {
       (duplicateEdge, aggregatedScore) <- fetchDuplicatedEdges(edge, score, hashKey, duplicateEdges) if aggregatedScore >= queryParam.threshold
     } yield EdgeWithScore(duplicateEdge, aggregatedScore)
 
-    QueryRequestWithResult(queryRequest, QueryResult(edgesWithScores))
+    QueryRequestWithResult(queryRequest, queryResult.copy(edgeWithScoreLs = edgesWithScores))
   }
 
   def fetchDuplicatedEdges(edge: Edge,

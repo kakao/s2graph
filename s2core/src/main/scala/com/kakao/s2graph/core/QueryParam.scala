@@ -275,6 +275,8 @@ case class QueryParam(labelWithDir: LabelWithDirection, timestamp: Long = System
   var columnRangeFilterMinBytes = Array.empty[Byte]
   var columnRangeFilterMaxBytes = Array.empty[Byte]
 
+  var cursorOpt: Option[String] = None
+
   lazy val srcColumnWithDir = label.srcColumnWithDir(labelWithDir.dir)
   lazy val tgtColumnWithDir = label.tgtColumnWithDir(labelWithDir.dir)
 
@@ -460,6 +462,11 @@ case class QueryParam(labelWithDir: LabelWithDirection, timestamp: Long = System
 
   def whereRawOpt(sqlOpt: Option[String]): QueryParam = {
     this.whereRawOpt = sqlOpt
+    this
+  }
+
+  def cursorOpt(cursorOpt: Option[String]): QueryParam = {
+    this.cursorOpt = cursorOpt
     this
   }
 

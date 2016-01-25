@@ -1,6 +1,7 @@
 package com.kakao.s2graph.core.storage.hbase
 
 import java.util
+import java.util.Base64
 import java.util.concurrent.{Executors, TimeUnit}
 import com.google.common.cache.CacheBuilder
 import com.kakao.s2graph.core.GraphExceptions.FetchTimeoutException
@@ -161,12 +162,20 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
         val (startKey, stopKey) =
           if (queryParam.columnRangeFilter != null) {
             // interval is set.
-            (Bytes.add(baseKey, queryParam.columnRangeFilterMinBytes), Bytes.add(baseKey, queryParam.columnRangeFilterMaxBytes))
+            val _startKey = queryParam.cursorOpt match {
+              case Some(cursor) => Base64.getDecoder.decode(cursor)
+              case None => Bytes.add(baseKey, queryParam.columnRangeFilterMinBytes)
+            }
+            (_startKey, Bytes.add(baseKey, queryParam.columnRangeFilterMaxBytes))
           } else {
             /**
              * note: since propsToBytes encode size of property map at first byte, we are sure about max value here
              */
-            (baseKey, Bytes.add(baseKey, Array.fill(1)(-1)))
+            val _startKey = queryParam.cursorOpt match {
+              case Some(cursor) => Base64.getDecoder.decode(cursor)
+              case None => baseKey
+            }
+            (_startKey, Bytes.add(baseKey, Array.fill(1)(-1)))
           }
 //        logger.debug(s"[StartKey]: ${startKey.toList}")
 //        logger.debug(s"[StopKey]: ${stopKey.toList}")
@@ -246,7 +255,7 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
         val resultEdgesWithScores = if (queryRequest.queryParam.sample >= 0 ) {
           sample(edgeWithScores, queryRequest.queryParam.sample)
         } else edgeWithScores
-        QueryRequestWithResult(queryRequest, QueryResult(resultEdgesWithScores))
+        QueryRequestWithResult(queryRequest, QueryResult(resultEdgesWithScores, tailCursor = kvs.last.key()))
       } recoverWith { ex =>
         logger.error(s"fetchQueryParam failed. fallback return.", ex)
         QueryRequestWithResult(queryRequest, QueryResult(isFailure = true))
