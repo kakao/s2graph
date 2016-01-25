@@ -86,67 +86,9 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
 
 //  override def buildRequest(queryRequest: QueryRequest): GetRequest = {
   private def buildRequest(queryRequest: QueryRequest): AnyRef = {
-    val label = queryRequest.queryParam.label
-    if (label.schemaVersion == HBaseType.VERSION4) buildRequestInnerV4(queryRequest)
-    else buildRequestInner(queryRequest)
+    buildRequestInner(queryRequest)
   }
 
-  private def buildRequestInnerV4(queryRequest: QueryRequest): AnyRef = {
-    val srcVertex = queryRequest.vertex
-    //    val tgtVertexOpt = queryRequest.tgtVertexOpt
-    val edgeCf = HSerializable.edgeCf
-    val queryParam = queryRequest.queryParam
-    val tgtVertexIdOpt = queryParam.tgtVertexInnerIdOpt
-    val label = queryParam.label
-    val labelWithDir = queryParam.labelWithDir
-    val (srcColumn, tgtColumn) = label.srcTgtColumn(labelWithDir.dir)
-    val (srcInnerId, tgtInnerId) = tgtVertexIdOpt match {
-      case Some(tgtVertexId) => // _to is given.
-        /** we use toSnapshotEdge so dont need to swap src, tgt */
-        val src = InnerVal.convertVersion(srcVertex.innerId, srcColumn.columnType, label.schemaVersion)
-        val tgt = InnerVal.convertVersion(tgtVertexId, tgtColumn.columnType, label.schemaVersion)
-        (src, tgt)
-      case None =>
-        val src = InnerVal.convertVersion(srcVertex.innerId, srcColumn.columnType, label.schemaVersion)
-        (src, src)
-    }
-
-    val (srcVId, tgtVId) = (SourceVertexId(srcColumn.id.get, srcInnerId), TargetVertexId(tgtColumn.id.get, tgtInnerId))
-    val (srcV, tgtV) = (Vertex(srcVId), Vertex(tgtVId))
-    val currentTs = System.currentTimeMillis()
-    val propsWithTs = Map(LabelMeta.timeStampSeq -> InnerValLikeWithTs(InnerVal.withLong(currentTs, label.schemaVersion), currentTs)).toMap
-    val edge = Edge(srcV, tgtV, labelWithDir, propsWithTs = propsWithTs)
-
-    val get = if (tgtVertexIdOpt.isDefined) {
-      val snapshotEdge = edge.toSnapshotEdge
-      val kv = storage.snapshotEdgeSerializer(snapshotEdge).toKeyValues.head
-      new GetRequest(label.hbaseTableName.getBytes, kv.row, edgeCf, kv.qualifier)
-    } else {
-      val indexedEdgeOpt = edge.edgesWithIndex.find(e => e.labelIndexSeq == queryParam.labelOrderSeq)
-      assert(indexedEdgeOpt.isDefined)
-
-      val indexedEdge = indexedEdgeOpt.get
-      val kv = storage.indexEdgeSerializer(indexedEdge).toKeyValues.head
-      val table = label.hbaseTableName.getBytes
-      val rowKey = kv.row
-      val cf = edgeCf
-      new GetRequest(table, rowKey, cf)
-    }
-
-    val (minTs, maxTs) = queryParam.duration.getOrElse((0L, Long.MaxValue))
-
-    get.maxVersions(1)
-    get.setFailfast(true)
-    get.setMaxResultsPerColumnFamily(queryParam.limit)
-    get.setRowOffsetPerColumnFamily(queryParam.offset)
-    get.setMinTimestamp(minTs)
-    get.setMaxTimestamp(maxTs)
-    get.setTimeout(queryParam.rpcTimeoutInMillis)
-
-    if (queryParam.columnRangeFilter != null) get.setFilter(queryParam.columnRangeFilter)
-
-    get
-  }
   private def buildRequestInner(queryRequest: QueryRequest): AnyRef = {
     val srcVertex = queryRequest.vertex
     //    val tgtVertexOpt = queryRequest.tgtVertexOpt
@@ -173,36 +115,111 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
     val propsWithTs = Map(LabelMeta.timeStampSeq -> InnerValLikeWithTs(InnerVal.withLong(currentTs, label.schemaVersion), currentTs)).toMap
     val edge = Edge(srcV, tgtV, labelWithDir, propsWithTs = propsWithTs)
 
-    val get = if (tgtVertexIdOpt.isDefined) {
+    val kv = if (tgtVertexIdOpt.isDefined) {
       val snapshotEdge = edge.toSnapshotEdge
-      val kv = storage.snapshotEdgeSerializer(snapshotEdge).toKeyValues.head
-      new GetRequest(label.hbaseTableName.getBytes, kv.row, edgeCf, kv.qualifier)
+      storage.snapshotEdgeSerializer(snapshotEdge).toKeyValues.head
+//      new GetRequest(label.hbaseTableName.getBytes, kv.row, edgeCf, kv.qualifier)
     } else {
       val indexedEdgeOpt = edge.edgesWithIndex.find(e => e.labelIndexSeq == queryParam.labelOrderSeq)
       assert(indexedEdgeOpt.isDefined)
 
       val indexedEdge = indexedEdgeOpt.get
-      val kv = storage.indexEdgeSerializer(indexedEdge).toKeyValues.head
-      val table = label.hbaseTableName.getBytes
-      val rowKey = kv.row
-      val cf = edgeCf
-      new GetRequest(table, rowKey, cf)
+      storage.indexEdgeSerializer(indexedEdge).toKeyValues.head
+//      val kv = storage.indexEdgeSerializer(indexedEdge).toKeyValues.head
+//      val table = label.hbaseTableName.getBytes
+//      val rowKey = kv.row
+//      val cf = edgeCf
+//      new GetRequest(table, rowKey, cf)
     }
 
     val (minTs, maxTs) = queryParam.duration.getOrElse((0L, Long.MaxValue))
 
-    get.maxVersions(1)
-    get.setFailfast(true)
-    get.setMaxResultsPerColumnFamily(queryParam.limit)
-    get.setRowOffsetPerColumnFamily(queryParam.offset)
-    get.setMinTimestamp(minTs)
-    get.setMaxTimestamp(maxTs)
-    get.setTimeout(queryParam.rpcTimeoutInMillis)
+    label.schemaVersion match {
+      case HBaseType.VERSION4 =>
+        val scanner = storage.client.newScanner(label.hbaseTableName.getBytes)
+        scanner.setFamily(edgeCf)
+        if (tgtVertexIdOpt.isDefined) scanner.setStartKey(kv.row)
+        else {
 
-    if (queryParam.columnRangeFilter != null) get.setFilter(queryParam.columnRangeFilter)
+        }
+        scanner.setMaxVersions(1)
+        scanner.setMaxNumRows(queryParam.limit)
+        // SET option for this rpc properly.
+        scanner
+      case _ =>
+        val get =
+          if (tgtVertexIdOpt.isDefined) new GetRequest(label.hbaseTableName.getBytes, kv.row, edgeCf, kv.qualifier)
+          else new GetRequest(label.hbaseTableName.getBytes, kv.row, edgeCf)
 
-    get
+        get.maxVersions(1)
+        get.setFailfast(true)
+        get.setMaxResultsPerColumnFamily(queryParam.limit)
+        get.setRowOffsetPerColumnFamily(queryParam.offset)
+        get.setMinTimestamp(minTs)
+        get.setMaxTimestamp(maxTs)
+        get.setTimeout(queryParam.rpcTimeoutInMillis)
+
+        if (queryParam.columnRangeFilter != null) get.setFilter(queryParam.columnRangeFilter)
+
+        get
+    }
   }
+//  private def buildRequestInner(queryRequest: QueryRequest): AnyRef = {
+//    val srcVertex = queryRequest.vertex
+//    //    val tgtVertexOpt = queryRequest.tgtVertexOpt
+//    val edgeCf = HSerializable.edgeCf
+//    val queryParam = queryRequest.queryParam
+//    val tgtVertexIdOpt = queryParam.tgtVertexInnerIdOpt
+//    val label = queryParam.label
+//    val labelWithDir = queryParam.labelWithDir
+//    val (srcColumn, tgtColumn) = label.srcTgtColumn(labelWithDir.dir)
+//    val (srcInnerId, tgtInnerId) = tgtVertexIdOpt match {
+//      case Some(tgtVertexId) => // _to is given.
+//        /** we use toSnapshotEdge so dont need to swap src, tgt */
+//        val src = InnerVal.convertVersion(srcVertex.innerId, srcColumn.columnType, label.schemaVersion)
+//        val tgt = InnerVal.convertVersion(tgtVertexId, tgtColumn.columnType, label.schemaVersion)
+//        (src, tgt)
+//      case None =>
+//        val src = InnerVal.convertVersion(srcVertex.innerId, srcColumn.columnType, label.schemaVersion)
+//        (src, src)
+//    }
+//
+//    val (srcVId, tgtVId) = (SourceVertexId(srcColumn.id.get, srcInnerId), TargetVertexId(tgtColumn.id.get, tgtInnerId))
+//    val (srcV, tgtV) = (Vertex(srcVId), Vertex(tgtVId))
+//    val currentTs = System.currentTimeMillis()
+//    val propsWithTs = Map(LabelMeta.timeStampSeq -> InnerValLikeWithTs(InnerVal.withLong(currentTs, label.schemaVersion), currentTs)).toMap
+//    val edge = Edge(srcV, tgtV, labelWithDir, propsWithTs = propsWithTs)
+//
+//    val get = if (tgtVertexIdOpt.isDefined) {
+//      val snapshotEdge = edge.toSnapshotEdge
+//      val kv = storage.snapshotEdgeSerializer(snapshotEdge).toKeyValues.head
+//      new GetRequest(label.hbaseTableName.getBytes, kv.row, edgeCf, kv.qualifier)
+//    } else {
+//      val indexedEdgeOpt = edge.edgesWithIndex.find(e => e.labelIndexSeq == queryParam.labelOrderSeq)
+//      assert(indexedEdgeOpt.isDefined)
+//
+//      val indexedEdge = indexedEdgeOpt.get
+//      val kv = storage.indexEdgeSerializer(indexedEdge).toKeyValues.head
+//      val table = label.hbaseTableName.getBytes
+//      val rowKey = kv.row
+//      val cf = edgeCf
+//      new GetRequest(table, rowKey, cf)
+//    }
+//
+//    val (minTs, maxTs) = queryParam.duration.getOrElse((0L, Long.MaxValue))
+//
+//    get.maxVersions(1)
+//    get.setFailfast(true)
+//    get.setMaxResultsPerColumnFamily(queryParam.limit)
+//    get.setRowOffsetPerColumnFamily(queryParam.offset)
+//    get.setMinTimestamp(minTs)
+//    get.setMaxTimestamp(maxTs)
+//    get.setTimeout(queryParam.rpcTimeoutInMillis)
+//
+//    if (queryParam.columnRangeFilter != null) get.setFilter(queryParam.columnRangeFilter)
+//
+//    get
+//  }
 
   override def getEdge(srcVertex: Vertex, tgtVertex: Vertex, queryParam: QueryParam, isInnerCall: Boolean): Deferred[QueryRequestWithResult] = {
     //TODO:
