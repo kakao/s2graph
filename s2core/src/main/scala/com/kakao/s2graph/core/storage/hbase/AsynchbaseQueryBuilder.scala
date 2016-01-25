@@ -141,44 +141,45 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
     val (minTs, maxTs) = queryParam.duration.getOrElse((0L, Long.MaxValue))
 
     label.schemaVersion match {
-      case HBaseType.VERSION4 =>
+      case HBaseType.VERSION4 if tgtVertexIdOpt.isEmpty =>
         val scanner = storage.client.newScanner(label.hbaseTableName.getBytes)
         scanner.setFamily(edgeCf)
-        if (tgtVertexIdOpt.isDefined) scanner.setStartKey(kv.row)
-        else {
-          /**
-           * TODO: remove this part.
-           */
-          val indexEdgeOpt = edge.edgesWithIndex.filter(edgeWithIndex => edgeWithIndex.labelIndex.seq == queryParam.labelOrderSeq).headOption
-          val indexEdge = indexEdgeOpt.getOrElse(throw new RuntimeException(s"Can`t find index for query $queryParam"))
-          val idxPropsMap = indexEdge.orders.toMap
-          val idxPropsBytes = propsToBytes(indexEdge.orders)
 
-          val srcIdBytes = VertexId.toSourceVertexId(indexEdge.srcVertex.id).bytes
-          val labelWithDirBytes = indexEdge.labelWithDir.bytes
-          val labelIndexSeqWithIsInvertedBytes = StorageSerializable.labelOrderSeqWithIsInverted(indexEdge.labelIndexSeq, isInverted = false)
+        /**
+         * TODO: remove this part.
+         */
+        val indexEdgeOpt = edge.edgesWithIndex.filter(edgeWithIndex => edgeWithIndex.labelIndex.seq == queryParam.labelOrderSeq).headOption
+        val indexEdge = indexEdgeOpt.getOrElse(throw new RuntimeException(s"Can`t find index for query $queryParam"))
+        val idxPropsMap = indexEdge.orders.toMap
+        val idxPropsBytes = propsToBytes(indexEdge.orders)
 
-          val row = Bytes.add(srcIdBytes, labelWithDirBytes, labelIndexSeqWithIsInvertedBytes)
-          //    logger.error(s"${row.toList}\n${srcIdBytes.toList}\n${labelWithDirBytes.toList}\n${labelIndexSeqWithIsInvertedBytes.toList}")
-          val tgtIdBytes = VertexId.toTargetVertexId(indexEdge.tgtVertex.id).bytes
-          val qualifier =
-            if (indexEdge.degreeEdge) Array.empty[Byte]
-            else
-              idxPropsMap.get(LabelMeta.toSeq) match {
-                case None => Bytes.add(idxPropsBytes, tgtIdBytes)
-                case Some(vId) => idxPropsBytes
-              }
-          val rowBytes = Bytes.add(row, Array.fill(1)(indexEdge.op), qualifier)
-          val stopKey = Bytes.add(srcIdBytes, labelWithDirBytes, StorageSerializable.labelOrderSeqWithIsInverted(indexEdge.labelIndexSeq, isInverted = true))
+        val srcIdBytes = VertexId.toSourceVertexId(indexEdge.srcVertex.id).bytes
+        val labelWithDirBytes = indexEdge.labelWithDir.bytes
+        val labelIndexSeqWithIsInvertedBytes = StorageSerializable.labelOrderSeqWithIsInverted(indexEdge.labelIndexSeq, isInverted = false)
 
-//          logger.error(s"${rowBytes.toList}")
-//          logger.error(s"${stopKey.toList}")
-          scanner.setStartKey(rowBytes)
-          scanner.setStopKey(stopKey)
-        }
+        val row = Bytes.add(srcIdBytes, labelWithDirBytes, labelIndexSeqWithIsInvertedBytes)
+        //    logger.error(s"${row.toList}\n${srcIdBytes.toList}\n${labelWithDirBytes.toList}\n${labelIndexSeqWithIsInvertedBytes.toList}")
+        val tgtIdBytes = VertexId.toTargetVertexId(indexEdge.tgtVertex.id).bytes
+        val qualifier =
+          if (indexEdge.degreeEdge) Array.empty[Byte]
+          else
+            idxPropsMap.get(LabelMeta.toSeq) match {
+              case None => Bytes.add(idxPropsBytes, tgtIdBytes)
+              case Some(vId) => idxPropsBytes
+            }
+//        val rowBytes = Bytes.add(row, Array.fill(1)(indexEdge.op), qualifier)
+        val rowBytes = Bytes.add(row, Array.fill(1)(indexEdge.op))
+        val stopKey = Bytes.add(srcIdBytes, labelWithDirBytes, StorageSerializable.labelOrderSeqWithIsInverted(indexEdge.labelIndexSeq, isInverted = true))
+
+        //          logger.error(s"${rowBytes.toList}")
+        //          logger.error(s"${stopKey.toList}")
+        scanner.setStartKey(rowBytes)
+        scanner.setStopKey(stopKey)
+
 
         scanner.setMaxVersions(1)
         scanner.setMaxNumRows(queryParam.limit)
+
         // SET option for this rpc properly.
         scanner
       case _ =>
@@ -398,7 +399,7 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
       (queryRequest, prevStepScore) <- queryRequestWithScoreLs
       parentEdges <- prevStepEdges.get(queryRequest.vertex.id)
     } yield fetch(queryRequest, prevStepScore, isInnerCall = false, parentEdges)
-    
+
     val grouped: Deferred[util.ArrayList[QueryRequestWithResult]] = Deferred.group(defers)
     grouped withCallback {
       queryResults: util.ArrayList[QueryRequestWithResult] =>

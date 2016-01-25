@@ -87,7 +87,7 @@ case class IndexEdgeSerializable(indexEdge: IndexEdge) extends HSerializable[Ind
 
     val kv = SKeyValue(table, rowBytes, cf, qualifierBytes, value, indexEdge.version)
 
-    logger.error(s"${kv.row.toList}, ${kv.qualifier.toList}, ${kv.value.toList}")
+//    logger.debug(s"${kv.row.toList}, ${kv.qualifier.toList}, ${kv.value.toList}")
     Seq(kv)
   }
 }

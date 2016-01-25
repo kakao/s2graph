@@ -143,19 +143,7 @@ class IndexEdgeDeserializable extends HDeserializable[IndexEdge] {
     pos += 1
     val op = kv.row(pos)
     pos += 1
-    val msg = Seq(
-      pos,
-      kv.row.length,
-      srcVertexId, srcIdLen,
-      labelWithDir,
-      labelIdxSeq, isInverted,
-      op,
-      kv.row.toList,
-      kv.cf.toList,
-      kv.qualifier.toList,
-      kv.value.toList
-    )
-    logger.error(s"${msg.mkString("\n")}")
+
     if (pos == kv.row.length) {
       // degree
       val degreeVal = Bytes.toLong(kv.value)

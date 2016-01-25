@@ -96,6 +96,7 @@ abstract class Storage(val config: Config)(implicit ec: ExecutionContext) {
                               queryParam: QueryParam,
                               cacheElementOpt: Option[IndexEdge],
                               parentEdges: Seq[EdgeWithScore]): Option[Edge] = {
+//    logger.debug(s"toEdge: $kv")
     try {
       val indexEdge = indexEdgeDeserializer.fromKeyValues(queryParam, Seq(kv), queryParam.label.schemaVersion, cacheElementOpt)
 
