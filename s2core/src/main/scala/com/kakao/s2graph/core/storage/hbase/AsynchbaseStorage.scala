@@ -172,19 +172,20 @@ class AsynchbaseStorage(override val config: Config, vertexCache: Cache[Integer,
       }
 
       // After deleteAll, process others
-      lazy val mutateEdgeFutures = {
-        val head = edges.head
-        val strongConsistency = edges.head.label.consistencyLevel == "strong"
-        if (strongConsistency) {
-          val edgeFuture = mutateEdgesInner(edges, strongConsistency, withWait)(Edge.buildOperation)
+      lazy val mutateEdgeFutures = edges.toList match {
+        case head :: tail =>
+          val strongConsistency = edges.head.label.consistencyLevel == "strong"
+          if (strongConsistency) {
+            val edgeFuture = mutateEdgesInner(edges, strongConsistency, withWait)(Edge.buildOperation)
 
-          //TODO: decide what we will do on failure on vertex put
-          val puts = mutationBuilder.buildVertexPutsAsync(head)
-          val vertexFuture = writeAsyncSimple(head.label.hbaseZkAddr, puts, withWait)
-          Seq(edgeFuture, vertexFuture)
-        } else {
-          edges.map { edge => mutateEdge(edge, withWait = withWait) }
-        }
+            //TODO: decide what we will do on failure on vertex put
+            val puts = mutationBuilder.buildVertexPutsAsync(head)
+            val vertexFuture = writeAsyncSimple(head.label.hbaseZkAddr, puts, withWait)
+            Seq(edgeFuture, vertexFuture)
+          } else {
+            edges.map { edge => mutateEdge(edge, withWait = withWait) }
+          }
+        case Nil => Nil
       }
 
       val composed = for {
