@@ -48,15 +48,14 @@ class QueueActor(s2: Graph) extends Actor with ActorLogging {
   import Protocol._
 
   implicit val ec = context.system.dispatcher
-
-  // Order by ts: 1000 > 9999 > 8888
-  def tsOrder(g: GraphElement) = g.ts
-  val queue = mutable.PriorityQueue.empty[GraphElement](Ordering.by(tsOrder))
+  //  logger.error(s"QueueActor: $self")
+  val queue = mutable.Queue.empty[GraphElement]
   var queueSize = 0L
   val maxQueueSize = Config.LOCAL_QUEUE_ACTOR_MAX_QUEUE_SIZE
   val timeUnitInMillis = 10
   val rateLimitTimeStep = 1000 / timeUnitInMillis
   val rateLimit = Config.LOCAL_QUEUE_ACTOR_RATE_LIMIT / rateLimitTimeStep
+
 
   context.system.scheduler.schedule(Duration.Zero, Duration(timeUnitInMillis, TimeUnit.MILLISECONDS), self, Flush)
 
@@ -72,7 +71,7 @@ class QueueActor(s2: Graph) extends Actor with ActorLogging {
 
     case Flush =>
       val elementsToFlush =
-        if (queue.size < rateLimit) queue.dequeueAll
+        if (queue.size < rateLimit) queue.dequeueAll(_ => true)
         else (0 until rateLimit).map(_ => queue.dequeue())
 
       val flushSize = elementsToFlush.size
@@ -85,7 +84,7 @@ class QueueActor(s2: Graph) extends Actor with ActorLogging {
       }
 
     case FlushAll =>
-      s2.mutateElements(queue.toSeq)
+      s2.mutateElements(queue)
       context.stop(self)
 
     case _ => logger.error("unknown protocol")
