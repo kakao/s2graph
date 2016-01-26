@@ -161,39 +161,41 @@ class AsynchbaseStorage(override val config: Config, vertexCache: Cache[Integer,
   }
 
   override def mutateEdges(_edges: Seq[Edge], withWait: Boolean): Future[Seq[Boolean]] = {
-    val (deleteAllEdges, edges) = _edges.partition(_.op == GraphUtil.operations("deleteAll"))
+    val grouped = _edges.groupBy { edge => (edge.label, edge.srcVertex.innerId, edge.tgtVertex.innerId) } toSeq
 
-    // process deleteAll op
-    val deleteAllFutures = deleteAllEdges.map { edge =>
-      deleteAllAdjacentEdges(Seq(edge.srcVertex), Seq(edge.label), edge.labelWithDir.dir, edge.ts)
-    }
+    val mutateEdges = grouped.map { case ((_, _, _), edgeGroup) =>
+      val (deleteAllEdges, edges) = edgeGroup.partition(_.op == GraphUtil.operations("deleteAll"))
 
-    // process other op
-    val grouped = edges.groupBy { edge => (edge.label, edge.srcVertex.innerId, edge.tgtVertex.innerId) } toSeq
-    val mutateEdges = grouped.map { case ((label, srcId, tgtId), edges) =>
-      val head = edges.head
-
-      val strongConsistency = edges.head.label.consistencyLevel == "strong"
-      if (strongConsistency) {
-        val edgeFuture = mutateEdgesInner(edges, strongConsistency, withWait)(Edge.buildOperation)
-
-        //TODO: decide what we will do on failure on vertex put
-        val vertexFuture = writeAsyncSimple(head.label.hbaseZkAddr,
-          mutationBuilder.buildVertexPutsAsync(head), withWait)
-        Future.sequence(Seq(edgeFuture, vertexFuture)).map(_.forall(identity))
-      } else {
-        Future.sequence(edges.map { edge =>
-          mutateEdge(edge, withWait = withWait)
-        }).map(_.forall(identity))
+      // DeleteAll first
+      val deleteAllFutures = deleteAllEdges.map { edge =>
+        deleteAllAdjacentEdges(Seq(edge.srcVertex), Seq(edge.label), edge.labelWithDir.dir, edge.ts)
       }
+
+      // After deleteAll, process others
+      lazy val mutateEdgeFutures = {
+        val head = edges.head
+        val strongConsistency = edges.head.label.consistencyLevel == "strong"
+        if (strongConsistency) {
+          val edgeFuture = mutateEdgesInner(edges, strongConsistency, withWait)(Edge.buildOperation)
+
+          //TODO: decide what we will do on failure on vertex put
+          val puts = mutationBuilder.buildVertexPutsAsync(head)
+          val vertexFuture = writeAsyncSimple(head.label.hbaseZkAddr, puts, withWait)
+          Seq(edgeFuture, vertexFuture)
+        } else {
+          edges.map { edge => mutateEdge(edge, withWait = withWait) }
+        }
+      }
+
+      val composed = for {
+        deleteRet <- Future.sequence(deleteAllFutures)
+        mutateRet <- Future.sequence(mutateEdgeFutures)
+      } yield deleteRet ++ mutateRet
+
+      composed.map(_.forall(identity))
     }
 
-    val opRes = for {
-      deleteRet <- Future.sequence(deleteAllFutures)
-      mutateRet <- Future.sequence(mutateEdges)
-    } yield deleteRet ++ mutateRet
-
-    opRes
+    Future.sequence(mutateEdges)
   }
 
   def mutateVertex(vertex: Vertex, withWait: Boolean): Future[Boolean] = {
@@ -532,7 +534,12 @@ class AsynchbaseStorage(override val config: Config, vertexCache: Cache[Integer,
               val oldSnapshotEdge = if (snapshotEdge.ts == pendingEdge.ts) None else Option(snapshotEdge)
               val (_, newEdgeUpdate) = Edge.buildOperation(oldSnapshotEdge, Seq(pendingEdge))
               val newLockEdge = buildLockEdge(snapshotEdgeOpt, pendingEdge, kvOpt)
-              val newReleaseLockEdge = buildReleaseLockEdge(snapshotEdgeOpt, newLockEdge, newEdgeUpdate)
+              val _newReleaseLockEdge = buildReleaseLockEdge(snapshotEdgeOpt, newLockEdge, newEdgeUpdate)
+
+              // set lock ts as current ts
+              val newPendingEdgeOpt = _newReleaseLockEdge.pendingEdgeOpt.map(_.copy(lockTs = Option(System.currentTimeMillis())))
+              val newReleaseLockEdge = _newReleaseLockEdge.copy(pendingEdgeOpt = newPendingEdgeOpt)
+
               process(newLockEdge, newReleaseLockEdge, newEdgeUpdate, statusCode = 0).flatMap { ret =>
                 val log = s"[Success]: Resolving expired pending edge.\n${pendingEdge.toLogString}"
                 throw new PartialFailureException(edge, 0, log)
@@ -543,11 +550,7 @@ class AsynchbaseStorage(override val config: Config, vertexCache: Cache[Integer,
                 // self locked
                 val oldSnapshotEdge = if (snapshotEdge.ts == pendingEdge.ts) None else Option(snapshotEdge)
                 val (_, newEdgeUpdate) = Edge.buildOperation(oldSnapshotEdge, Seq(edge))
-                val _newReleaseLockEdge = buildReleaseLockEdge(snapshotEdgeOpt, lockEdge, newEdgeUpdate)
-
-                // set lock ts as current
-                val newPendingEdgeOpt = _newReleaseLockEdge.pendingEdgeOpt.map(_.copy(lockTs = Option(System.currentTimeMillis())))
-                val newReleaseLockEdge = _newReleaseLockEdge.copy(pendingEdgeOpt = newPendingEdgeOpt)
+                val newReleaseLockEdge = buildReleaseLockEdge(snapshotEdgeOpt, lockEdge, newEdgeUpdate)
 
                 /** lockEdge will be ignored */
                 process(lockEdge, newReleaseLockEdge, newEdgeUpdate, statusCode)
