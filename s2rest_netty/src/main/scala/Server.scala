@@ -168,7 +168,9 @@ object NettyServer extends App {
   logger.info(s"starts with num of thread: $numOfThread, ${threadPool.getClass.getSimpleName}")
 
   // Configure the server.
-  val bossGroup: EventLoopGroup = new NioEventLoopGroup(1)
+
+  val bossGroupSize = Try(config.getInt("boss.size")).recover { case _ => 2 }.get
+  val bossGroup: EventLoopGroup = new NioEventLoopGroup(bossGroupSize)
   val workerGroup: EventLoopGroup = new NioEventLoopGroup()
 
   try {
