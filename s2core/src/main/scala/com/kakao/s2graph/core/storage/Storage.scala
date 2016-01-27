@@ -9,9 +9,11 @@ import com.typesafe.config.Config
 import scala.collection.Seq
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.Try
+import scala.util.{Random, Try}
 
 abstract class Storage(val config: Config)(implicit ec: ExecutionContext) {
+
+  def client: StorageClient
 
   def cacheOpt: Option[Cache[Integer, Seq[QueryResult]]]
 
@@ -158,6 +160,62 @@ abstract class Storage(val config: Config)(implicit ec: ExecutionContext) {
       }
     }
   }
+
+
+  /**
+   * methods for consistency
+   */
+
+  case class PartialFailureException(edge: Edge, statusCode: Byte, failReason: String) extends Exception
+
+  def debug(ret: Boolean, phase: String, snapshotEdge: SnapshotEdge) = {
+    val msg = Seq(s"[$ret] [$phase]", s"${snapshotEdge.toLogString()}").mkString("\n")
+    logger.debug(msg)
+  }
+
+  def debug(ret: Boolean, phase: String, snapshotEdge: SnapshotEdge, edgeMutate: EdgeMutate) = {
+    val msg = Seq(s"[$ret] [$phase]", s"${snapshotEdge.toLogString()}",
+      s"${edgeMutate.toLogString}").mkString("\n")
+    logger.debug(msg)
+  }
+
+  def buildLockEdge(snapshotEdgeOpt: Option[Edge], edge: Edge, kvOpt: Option[SKeyValue]) = {
+    val currentTs = System.currentTimeMillis()
+    val lockTs = snapshotEdgeOpt match {
+      case None => Option(currentTs)
+      case Some(snapshotEdge) =>
+        snapshotEdge.pendingEdgeOpt match {
+          case None => Option(currentTs)
+          case Some(pendingEdge) => pendingEdge.lockTs
+        }
+    }
+    val newVersion = kvOpt.map(_.timestamp).getOrElse(edge.ts) + 1
+    //      snapshotEdgeOpt.map(_.version).getOrElse(edge.ts) + 1
+    val pendingEdge = edge.copy(version = newVersion, statusCode = 1, lockTs = lockTs)
+    val base = snapshotEdgeOpt match {
+      case None =>
+        // no one ever mutated on this snapshotEdge.
+        edge.toSnapshotEdge.copy(pendingEdgeOpt = Option(pendingEdge))
+      case Some(snapshotEdge) =>
+        // there is at least one mutation have been succeed.
+        snapshotEdgeOpt.get.toSnapshotEdge.copy(pendingEdgeOpt = Option(pendingEdge))
+    }
+    base.copy(version = newVersion, statusCode = 1, lockTs = None)
+  }
+
+  def buildReleaseLockEdge(snapshotEdgeOpt: Option[Edge], lockEdge: SnapshotEdge,
+                           edgeMutate: EdgeMutate) = {
+    val newVersion = lockEdge.version + 1
+    val base = edgeMutate.newSnapshotEdge match {
+      case None =>
+        // shouldReplace false
+        assert(snapshotEdgeOpt.isDefined)
+        snapshotEdgeOpt.get.toSnapshotEdge
+      case Some(newSnapshotEdge) => newSnapshotEdge
+    }
+    base.copy(version = newVersion, statusCode = 0, pendingEdgeOpt = None)
+  }
+
 
 
 }

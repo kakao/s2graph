@@ -21,33 +21,11 @@ import scala.util.Random
 import scala.concurrent.{ExecutionContext, Future}
 
 class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionContext)
-  extends QueryBuilder[GetRequest, Deferred[QueryRequestWithResult]](storage) {
+  extends QueryBuilder[Deferred[QueryRequestWithResult]](storage) {
 
   import Extensions.DeferOps
 
-  val maxSize = storage.config.getInt("future.cache.max.size")
-  val expreAfterWrite = storage.config.getInt("future.cache.expire.after.write")
-  val expreAfterAccess = storage.config.getInt("future.cache.expire.after.access")
-
-  val futureCache = CacheBuilder.newBuilder()
-//  .recordStats()
-  .initialCapacity(maxSize)
-  .concurrencyLevel(Runtime.getRuntime.availableProcessors())
-  .expireAfterWrite(expreAfterWrite, TimeUnit.MILLISECONDS)
-  .expireAfterAccess(expreAfterAccess, TimeUnit.MILLISECONDS)
-//  .weakKeys()
-  .maximumSize(maxSize).build[java.lang.Long, (Long, Deferred[QueryRequestWithResult])]()
-
-  val emptyKeyValues = new util.ArrayList[KeyValue]()
-  //  val scheduleTime = 60L * 60
-//  val scheduleTime = 60
-//  val scheduler = Executors.newScheduledThreadPool(1)
-//
-//  scheduler.scheduleAtFixedRate(new Runnable(){
-//    override def run() = {
-//      logger.info(s"[FutureCache]: ${futureCache.stats()}")
-//    }
-//  }, scheduleTime, scheduleTime, TimeUnit.SECONDS)
+  private val emptyKeyValues = new util.ArrayList[KeyValue]()
 
   private def fetchKeyValues(hbaseRpc: AnyRef): Deferred[util.ArrayList[KeyValue]] = {
     hbaseRpc match {
@@ -104,32 +82,12 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
   }
 
   private def buildRequestInner(queryRequest: QueryRequest): AnyRef = {
-    val srcVertex = queryRequest.vertex
-    //    val tgtVertexOpt = queryRequest.tgtVertexOpt
-    val edgeCf = HSerializable.edgeCf
+    import HSerializable._
     val queryParam = queryRequest.queryParam
-    val tgtVertexIdOpt = queryParam.tgtVertexInnerIdOpt
     val label = queryParam.label
-    val labelWithDir = queryParam.labelWithDir
-    val (srcColumn, tgtColumn) = label.srcTgtColumn(labelWithDir.dir)
-    val (srcInnerId, tgtInnerId) = tgtVertexIdOpt match {
-      case Some(tgtVertexId) => // _to is given.
-        /** we use toSnapshotEdge so dont need to swap src, tgt */
-        val src = InnerVal.convertVersion(srcVertex.innerId, srcColumn.columnType, label.schemaVersion)
-        val tgt = InnerVal.convertVersion(tgtVertexId, tgtColumn.columnType, label.schemaVersion)
-        (src, tgt)
-      case None =>
-        val src = InnerVal.convertVersion(srcVertex.innerId, srcColumn.columnType, label.schemaVersion)
-        (src, src)
-    }
+    val edge = toRequestEdge(queryRequest)
 
-    val (srcVId, tgtVId) = (SourceVertexId(srcColumn.id.get, srcInnerId), TargetVertexId(tgtColumn.id.get, tgtInnerId))
-    val (srcV, tgtV) = (Vertex(srcVId), Vertex(tgtVId))
-    val currentTs = System.currentTimeMillis()
-    val propsWithTs = Map(LabelMeta.timeStampSeq -> InnerValLikeWithTs(InnerVal.withLong(currentTs, label.schemaVersion), currentTs)).toMap
-    val edge = Edge(srcV, tgtV, labelWithDir, propsWithTs = propsWithTs)
-
-    val kv = if (tgtVertexIdOpt.isDefined) {
+    val kv = if (queryParam.tgtVertexInnerIdOpt.isDefined) {
       val snapshotEdge = edge.toSnapshotEdge
       storage.snapshotEdgeSerializer(snapshotEdge).toKeyValues.head
 //      new GetRequest(label.hbaseTableName.getBytes, kv.row, edgeCf, kv.qualifier)
@@ -139,17 +97,12 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
 
       val indexedEdge = indexedEdgeOpt.get
       storage.indexEdgeSerializer(indexedEdge).toKeyValues.head
-//      val kv = storage.indexEdgeSerializer(indexedEdge).toKeyValues.head
-//      val table = label.hbaseTableName.getBytes
-//      val rowKey = kv.row
-//      val cf = edgeCf
-//      new GetRequest(table, rowKey, cf)
     }
 
     val (minTs, maxTs) = queryParam.duration.getOrElse((0L, Long.MaxValue))
 
     label.schemaVersion match {
-      case HBaseType.VERSION4 if tgtVertexIdOpt.isEmpty =>
+      case HBaseType.VERSION4 if queryParam.tgtVertexInnerIdOpt.isEmpty =>
         val scanner = storage.client.newScanner(label.hbaseTableName.getBytes)
         scanner.setFamily(edgeCf)
 
@@ -158,13 +111,11 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
          */
         val indexEdgeOpt = edge.edgesWithIndex.filter(edgeWithIndex => edgeWithIndex.labelIndex.seq == queryParam.labelOrderSeq).headOption
         val indexEdge = indexEdgeOpt.getOrElse(throw new RuntimeException(s"Can`t find index for query $queryParam"))
-//        val idxPropsMap = indexEdge.orders.toMap
-//        val idxPropsBytes = propsToBytes(indexEdge.orders)
 
         val srcIdBytes = VertexId.toSourceVertexId(indexEdge.srcVertex.id).bytes
         val labelWithDirBytes = indexEdge.labelWithDir.bytes
         val labelIndexSeqWithIsInvertedBytes = StorageSerializable.labelOrderSeqWithIsInverted(indexEdge.labelIndexSeq, isInverted = false)
-//        val labelIndexSeqWithIsInvertedStopBytes =  StorageSerializable.labelOrderSeqWithIsInverted(indexEdge.labelIndexSeq, isInverted = true)
+
         val baseKey = Bytes.add(srcIdBytes, labelWithDirBytes, Bytes.add(labelIndexSeqWithIsInvertedBytes, Array.fill(1)(edge.op)))
         val (startKey, stopKey) =
           if (queryParam.columnRangeFilter != null) {
@@ -201,7 +152,7 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
         scanner
       case _ =>
         val get =
-          if (tgtVertexIdOpt.isDefined) new GetRequest(label.hbaseTableName.getBytes, kv.row, edgeCf, kv.qualifier)
+          if (queryParam.tgtVertexInnerIdOpt.isDefined) new GetRequest(label.hbaseTableName.getBytes, kv.row, edgeCf, kv.qualifier)
           else new GetRequest(label.hbaseTableName.getBytes, kv.row, edgeCf)
 
         get.maxVersions(1)
@@ -218,49 +169,16 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
     }
   }
 
-  override def getEdge(srcVertex: Vertex, tgtVertex: Vertex, queryParam: QueryParam, isInnerCall: Boolean): Deferred[QueryRequestWithResult] = {
-    //TODO:
-    val _queryParam = queryParam.tgtVertexInnerIdOpt(Option(tgtVertex.innerId))
-    val q = Query.toQuery(Seq(srcVertex), _queryParam)
-    val queryRequest = QueryRequest(q, 0, srcVertex, _queryParam)
-    fetch(queryRequest, 1.0, isInnerCall = true, parentEdges = Nil)
-  }
 
   override def fetch(queryRequest: QueryRequest,
                      prevStepScore: Double,
                      isInnerCall: Boolean,
                      parentEdges: Seq[EdgeWithScore]): Deferred[QueryRequestWithResult] = {
-    @tailrec
-    def randomInt(sampleNumber: Int, range: Int, set: Set[Int] = Set.empty[Int]): Set[Int] = {
-      if (range < sampleNumber || set.size == sampleNumber) set
-      else randomInt(sampleNumber, range, set + Random.nextInt(range))
-    }
-
-    def sample(edges: Seq[EdgeWithScore], n: Int): Seq[EdgeWithScore] = {
-      if (edges.size <= n){
-        edges
-      }else{
-        val plainEdges = if (queryRequest.queryParam.offset == 0) {
-          edges.tail
-        } else edges
-
-        val randoms = randomInt(n, plainEdges.size)
-        var samples = List.empty[EdgeWithScore]
-        var idx = 0
-        plainEdges.foreach { e =>
-          if (randoms.contains(idx)) samples = e :: samples
-          idx += 1
-        }
-        samples.toSeq
-      }
-
-    }
-
     def fetchInner(hbaseRpc: AnyRef) = {
       fetchKeyValues(hbaseRpc) withCallback { kvs =>
         val edgeWithScores = storage.toEdges(kvs.toSeq, queryRequest.queryParam, prevStepScore, isInnerCall, parentEdges)
         val resultEdgesWithScores = if (queryRequest.queryParam.sample >= 0 ) {
-          sample(edgeWithScores, queryRequest.queryParam.sample)
+          sample(queryRequest, edgeWithScores, queryRequest.queryParam.sample)
         } else edgeWithScores
         QueryRequestWithResult(queryRequest, QueryResult(resultEdgesWithScores, tailCursor = kvs.last.key()))
       } recoverWith { ex =>

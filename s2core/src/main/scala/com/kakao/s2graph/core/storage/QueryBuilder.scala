@@ -1,18 +1,67 @@
 package com.kakao.s2graph.core.storage
 
-import com.google.common.cache.Cache
+import java.util.concurrent.TimeUnit
+
+import com.google.common.cache.{CacheBuilder}
 import com.kakao.s2graph.core._
-import com.kakao.s2graph.core.types.{LabelWithDirection, VertexId}
-import com.kakao.s2graph.core.utils.logger
+import com.kakao.s2graph.core.mysqls.LabelMeta
+import com.kakao.s2graph.core.storage.hbase.HSerializable
+import com.kakao.s2graph.core.types._
+import com.kakao.s2graph.core.utils.{logger}
+import scala.annotation.tailrec
 import scala.collection.{Map, Seq}
 import scala.concurrent.{Future, ExecutionContext}
-import scala.util.Try
+import scala.util.{Random, Try}
 
-abstract class QueryBuilder[R, T](storage: Storage)(implicit ec: ExecutionContext) {
+abstract class QueryBuilder[T](storage: Storage)(implicit ec: ExecutionContext) {
+
+  val maxSize = storage.config.getInt("future.cache.max.size")
+  val expreAfterWrite = storage.config.getInt("future.cache.expire.after.write")
+  val expreAfterAccess = storage.config.getInt("future.cache.expire.after.access")
+
+  val futureCache = CacheBuilder.newBuilder()
+  .initialCapacity(maxSize)
+  .concurrencyLevel(Runtime.getRuntime.availableProcessors())
+  .expireAfterWrite(expreAfterWrite, TimeUnit.MILLISECONDS)
+  .expireAfterAccess(expreAfterAccess, TimeUnit.MILLISECONDS)
+  .maximumSize(maxSize).build[java.lang.Long, (Long, T)]()
 
 //  def buildRequest(queryRequest: QueryRequest): R
 
-  def getEdge(srcVertex: Vertex, tgtVertex: Vertex, queryParam: QueryParam, isInnerCall: Boolean): T
+  def toRequestEdge(queryRequest: QueryRequest): Edge = {
+    val srcVertex = queryRequest.vertex
+    //    val tgtVertexOpt = queryRequest.tgtVertexOpt
+    val edgeCf = HSerializable.edgeCf
+    val queryParam = queryRequest.queryParam
+    val tgtVertexIdOpt = queryParam.tgtVertexInnerIdOpt
+    val label = queryParam.label
+    val labelWithDir = queryParam.labelWithDir
+    val (srcColumn, tgtColumn) = label.srcTgtColumn(labelWithDir.dir)
+    val (srcInnerId, tgtInnerId) = tgtVertexIdOpt match {
+      case Some(tgtVertexId) => // _to is given.
+        /** we use toSnapshotEdge so dont need to swap src, tgt */
+        val src = InnerVal.convertVersion(srcVertex.innerId, srcColumn.columnType, label.schemaVersion)
+        val tgt = InnerVal.convertVersion(tgtVertexId, tgtColumn.columnType, label.schemaVersion)
+        (src, tgt)
+      case None =>
+        val src = InnerVal.convertVersion(srcVertex.innerId, srcColumn.columnType, label.schemaVersion)
+        (src, src)
+    }
+
+    val (srcVId, tgtVId) = (SourceVertexId(srcColumn.id.get, srcInnerId), TargetVertexId(tgtColumn.id.get, tgtInnerId))
+    val (srcV, tgtV) = (Vertex(srcVId), Vertex(tgtVId))
+    val currentTs = System.currentTimeMillis()
+    val propsWithTs = Map(LabelMeta.timeStampSeq -> InnerValLikeWithTs(InnerVal.withLong(currentTs, label.schemaVersion), currentTs)).toMap
+    Edge(srcV, tgtV, labelWithDir, propsWithTs = propsWithTs)
+  }
+
+  def getEdge(srcVertex: Vertex, tgtVertex: Vertex, queryParam: QueryParam, isInnerCall: Boolean): T = {
+    val _queryParam = queryParam.tgtVertexInnerIdOpt(Option(tgtVertex.innerId))
+    val q = Query.toQuery(Seq(srcVertex), _queryParam)
+    val queryRequest = QueryRequest(q, 0, srcVertex, _queryParam)
+    fetch(queryRequest, 1.0, isInnerCall = true, parentEdges = Nil)
+  }
+
 
   def fetchSnapshotEdge(edge: Edge): Future[(QueryParam, Option[Edge], Option[SKeyValue])]
 
@@ -103,4 +152,32 @@ abstract class QueryBuilder[R, T](storage: Storage)(implicit ec: ExecutionContex
         fallback
     } get
   }
+
+  @tailrec
+  final def randomInt(sampleNumber: Int, range: Int, set: Set[Int] = Set.empty[Int]): Set[Int] = {
+    if (range < sampleNumber || set.size == sampleNumber) set
+    else randomInt(sampleNumber, range, set + Random.nextInt(range))
+  }
+
+  def sample(queryRequest: QueryRequest, edges: Seq[EdgeWithScore], n: Int): Seq[EdgeWithScore] = {
+    if (edges.size <= n){
+      edges
+    }else{
+      val plainEdges = if (queryRequest.queryParam.offset == 0) {
+        edges.tail
+      } else edges
+
+      val randoms = randomInt(n, plainEdges.size)
+      var samples = List.empty[EdgeWithScore]
+      var idx = 0
+      plainEdges.foreach { e =>
+        if (randoms.contains(idx)) samples = e :: samples
+        idx += 1
+      }
+      samples.toSeq
+    }
+
+  }
+
+
 }
