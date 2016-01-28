@@ -1,6 +1,7 @@
 package com.kakao.s2graph.core.types.v2
 
 import com.kakao.s2graph.core.types._
+import com.kakao.s2graph.core.utils.logger
 import org.apache.hadoop.hbase.util._
 
 /**

@@ -1,13 +1,11 @@
 package com.kakao.s2graph.core.storage
 
-import java.util.concurrent.TimeUnit
-
 import com.google.common.cache.{CacheBuilder, Cache}
 import com.kakao.s2graph.core.ExceptionHandler.{Key, Val, KafkaMessage}
 import com.kakao.s2graph.core.GraphExceptions.FetchTimeoutException
 import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.mysqls.{LabelMeta, Service, Label}
-import com.kakao.s2graph.core.storage.hbase.HSerializable
+import com.kakao.s2graph.core.storage.hbase._
 import com.kakao.s2graph.core.types._
 import com.kakao.s2graph.core.utils.{Extensions, logger}
 import com.typesafe.config.Config
@@ -27,34 +25,23 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
   val DeleteAllFetchSize = config.getInt("delete.all.fetch.size")
   val FailProb = config.getDouble("hbase.fail.prob")
   val LockExpireDuration = Math.max(MaxRetryNum * MaxBackOff * 2, 10000)
+  val maxSize = config.getInt("future.cache.max.size")
+  val expireAfterWrite = config.getInt("future.cache.expire.after.write")
+  val expireAfterAccess = config.getInt("future.cache.expire.after.access")
 
 
-//  def mutationBuilder: MutationBuilder[W]
+  /** Serializer/Deserializer */
+  // default serializer/deserializer. override this if any other backend system need special serialization.
+  def snapshotEdgeSerializer(snapshotEdge: SnapshotEdge) = new SnapshotEdgeSerializable(snapshotEdge)
+  def indexEdgeSerializer(indexedEdge: IndexEdge) = new IndexEdgeSerializable(indexedEdge)
+  def vertexSerializer(vertex: Vertex) = new VertexSerializable(vertex)
+  val snapshotEdgeDeserializer = new SnapshotEdgeDeserializable
+  val indexEdgeDeserializer = new IndexEdgeDeserializable
+  val vertexDeserializer = new VertexDeserializable
+  /** End of Serializer/Deserializer */
 
-  def cacheOpt: Option[Cache[Integer, Seq[QueryResult]]]
 
-  def vertexCacheOpt: Option[Cache[Integer, Option[Vertex]]]
-
-  // Serializer/Deserializer
-  def snapshotEdgeSerializer(snapshotEdge: SnapshotEdge): StorageSerializable[SnapshotEdge]
-
-  def indexEdgeSerializer(indexedEdge: IndexEdge): StorageSerializable[IndexEdge]
-
-  def vertexSerializer(vertex: Vertex): StorageSerializable[Vertex]
-
-  def snapshotEdgeDeserializer: StorageDeserializable[SnapshotEdge]
-
-  def indexEdgeDeserializer: StorageDeserializable[IndexEdge]
-
-  def vertexDeserializer: StorageDeserializable[Vertex]
-
-  // Interface
-//  def getEdges(q: Query): Future[Seq[QueryRequestWithResult]]
-
-//  def checkEdges(params: Seq[(Vertex, Vertex, QueryParam)]): Future[Seq[QueryRequestWithResult]]
-
-  def getVertices(vertices: Seq[Vertex]): Future[Seq[Vertex]]
-
+  /** Mutation Logics */
   def writeToStorage(rpc: W, withWait: Boolean): Future[Boolean]
 
   def acquireLock(statusCode: Byte,
@@ -69,6 +56,20 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
                   _edgeMutate: EdgeMutate,
                   oldBytes: Array[Byte]): Future[Boolean]
 
+  def incrementCounts(edges: Seq[Edge], withWait: Boolean): Future[Seq[(Boolean, Long)]]
+
+  /** Build backend storage specific RPC */
+  def put(kvs: Seq[SKeyValue]): Seq[W]
+
+  def increment(kvs: Seq[SKeyValue]): Seq[W]
+
+  def delete(kvs: Seq[SKeyValue]): Seq[W]
+  /** Build backend storage specific RPC */
+
+  /** End of Mutation */
+
+
+  /** Management Logic */
   def flush(): Unit
 
   def createTable(zkAddr: String,
@@ -77,6 +78,11 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
                   regionMultiplier: Int,
                   ttl: Option[Int],
                   compressionAlgorithm: String): Unit
+
+  /** End of Management Logic */
+
+
+  /** Query Logic */
 
   def fetchKeyValues(rpc: AnyRef): Future[Seq[SKeyValue]]
 
@@ -91,16 +97,37 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
   def fetches(queryRequestWithScoreLs: Seq[(QueryRequest, Double)],
               prevStepEdges: Map[VertexId, Seq[EdgeWithScore]]): Future[Seq[QueryRequestWithResult]]
 
-  def incrementCounts(edges: Seq[Edge], withWait: Boolean): Future[Seq[(Boolean, Long)]]
+  /** End of Query */
 
-  def put(kvs: Seq[SKeyValue]): Seq[W]
 
-  def increment(kvs: Seq[SKeyValue]): Seq[W]
 
-  def delete(kvs: Seq[SKeyValue]): Seq[W]
+  /** Public Interface */
 
-  /** Query */
+  def getVertices(vertices: Seq[Vertex]): Future[Seq[Vertex]] = {
+    def fromResult(queryParam: QueryParam,
+                   kvs: Seq[SKeyValue],
+                   version: String): Option[Vertex] = {
 
+      if (kvs.isEmpty) None
+      else {
+        val newKVs = kvs
+        Option(vertexDeserializer.fromKeyValues(queryParam, newKVs, version, None))
+      }
+    }
+
+    val futures = vertices.map { vertex =>
+      val queryParam = QueryParam.Empty
+      val q = Query.toQuery(Seq(vertex), queryParam)
+      val queryRequest = QueryRequest(q, stepIdx = -1, vertex, queryParam)
+      fetchKeyValues(buildRequest(queryRequest)).map { kvs =>
+        fromResult(queryParam, kvs, vertex.serviceColumn.schemaVersion)
+      } recoverWith { case ex: Throwable =>
+        Future.successful(None)
+      }
+    }
+
+    Future.sequence(futures).map { result => result.toList.flatten }
+  }
 
   def mutateElements(elements: Seq[GraphElement],
                      withWait: Boolean = false): Future[Seq[Boolean]] = {
@@ -200,439 +227,6 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
   }
 
 
-
-  /** */
-
-  def toEdge[K: CanSKeyValue](kv: K,
-                              queryParam: QueryParam,
-                              cacheElementOpt: Option[IndexEdge],
-                              parentEdges: Seq[EdgeWithScore]): Option[Edge] = {
-//    logger.debug(s"toEdge: $kv")
-    try {
-      val indexEdge = indexEdgeDeserializer.fromKeyValues(queryParam, Seq(kv), queryParam.label.schemaVersion, cacheElementOpt)
-
-      Option(indexEdge.toEdge.copy(parentEdges = parentEdges))
-    } catch {
-      case ex: Exception =>
-        logger.error(s"Fail on toEdge: ${kv.toString}, ${queryParam}")
-        None
-    }
-  }
-
-  def toSnapshotEdge[K: CanSKeyValue](kv: K,
-                                      queryParam: QueryParam,
-                                      cacheElementOpt: Option[SnapshotEdge] = None,
-                                      isInnerCall: Boolean,
-                                      parentEdges: Seq[EdgeWithScore]): Option[Edge] = {
-    val snapshotEdge = snapshotEdgeDeserializer.fromKeyValues(queryParam, Seq(kv), queryParam.label.schemaVersion, cacheElementOpt)
-
-    if (isInnerCall) {
-      val edge = snapshotEdge.toEdge.copy(parentEdges = parentEdges)
-      if (queryParam.where.map(_.filter(edge)).getOrElse(true)) Option(edge)
-      else None
-    } else {
-      if (Edge.allPropsDeleted(snapshotEdge.props)) None
-      else {
-        val edge = snapshotEdge.toEdge.copy(parentEdges = parentEdges)
-        if (queryParam.where.map(_.filter(edge)).getOrElse(true)) Option(edge)
-        else None
-      }
-    }
-  }
-
-  def toEdges[K: CanSKeyValue](kvs: Seq[K],
-                               queryParam: QueryParam,
-                               prevScore: Double = 1.0,
-                               isInnerCall: Boolean,
-                               parentEdges: Seq[EdgeWithScore]): Seq[EdgeWithScore] = {
-    if (kvs.isEmpty) Seq.empty
-    else {
-      val first = kvs.head
-      val kv = first
-      val cacheElementOpt =
-        if (queryParam.isSnapshotEdge) None
-        else Option(indexEdgeDeserializer.fromKeyValues(queryParam, Seq(kv), queryParam.label.schemaVersion, None))
-
-      for {
-        kv <- kvs
-        edge <-
-        if (queryParam.isSnapshotEdge) toSnapshotEdge(kv, queryParam, None, isInnerCall, parentEdges)
-        else toEdge(kv, queryParam, cacheElementOpt, parentEdges)
-      } yield {
-        //TODO: Refactor this.
-        val currentScore =
-          queryParam.scorePropagateOp match {
-            case "plus" => edge.rank(queryParam.rank) + prevScore
-            case _ => edge.rank(queryParam.rank) * prevScore
-          }
-        EdgeWithScore(edge, currentScore)
-      }
-    }
-  }
-
-
-  /**
-   * methods for consistency
-   */
-  def writeAsyncSimple(zkQuorum: String, elementRpcs: Seq[W], withWait: Boolean): Future[Boolean] = {
-    if (elementRpcs.isEmpty) {
-      Future.successful(true)
-    } else {
-      val futures = elementRpcs.map { rpc => writeToStorage(rpc, withWait) }
-      Future.sequence(futures).map(_.forall(identity))
-    }
-  }
-
-  case class PartialFailureException(edge: Edge, statusCode: Byte, failReason: String) extends Exception
-
-  def debug(ret: Boolean, phase: String, snapshotEdge: SnapshotEdge) = {
-    val msg = Seq(s"[$ret] [$phase]", s"${snapshotEdge.toLogString()}").mkString("\n")
-    logger.debug(msg)
-  }
-
-  def debug(ret: Boolean, phase: String, snapshotEdge: SnapshotEdge, edgeMutate: EdgeMutate) = {
-    val msg = Seq(s"[$ret] [$phase]", s"${snapshotEdge.toLogString()}",
-      s"${edgeMutate.toLogString}").mkString("\n")
-    logger.debug(msg)
-  }
-
-  def buildLockEdge(snapshotEdgeOpt: Option[Edge], edge: Edge, kvOpt: Option[SKeyValue]) = {
-    val currentTs = System.currentTimeMillis()
-    val lockTs = snapshotEdgeOpt match {
-      case None => Option(currentTs)
-      case Some(snapshotEdge) =>
-        snapshotEdge.pendingEdgeOpt match {
-          case None => Option(currentTs)
-          case Some(pendingEdge) => pendingEdge.lockTs
-        }
-    }
-    val newVersion = kvOpt.map(_.timestamp).getOrElse(edge.ts) + 1
-    //      snapshotEdgeOpt.map(_.version).getOrElse(edge.ts) + 1
-    val pendingEdge = edge.copy(version = newVersion, statusCode = 1, lockTs = lockTs)
-    val base = snapshotEdgeOpt match {
-      case None =>
-        // no one ever mutated on this snapshotEdge.
-        edge.toSnapshotEdge.copy(pendingEdgeOpt = Option(pendingEdge))
-      case Some(snapshotEdge) =>
-        // there is at least one mutation have been succeed.
-        snapshotEdgeOpt.get.toSnapshotEdge.copy(pendingEdgeOpt = Option(pendingEdge))
-    }
-    base.copy(version = newVersion, statusCode = 1, lockTs = None)
-  }
-
-  def buildReleaseLockEdge(snapshotEdgeOpt: Option[Edge], lockEdge: SnapshotEdge,
-                           edgeMutate: EdgeMutate) = {
-    val newVersion = lockEdge.version + 1
-    val base = edgeMutate.newSnapshotEdge match {
-      case None =>
-        // shouldReplace false
-        assert(snapshotEdgeOpt.isDefined)
-        snapshotEdgeOpt.get.toSnapshotEdge
-      case Some(newSnapshotEdge) => newSnapshotEdge
-    }
-    base.copy(version = newVersion, statusCode = 0, pendingEdgeOpt = None)
-  }
-
-
-
-  def mutate(predicate: Boolean,
-             edge: Edge,
-             statusCode: Byte,
-             _edgeMutate: EdgeMutate): Future[Boolean] = {
-    if (!predicate) throw new PartialFailureException(edge, 1, "predicate failed.")
-
-    if (statusCode >= 2) {
-      logger.debug(s"skip mutate: [$statusCode]\n${edge.toLogString}")
-      Future.successful(true)
-    } else {
-      val p = Random.nextDouble()
-      if (p < FailProb) throw new PartialFailureException(edge, 1, s"$p")
-      else
-        writeAsyncSimple(edge.label.hbaseZkAddr, indexedEdgeMutations(_edgeMutate), withWait = true).map { ret =>
-          if (ret) {
-            debug(ret, "mutate", edge.toSnapshotEdge, _edgeMutate)
-          } else {
-            throw new PartialFailureException(edge, 1, "hbase fail.")
-          }
-          true
-        }
-    }
-  }
-
-  def increment(predicate: Boolean,
-                edge: Edge,
-                statusCode: Byte, _edgeMutate: EdgeMutate): Future[Boolean] = {
-    if (!predicate) throw new PartialFailureException(edge, 2, "predicate failed.")
-    if (statusCode >= 3) {
-      logger.debug(s"skip increment: [$statusCode]\n${edge.toLogString}")
-      Future.successful(true)
-    } else {
-      val p = Random.nextDouble()
-      if (p < FailProb) throw new PartialFailureException(edge, 2, s"$p")
-      else
-        writeAsyncSimple(edge.label.hbaseZkAddr, increments(_edgeMutate), withWait = true).map { ret =>
-          if (ret) {
-            debug(ret, "increment", edge.toSnapshotEdge, _edgeMutate)
-          } else {
-            throw new PartialFailureException(edge, 2, "hbase fail.")
-          }
-          true
-        }
-    }
-  }
-
-
-
-  def commitUpdate(edge: Edge,
-                   statusCode: Byte)(snapshotEdgeOpt: Option[Edge],
-                                     kvOpt: Option[SKeyValue],
-                                     edgeUpdate: EdgeMutate): Future[Boolean] = {
-    val label = edge.label
-    def oldBytes = kvOpt.map(_.value).getOrElse(Array.empty)
-    //    def oldBytes = snapshotEdgeOpt.map { e =>
-    //      snapshotEdgeSerializer(e.toSnapshotEdge).toKeyValues.head.value
-    //    }.getOrElse(Array.empty)
-    def process(lockEdge: SnapshotEdge,
-                releaseLockEdge: SnapshotEdge,
-                _edgeMutate: EdgeMutate,
-                statusCode: Byte): Future[Boolean] = {
-
-      for {
-        locked <- acquireLock(statusCode, edge, lockEdge, oldBytes)
-        mutated <- mutate(locked, edge, statusCode, _edgeMutate)
-        incremented <- increment(mutated, edge, statusCode, _edgeMutate)
-        released <- releaseLock(incremented, edge, lockEdge, releaseLockEdge, _edgeMutate, oldBytes)
-      } yield {
-        released
-      }
-    }
-
-
-    val lockEdge = buildLockEdge(snapshotEdgeOpt, edge, kvOpt)
-    val releaseLockEdge = buildReleaseLockEdge(snapshotEdgeOpt, lockEdge, edgeUpdate)
-    snapshotEdgeOpt match {
-      case None =>
-        // no one ever did success on acquire lock.
-        process(lockEdge, releaseLockEdge, edgeUpdate, statusCode)
-      case Some(snapshotEdge) =>
-        // someone did success on acquire lock at least one.
-        snapshotEdge.pendingEdgeOpt match {
-          case None =>
-            // not locked
-            process(lockEdge, releaseLockEdge, edgeUpdate, statusCode)
-          case Some(pendingEdge) =>
-            def isLockExpired = pendingEdge.lockTs.get + LockExpireDuration < System.currentTimeMillis()
-            if (isLockExpired) {
-              val oldSnapshotEdge = if (snapshotEdge.ts == pendingEdge.ts) None else Option(snapshotEdge)
-              val (_, newEdgeUpdate) = Edge.buildOperation(oldSnapshotEdge, Seq(pendingEdge))
-              val newLockEdge = buildLockEdge(snapshotEdgeOpt, pendingEdge, kvOpt)
-              val newReleaseLockEdge = buildReleaseLockEdge(snapshotEdgeOpt, newLockEdge, newEdgeUpdate)
-              process(newLockEdge, newReleaseLockEdge, newEdgeUpdate, statusCode = 0).flatMap { ret =>
-                val log = s"[Success]: Resolving expired pending edge.\n${pendingEdge.toLogString}"
-                throw new PartialFailureException(edge, 0, log)
-              }
-            } else {
-              // locked
-              if (pendingEdge.ts == edge.ts && statusCode > 0) {
-                // self locked
-                val oldSnapshotEdge = if (snapshotEdge.ts == pendingEdge.ts) None else Option(snapshotEdge)
-                val (_, newEdgeUpdate) = Edge.buildOperation(oldSnapshotEdge, Seq(edge))
-                val newReleaseLockEdge = buildReleaseLockEdge(snapshotEdgeOpt, lockEdge, newEdgeUpdate)
-
-                /** lockEdge will be ignored */
-                process(lockEdge, newReleaseLockEdge, newEdgeUpdate, statusCode)
-              } else {
-                throw new PartialFailureException(edge, statusCode, s"others[${pendingEdge.ts}] is mutating. me[${edge.ts}]")
-              }
-            }
-        }
-    }
-  }
-
-  /** Query */
-  val maxSize = config.getInt("future.cache.max.size")
-  val expreAfterWrite = config.getInt("future.cache.expire.after.write")
-  val expreAfterAccess = config.getInt("future.cache.expire.after.access")
-
-//  def futureCache[T] = Cache[Long, (Long, T)]
-
-  def toRequestEdge(queryRequest: QueryRequest): Edge = {
-    val srcVertex = queryRequest.vertex
-    //    val tgtVertexOpt = queryRequest.tgtVertexOpt
-    val edgeCf = HSerializable.edgeCf
-    val queryParam = queryRequest.queryParam
-    val tgtVertexIdOpt = queryParam.tgtVertexInnerIdOpt
-    val label = queryParam.label
-    val labelWithDir = queryParam.labelWithDir
-    val (srcColumn, tgtColumn) = label.srcTgtColumn(labelWithDir.dir)
-    val (srcInnerId, tgtInnerId) = tgtVertexIdOpt match {
-      case Some(tgtVertexId) => // _to is given.
-        /** we use toSnapshotEdge so dont need to swap src, tgt */
-        val src = InnerVal.convertVersion(srcVertex.innerId, srcColumn.columnType, label.schemaVersion)
-        val tgt = InnerVal.convertVersion(tgtVertexId, tgtColumn.columnType, label.schemaVersion)
-        (src, tgt)
-      case None =>
-        val src = InnerVal.convertVersion(srcVertex.innerId, srcColumn.columnType, label.schemaVersion)
-        (src, src)
-    }
-
-    val (srcVId, tgtVId) = (SourceVertexId(srcColumn.id.get, srcInnerId), TargetVertexId(tgtColumn.id.get, tgtInnerId))
-    val (srcV, tgtV) = (Vertex(srcVId), Vertex(tgtVId))
-    val currentTs = System.currentTimeMillis()
-    val propsWithTs = Map(LabelMeta.timeStampSeq -> InnerValLikeWithTs(InnerVal.withLong(currentTs, label.schemaVersion), currentTs)).toMap
-    Edge(srcV, tgtV, labelWithDir, propsWithTs = propsWithTs)
-  }
-
-
-
-  def fetchSnapshotEdge(edge: Edge): Future[(QueryParam, Option[Edge], Option[SKeyValue])] = {
-    val labelWithDir = edge.labelWithDir
-    val queryParam = QueryParam(labelWithDir)
-    val _queryParam = queryParam.tgtVertexInnerIdOpt(Option(edge.tgtVertex.innerId))
-    val q = Query.toQuery(Seq(edge.srcVertex), _queryParam)
-    val queryRequest = QueryRequest(q, 0, edge.srcVertex, _queryParam)
-
-    fetchKeyValues(buildRequest(queryRequest)).map { kvs =>
-      val (edgeOpt, kvOpt) =
-        if (kvs.isEmpty) (None, None)
-        else {
-          val _edgeOpt = toEdges(kvs, queryParam, 1.0, isInnerCall = true, parentEdges = Nil).headOption.map(_.edge)
-          val _kvOpt = kvs.headOption
-          (_edgeOpt, _kvOpt)
-        }
-      (queryParam, edgeOpt, kvOpt)
-    } recoverWith { case ex: Throwable =>
-      logger.error(s"fetchQueryParam failed. fallback return.", ex)
-      throw new FetchTimeoutException(s"${edge.toLogString}")
-    }
-  }
-
-  def fetchStep(orgQuery: Query, queryRequestWithResultsLs: Seq[QueryRequestWithResult]): Future[Seq[QueryRequestWithResult]] = {
-    if (queryRequestWithResultsLs.isEmpty) Future.successful(Nil)
-    else {
-      val queryRequest = queryRequestWithResultsLs.head.queryRequest
-      val q = orgQuery
-      val queryResultsLs = queryRequestWithResultsLs.map(_.queryResult)
-
-      val stepIdx = queryRequest.stepIdx + 1
-
-      val prevStepOpt = if (stepIdx > 0) Option(q.steps(stepIdx - 1)) else None
-      val prevStepThreshold = prevStepOpt.map(_.nextStepScoreThreshold).getOrElse(QueryParam.DefaultThreshold)
-      val prevStepLimit = prevStepOpt.map(_.nextStepLimit).getOrElse(-1)
-      val step = q.steps(stepIdx)
-      val alreadyVisited =
-        if (stepIdx == 0) Map.empty[(LabelWithDirection, Vertex), Boolean]
-        else Graph.alreadyVisitedVertices(queryResultsLs)
-
-      val groupedBy = queryResultsLs.flatMap { queryResult =>
-        queryResult.edgeWithScoreLs.map { case edgeWithScore =>
-          edgeWithScore.edge.tgtVertex -> edgeWithScore
-        }
-      }.groupBy { case (vertex, edgeWithScore) => vertex }
-
-      val groupedByFiltered = for {
-        (vertex, edgesWithScore) <- groupedBy
-        aggregatedScore = edgesWithScore.map(_._2.score).sum if aggregatedScore >= prevStepThreshold
-      } yield vertex -> aggregatedScore
-
-      val prevStepTgtVertexIdEdges = for {
-        (vertex, edgesWithScore) <- groupedBy
-      } yield vertex.id -> edgesWithScore.map { case (vertex, edgeWithScore) => edgeWithScore }
-
-      val nextStepSrcVertices = if (prevStepLimit >= 0) {
-        groupedByFiltered.toSeq.sortBy(-1 * _._2).take(prevStepLimit)
-      } else {
-        groupedByFiltered.toSeq
-      }
-
-      val queryRequests = for {
-        (vertex, prevStepScore) <- nextStepSrcVertices
-        queryParam <- step.queryParams
-      } yield (QueryRequest(q, stepIdx, vertex, queryParam), prevStepScore)
-
-      Graph.filterEdges(fetches(queryRequests, prevStepTgtVertexIdEdges), alreadyVisited)(ec)
-    }
-  }
-
-  def fetchStepFuture(orgQuery: Query, queryRequestWithResultLsFuture: Future[Seq[QueryRequestWithResult]]): Future[Seq[QueryRequestWithResult]] = {
-    for {
-      queryRequestWithResultLs <- queryRequestWithResultLsFuture
-      ret <- fetchStep(orgQuery, queryRequestWithResultLs)
-    } yield ret
-  }
-
-  def getEdges(q: Query): Future[Seq[QueryRequestWithResult]] = {
-    val fallback = {
-      val queryRequest = QueryRequest(query = q, stepIdx = 0, q.vertices.head, queryParam = QueryParam.Empty)
-      Future.successful(q.vertices.map(v => QueryRequestWithResult(queryRequest, QueryResult())))
-    }
-    Try {
-      if (q.steps.isEmpty) {
-        // TODO: this should be get vertex query.
-        fallback
-      } else {
-        // current stepIdx = -1
-        val startQueryResultLs = QueryResult.fromVertices(q)
-        q.steps.foldLeft(Future.successful(startQueryResultLs)) { case (acc, step) =>
-          fetchStepFuture(q, acc)
-        }
-      }
-    } recover {
-      case e: Exception =>
-        logger.error(s"getEdgesAsync: $e", e)
-        fallback
-    } get
-  }
-
-  def checkEdges(params: Seq[(Vertex, Vertex, QueryParam)]): Future[Seq[QueryRequestWithResult]] = {
-    val ts = System.currentTimeMillis()
-    val futures = for {
-      (srcVertex, tgtVertex, queryParam) <- params
-      propsWithTs = Map(LabelMeta.timeStampSeq -> InnerValLikeWithTs.withLong(ts, ts, queryParam.label.schemaVersion))
-      edge = Edge(srcVertex, tgtVertex, queryParam.labelWithDir, propsWithTs = propsWithTs)
-    } yield {
-        fetchSnapshotEdge(edge).map { case (queryParam, edgeOpt, kvOpt) =>
-          val _queryParam = queryParam.tgtVertexInnerIdOpt(Option(edge.tgtVertex.innerId))
-          val q = Query.toQuery(Seq(edge.srcVertex), _queryParam)
-          val queryRequest = QueryRequest(q, 0, edge.srcVertex, _queryParam)
-          val queryResult = QueryResult(edgeOpt.toSeq.map(e => EdgeWithScore(e, 1.0)))
-          QueryRequestWithResult(queryRequest, queryResult)
-        }
-      }
-
-    Future.sequence(futures)
-  }
-
-
-
-  @tailrec
-  final def randomInt(sampleNumber: Int, range: Int, set: Set[Int] = Set.empty[Int]): Set[Int] = {
-    if (range < sampleNumber || set.size == sampleNumber) set
-    else randomInt(sampleNumber, range, set + Random.nextInt(range))
-  }
-
-  def sample(queryRequest: QueryRequest, edges: Seq[EdgeWithScore], n: Int): Seq[EdgeWithScore] = {
-    if (edges.size <= n){
-      edges
-    }else{
-      val plainEdges = if (queryRequest.queryParam.offset == 0) {
-        edges.tail
-      } else edges
-
-      val randoms = randomInt(n, plainEdges.size)
-      var samples = List.empty[EdgeWithScore]
-      var idx = 0
-      plainEdges.foreach { e =>
-        if (randoms.contains(idx)) samples = e :: samples
-        idx += 1
-      }
-      samples.toSeq
-    }
-
-  }
-  /** end of query */
-
-
   def mutateEdgesInner(edges: Seq[Edge],
                        checkConsistency: Boolean,
                        withWait: Boolean)(f: (Option[Edge], Seq[Edge]) => (Edge, EdgeMutate)): Future[Boolean] = {
@@ -719,7 +313,8 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
       "----------------------------------------------").mkString("\n")
 
 
-  def deleteAllFetchedEdgesAsyncOld(queryRequest: QueryRequest,
+  /** Delete All */
+  protected def deleteAllFetchedEdgesAsyncOld(queryRequest: QueryRequest,
                                     queryResult: QueryResult,
                                     requestTs: Long,
                                     retryNum: Int): Future[Boolean] = {
@@ -744,7 +339,7 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
     Future.sequence(futures).map { rets => rets.forall(identity) }
   }
 
-  def buildEdgesToDelete(queryRequestWithResultLs: QueryRequestWithResult, requestTs: Long): QueryResult = {
+  protected def buildEdgesToDelete(queryRequestWithResultLs: QueryRequestWithResult, requestTs: Long): QueryResult = {
     val (queryRequest, queryResult) = QueryRequestWithResult.unapply(queryRequestWithResultLs).get
     val edgeWithScoreLs = queryResult.edgeWithScoreLs.filter { edgeWithScore =>
       (edgeWithScore.edge.ts < requestTs) && !edgeWithScore.edge.isDegree
@@ -759,7 +354,7 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
     queryResult.copy(edgeWithScoreLs = edgeWithScoreLs)
   }
 
-  def deleteAllFetchedEdgesLs(queryRequestWithResultLs: Seq[QueryRequestWithResult], requestTs: Long): Future[(Boolean, Boolean)] = {
+  protected def deleteAllFetchedEdgesLs(queryRequestWithResultLs: Seq[QueryRequestWithResult], requestTs: Long): Future[(Boolean, Boolean)] = {
     val queryResultLs = queryRequestWithResultLs.map(_.queryResult)
     queryResultLs.foreach { queryResult =>
       if (queryResult.isFailure) throw new RuntimeException("fetched result is fallback.")
@@ -797,7 +392,7 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
     }
   }
 
-  def fetchAndDeleteAll(query: Query, requestTs: Long): Future[(Boolean, Boolean)] = {
+  protected def fetchAndDeleteAll(query: Query, requestTs: Long): Future[(Boolean, Boolean)] = {
     val future = for {
       queryRequestWithResultLs <- getEdges(query)
       (allDeleted, ret) <- deleteAllFetchedEdgesLs(queryRequestWithResultLs, requestTs)
@@ -859,9 +454,441 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
     retryFuture
   }
 
-  /**
-   * Mutation
-   */
+  /** End Of Delete All */
+
+
+
+
+  /** Parsing Logic: parse from kv from Storage into Edge */
+
+  def toEdge[K: CanSKeyValue](kv: K,
+                              queryParam: QueryParam,
+                              cacheElementOpt: Option[IndexEdge],
+                              parentEdges: Seq[EdgeWithScore]): Option[Edge] = {
+    logger.debug(s"toEdge: $kv")
+    try {
+      val indexEdge = indexEdgeDeserializer.fromKeyValues(queryParam, Seq(kv), queryParam.label.schemaVersion, cacheElementOpt)
+
+      Option(indexEdge.toEdge.copy(parentEdges = parentEdges))
+    } catch {
+      case ex: Exception =>
+        logger.error(s"Fail on toEdge: ${kv.toString}, ${queryParam}")
+        None
+    }
+  }
+
+  def toSnapshotEdge[K: CanSKeyValue](kv: K,
+                                      queryParam: QueryParam,
+                                      cacheElementOpt: Option[SnapshotEdge] = None,
+                                      isInnerCall: Boolean,
+                                      parentEdges: Seq[EdgeWithScore]): Option[Edge] = {
+    logger.debug(s"toEdge: $kv")
+    val snapshotEdge = snapshotEdgeDeserializer.fromKeyValues(queryParam, Seq(kv), queryParam.label.schemaVersion, cacheElementOpt)
+
+    if (isInnerCall) {
+      val edge = snapshotEdge.toEdge.copy(parentEdges = parentEdges)
+      if (queryParam.where.map(_.filter(edge)).getOrElse(true)) Option(edge)
+      else None
+    } else {
+      if (Edge.allPropsDeleted(snapshotEdge.props)) None
+      else {
+        val edge = snapshotEdge.toEdge.copy(parentEdges = parentEdges)
+        if (queryParam.where.map(_.filter(edge)).getOrElse(true)) Option(edge)
+        else None
+      }
+    }
+  }
+
+  def toEdges[K: CanSKeyValue](kvs: Seq[K],
+                               queryParam: QueryParam,
+                               prevScore: Double = 1.0,
+                               isInnerCall: Boolean,
+                               parentEdges: Seq[EdgeWithScore]): Seq[EdgeWithScore] = {
+    if (kvs.isEmpty) Seq.empty
+    else {
+      val first = kvs.head
+      val kv = first
+      val cacheElementOpt =
+        if (queryParam.isSnapshotEdge) None
+        else Option(indexEdgeDeserializer.fromKeyValues(queryParam, Seq(kv), queryParam.label.schemaVersion, None))
+
+      for {
+        kv <- kvs
+        edge <-
+        if (queryParam.isSnapshotEdge) toSnapshotEdge(kv, queryParam, None, isInnerCall, parentEdges)
+        else toEdge(kv, queryParam, cacheElementOpt, parentEdges)
+      } yield {
+        //TODO: Refactor this.
+        val currentScore =
+          queryParam.scorePropagateOp match {
+            case "plus" => edge.rank(queryParam.rank) + prevScore
+            case _ => edge.rank(queryParam.rank) * prevScore
+          }
+        EdgeWithScore(edge, currentScore)
+      }
+    }
+  }
+
+  /** End Of Parse Logic */
+
+  /** methods for consistency */
+  protected def writeAsyncSimple(zkQuorum: String, elementRpcs: Seq[W], withWait: Boolean): Future[Boolean] = {
+    if (elementRpcs.isEmpty) {
+      Future.successful(true)
+    } else {
+      val futures = elementRpcs.map { rpc => writeToStorage(rpc, withWait) }
+      Future.sequence(futures).map(_.forall(identity))
+    }
+  }
+
+  case class PartialFailureException(edge: Edge, statusCode: Byte, failReason: String) extends Exception
+
+  protected def debug(ret: Boolean, phase: String, snapshotEdge: SnapshotEdge) = {
+    val msg = Seq(s"[$ret] [$phase]", s"${snapshotEdge.toLogString()}").mkString("\n")
+    logger.debug(msg)
+  }
+
+  protected def debug(ret: Boolean, phase: String, snapshotEdge: SnapshotEdge, edgeMutate: EdgeMutate) = {
+    val msg = Seq(s"[$ret] [$phase]", s"${snapshotEdge.toLogString()}",
+      s"${edgeMutate.toLogString}").mkString("\n")
+    logger.debug(msg)
+  }
+
+  protected def buildLockEdge(snapshotEdgeOpt: Option[Edge], edge: Edge, kvOpt: Option[SKeyValue]) = {
+    val currentTs = System.currentTimeMillis()
+    val lockTs = snapshotEdgeOpt match {
+      case None => Option(currentTs)
+      case Some(snapshotEdge) =>
+        snapshotEdge.pendingEdgeOpt match {
+          case None => Option(currentTs)
+          case Some(pendingEdge) => pendingEdge.lockTs
+        }
+    }
+    val newVersion = kvOpt.map(_.timestamp).getOrElse(edge.ts) + 1
+    //      snapshotEdgeOpt.map(_.version).getOrElse(edge.ts) + 1
+    val pendingEdge = edge.copy(version = newVersion, statusCode = 1, lockTs = lockTs)
+    val base = snapshotEdgeOpt match {
+      case None =>
+        // no one ever mutated on this snapshotEdge.
+        edge.toSnapshotEdge.copy(pendingEdgeOpt = Option(pendingEdge))
+      case Some(snapshotEdge) =>
+        // there is at least one mutation have been succeed.
+        snapshotEdgeOpt.get.toSnapshotEdge.copy(pendingEdgeOpt = Option(pendingEdge))
+    }
+    base.copy(version = newVersion, statusCode = 1, lockTs = None)
+  }
+
+  protected def buildReleaseLockEdge(snapshotEdgeOpt: Option[Edge], lockEdge: SnapshotEdge,
+                           edgeMutate: EdgeMutate) = {
+    val newVersion = lockEdge.version + 1
+    val base = edgeMutate.newSnapshotEdge match {
+      case None =>
+        // shouldReplace false
+        assert(snapshotEdgeOpt.isDefined)
+        snapshotEdgeOpt.get.toSnapshotEdge
+      case Some(newSnapshotEdge) => newSnapshotEdge
+    }
+    base.copy(version = newVersion, statusCode = 0, pendingEdgeOpt = None)
+  }
+
+
+
+  protected def mutate(predicate: Boolean,
+             edge: Edge,
+             statusCode: Byte,
+             _edgeMutate: EdgeMutate): Future[Boolean] = {
+    if (!predicate) throw new PartialFailureException(edge, 1, "predicate failed.")
+
+    if (statusCode >= 2) {
+      logger.debug(s"skip mutate: [$statusCode]\n${edge.toLogString}")
+      Future.successful(true)
+    } else {
+      val p = Random.nextDouble()
+      if (p < FailProb) throw new PartialFailureException(edge, 1, s"$p")
+      else
+        writeAsyncSimple(edge.label.hbaseZkAddr, indexedEdgeMutations(_edgeMutate), withWait = true).map { ret =>
+          if (ret) {
+            debug(ret, "mutate", edge.toSnapshotEdge, _edgeMutate)
+          } else {
+            throw new PartialFailureException(edge, 1, "hbase fail.")
+          }
+          true
+        }
+    }
+  }
+
+  protected def increment(predicate: Boolean,
+                edge: Edge,
+                statusCode: Byte, _edgeMutate: EdgeMutate): Future[Boolean] = {
+    if (!predicate) throw new PartialFailureException(edge, 2, "predicate failed.")
+    if (statusCode >= 3) {
+      logger.debug(s"skip increment: [$statusCode]\n${edge.toLogString}")
+      Future.successful(true)
+    } else {
+      val p = Random.nextDouble()
+      if (p < FailProb) throw new PartialFailureException(edge, 2, s"$p")
+      else
+        writeAsyncSimple(edge.label.hbaseZkAddr, increments(_edgeMutate), withWait = true).map { ret =>
+          if (ret) {
+            debug(ret, "increment", edge.toSnapshotEdge, _edgeMutate)
+          } else {
+            throw new PartialFailureException(edge, 2, "hbase fail.")
+          }
+          true
+        }
+    }
+  }
+
+
+
+  protected def commitUpdate(edge: Edge,
+                   statusCode: Byte)(snapshotEdgeOpt: Option[Edge],
+                                     kvOpt: Option[SKeyValue],
+                                     edgeUpdate: EdgeMutate): Future[Boolean] = {
+    val label = edge.label
+    def oldBytes = kvOpt.map(_.value).getOrElse(Array.empty)
+    //    def oldBytes = snapshotEdgeOpt.map { e =>
+    //      snapshotEdgeSerializer(e.toSnapshotEdge).toKeyValues.head.value
+    //    }.getOrElse(Array.empty)
+    def process(lockEdge: SnapshotEdge,
+                releaseLockEdge: SnapshotEdge,
+                _edgeMutate: EdgeMutate,
+                statusCode: Byte): Future[Boolean] = {
+
+      for {
+        locked <- acquireLock(statusCode, edge, lockEdge, oldBytes)
+        mutated <- mutate(locked, edge, statusCode, _edgeMutate)
+        incremented <- increment(mutated, edge, statusCode, _edgeMutate)
+        released <- releaseLock(incremented, edge, lockEdge, releaseLockEdge, _edgeMutate, oldBytes)
+      } yield {
+        released
+      }
+    }
+
+
+    val lockEdge = buildLockEdge(snapshotEdgeOpt, edge, kvOpt)
+    val releaseLockEdge = buildReleaseLockEdge(snapshotEdgeOpt, lockEdge, edgeUpdate)
+    snapshotEdgeOpt match {
+      case None =>
+        // no one ever did success on acquire lock.
+        process(lockEdge, releaseLockEdge, edgeUpdate, statusCode)
+      case Some(snapshotEdge) =>
+        // someone did success on acquire lock at least one.
+        snapshotEdge.pendingEdgeOpt match {
+          case None =>
+            // not locked
+            process(lockEdge, releaseLockEdge, edgeUpdate, statusCode)
+          case Some(pendingEdge) =>
+            def isLockExpired = pendingEdge.lockTs.get + LockExpireDuration < System.currentTimeMillis()
+            if (isLockExpired) {
+              val oldSnapshotEdge = if (snapshotEdge.ts == pendingEdge.ts) None else Option(snapshotEdge)
+              val (_, newEdgeUpdate) = Edge.buildOperation(oldSnapshotEdge, Seq(pendingEdge))
+              val newLockEdge = buildLockEdge(snapshotEdgeOpt, pendingEdge, kvOpt)
+              val newReleaseLockEdge = buildReleaseLockEdge(snapshotEdgeOpt, newLockEdge, newEdgeUpdate)
+              process(newLockEdge, newReleaseLockEdge, newEdgeUpdate, statusCode = 0).flatMap { ret =>
+                val log = s"[Success]: Resolving expired pending edge.\n${pendingEdge.toLogString}"
+                throw new PartialFailureException(edge, 0, log)
+              }
+            } else {
+              // locked
+              if (pendingEdge.ts == edge.ts && statusCode > 0) {
+                // self locked
+                val oldSnapshotEdge = if (snapshotEdge.ts == pendingEdge.ts) None else Option(snapshotEdge)
+                val (_, newEdgeUpdate) = Edge.buildOperation(oldSnapshotEdge, Seq(edge))
+                val newReleaseLockEdge = buildReleaseLockEdge(snapshotEdgeOpt, lockEdge, newEdgeUpdate)
+
+                /** lockEdge will be ignored */
+                process(lockEdge, newReleaseLockEdge, newEdgeUpdate, statusCode)
+              } else {
+                throw new PartialFailureException(edge, statusCode, s"others[${pendingEdge.ts}] is mutating. me[${edge.ts}]")
+              }
+            }
+        }
+    }
+  }
+
+  /** end of methods for consistency */
+
+
+//  def futureCache[T] = Cache[Long, (Long, T)]
+
+  protected def toRequestEdge(queryRequest: QueryRequest): Edge = {
+    val srcVertex = queryRequest.vertex
+    //    val tgtVertexOpt = queryRequest.tgtVertexOpt
+    val edgeCf = HSerializable.edgeCf
+    val queryParam = queryRequest.queryParam
+    val tgtVertexIdOpt = queryParam.tgtVertexInnerIdOpt
+    val label = queryParam.label
+    val labelWithDir = queryParam.labelWithDir
+    val (srcColumn, tgtColumn) = label.srcTgtColumn(labelWithDir.dir)
+    val (srcInnerId, tgtInnerId) = tgtVertexIdOpt match {
+      case Some(tgtVertexId) => // _to is given.
+        /** we use toSnapshotEdge so dont need to swap src, tgt */
+        val src = InnerVal.convertVersion(srcVertex.innerId, srcColumn.columnType, label.schemaVersion)
+        val tgt = InnerVal.convertVersion(tgtVertexId, tgtColumn.columnType, label.schemaVersion)
+        (src, tgt)
+      case None =>
+        val src = InnerVal.convertVersion(srcVertex.innerId, srcColumn.columnType, label.schemaVersion)
+        (src, src)
+    }
+
+    val (srcVId, tgtVId) = (SourceVertexId(srcColumn.id.get, srcInnerId), TargetVertexId(tgtColumn.id.get, tgtInnerId))
+    val (srcV, tgtV) = (Vertex(srcVId), Vertex(tgtVId))
+    val currentTs = System.currentTimeMillis()
+    val propsWithTs = Map(LabelMeta.timeStampSeq -> InnerValLikeWithTs(InnerVal.withLong(currentTs, label.schemaVersion), currentTs)).toMap
+    Edge(srcV, tgtV, labelWithDir, propsWithTs = propsWithTs)
+  }
+
+
+
+  protected def fetchSnapshotEdge(edge: Edge): Future[(QueryParam, Option[Edge], Option[SKeyValue])] = {
+    val labelWithDir = edge.labelWithDir
+    val queryParam = QueryParam(labelWithDir)
+    val _queryParam = queryParam.tgtVertexInnerIdOpt(Option(edge.tgtVertex.innerId))
+    val q = Query.toQuery(Seq(edge.srcVertex), _queryParam)
+    val queryRequest = QueryRequest(q, 0, edge.srcVertex, _queryParam)
+
+    fetchKeyValues(buildRequest(queryRequest)).map { kvs =>
+      val (edgeOpt, kvOpt) =
+        if (kvs.isEmpty) (None, None)
+        else {
+          val _edgeOpt = toEdges(kvs, queryParam, 1.0, isInnerCall = true, parentEdges = Nil).headOption.map(_.edge)
+          val _kvOpt = kvs.headOption
+          (_edgeOpt, _kvOpt)
+        }
+      (queryParam, edgeOpt, kvOpt)
+    } recoverWith { case ex: Throwable =>
+      logger.error(s"fetchQueryParam failed. fallback return.", ex)
+      throw new FetchTimeoutException(s"${edge.toLogString}")
+    }
+  }
+
+  protected def fetchStep(orgQuery: Query, queryRequestWithResultsLs: Seq[QueryRequestWithResult]): Future[Seq[QueryRequestWithResult]] = {
+    if (queryRequestWithResultsLs.isEmpty) Future.successful(Nil)
+    else {
+      val queryRequest = queryRequestWithResultsLs.head.queryRequest
+      val q = orgQuery
+      val queryResultsLs = queryRequestWithResultsLs.map(_.queryResult)
+
+      val stepIdx = queryRequest.stepIdx + 1
+
+      val prevStepOpt = if (stepIdx > 0) Option(q.steps(stepIdx - 1)) else None
+      val prevStepThreshold = prevStepOpt.map(_.nextStepScoreThreshold).getOrElse(QueryParam.DefaultThreshold)
+      val prevStepLimit = prevStepOpt.map(_.nextStepLimit).getOrElse(-1)
+      val step = q.steps(stepIdx)
+      val alreadyVisited =
+        if (stepIdx == 0) Map.empty[(LabelWithDirection, Vertex), Boolean]
+        else Graph.alreadyVisitedVertices(queryResultsLs)
+
+      val groupedBy = queryResultsLs.flatMap { queryResult =>
+        queryResult.edgeWithScoreLs.map { case edgeWithScore =>
+          edgeWithScore.edge.tgtVertex -> edgeWithScore
+        }
+      }.groupBy { case (vertex, edgeWithScore) => vertex }
+
+      val groupedByFiltered = for {
+        (vertex, edgesWithScore) <- groupedBy
+        aggregatedScore = edgesWithScore.map(_._2.score).sum if aggregatedScore >= prevStepThreshold
+      } yield vertex -> aggregatedScore
+
+      val prevStepTgtVertexIdEdges = for {
+        (vertex, edgesWithScore) <- groupedBy
+      } yield vertex.id -> edgesWithScore.map { case (vertex, edgeWithScore) => edgeWithScore }
+
+      val nextStepSrcVertices = if (prevStepLimit >= 0) {
+        groupedByFiltered.toSeq.sortBy(-1 * _._2).take(prevStepLimit)
+      } else {
+        groupedByFiltered.toSeq
+      }
+
+      val queryRequests = for {
+        (vertex, prevStepScore) <- nextStepSrcVertices
+        queryParam <- step.queryParams
+      } yield (QueryRequest(q, stepIdx, vertex, queryParam), prevStepScore)
+
+      Graph.filterEdges(fetches(queryRequests, prevStepTgtVertexIdEdges), alreadyVisited)(ec)
+    }
+  }
+
+  protected def fetchStepFuture(orgQuery: Query, queryRequestWithResultLsFuture: Future[Seq[QueryRequestWithResult]]): Future[Seq[QueryRequestWithResult]] = {
+    for {
+      queryRequestWithResultLs <- queryRequestWithResultLsFuture
+      ret <- fetchStep(orgQuery, queryRequestWithResultLs)
+    } yield ret
+  }
+
+  def getEdges(q: Query): Future[Seq[QueryRequestWithResult]] = {
+    val fallback = {
+      val queryRequest = QueryRequest(query = q, stepIdx = 0, q.vertices.head, queryParam = QueryParam.Empty)
+      Future.successful(q.vertices.map(v => QueryRequestWithResult(queryRequest, QueryResult())))
+    }
+    Try {
+      if (q.steps.isEmpty) {
+        // TODO: this should be get vertex query.
+        fallback
+      } else {
+        // current stepIdx = -1
+        val startQueryResultLs = QueryResult.fromVertices(q)
+        q.steps.foldLeft(Future.successful(startQueryResultLs)) { case (acc, step) =>
+          fetchStepFuture(q, acc)
+        }
+      }
+    } recover {
+      case e: Exception =>
+        logger.error(s"getEdgesAsync: $e", e)
+        fallback
+    } get
+  }
+
+  def checkEdges(params: Seq[(Vertex, Vertex, QueryParam)]): Future[Seq[QueryRequestWithResult]] = {
+    val ts = System.currentTimeMillis()
+    val futures = for {
+      (srcVertex, tgtVertex, queryParam) <- params
+      propsWithTs = Map(LabelMeta.timeStampSeq -> InnerValLikeWithTs.withLong(ts, ts, queryParam.label.schemaVersion))
+      edge = Edge(srcVertex, tgtVertex, queryParam.labelWithDir, propsWithTs = propsWithTs)
+    } yield {
+        fetchSnapshotEdge(edge).map { case (queryParam, edgeOpt, kvOpt) =>
+          val _queryParam = queryParam.tgtVertexInnerIdOpt(Option(edge.tgtVertex.innerId))
+          val q = Query.toQuery(Seq(edge.srcVertex), _queryParam)
+          val queryRequest = QueryRequest(q, 0, edge.srcVertex, _queryParam)
+          val queryResult = QueryResult(edgeOpt.toSeq.map(e => EdgeWithScore(e, 1.0)))
+          QueryRequestWithResult(queryRequest, queryResult)
+        }
+      }
+
+    Future.sequence(futures)
+  }
+
+
+
+  @tailrec
+  final def randomInt(sampleNumber: Int, range: Int, set: Set[Int] = Set.empty[Int]): Set[Int] = {
+    if (range < sampleNumber || set.size == sampleNumber) set
+    else randomInt(sampleNumber, range, set + Random.nextInt(range))
+  }
+
+  protected def sample(queryRequest: QueryRequest, edges: Seq[EdgeWithScore], n: Int): Seq[EdgeWithScore] = {
+    if (edges.size <= n){
+      edges
+    }else{
+      val plainEdges = if (queryRequest.queryParam.offset == 0) {
+        edges.tail
+      } else edges
+
+      val randoms = randomInt(n, plainEdges.size)
+      var samples = List.empty[EdgeWithScore]
+      var idx = 0
+      plainEdges.foreach { e =>
+        if (randoms.contains(idx)) samples = e :: samples
+        idx += 1
+      }
+      samples.toSeq
+    }
+
+  }
+  /** end of query */
+
+  /** Mutation Builder */
 
 
   /** EdgeMutate */

@@ -8,6 +8,7 @@ import com.kakao.s2graph.core.mysqls._
 import com.kakao.s2graph.core.parsers.WhereParser
 import com.kakao.s2graph.core.storage.Storage
 import com.kakao.s2graph.core.storage.hbase._
+import com.kakao.s2graph.core.storage.rocks.RocksDBStorage
 import com.kakao.s2graph.core.types._
 import com.kakao.s2graph.core.utils.logger
 import com.typesafe.config.{Config, ConfigFactory}
@@ -314,16 +315,16 @@ object Graph {
 
 class Graph(_config: Config)(implicit val ec: ExecutionContext) {
   val config = _config.withFallback(Graph.DefaultConfig)
-  val cacheSize = config.getInt("cache.max.size")
+//  val cacheSize = config.getInt("cache.max.size")
 //  val cache = CacheBuilder.newBuilder().maximumSize(cacheSize).build[java.lang.Integer, Seq[QueryResult]]()
-  val vertexCache = CacheBuilder.newBuilder().maximumSize(cacheSize).build[java.lang.Integer, Option[Vertex]]()
+//  val vertexCache = CacheBuilder.newBuilder().maximumSize(cacheSize).build[java.lang.Integer, Option[Vertex]]()
 
   Model.apply(config)
   Model.loadCache()
 
   // TODO: Make storage client by config param
-  val storage = new AsynchbaseStorage(config, vertexCache)(ec)
-//  val storage: Storage = new RocksDBStorage(config)(ec)
+//  val storage = new AsynchbaseStorage(config)(ec)
+  val storage = new RocksDBStorage(config)(ec)
 
   for {
     entry <- config.entrySet() if Graph.DefaultConfigs.contains(entry.getKey)
