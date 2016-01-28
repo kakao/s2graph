@@ -148,7 +148,7 @@ trait IntegrateCommon extends FunSuite with Matchers with BeforeAndAfterAll {
     val index1 = "idx_1"
     val index2 = "idx_2"
 
-    val NumOfEachTest = 30
+    val NumOfEachTest = 1
     val HttpRequestWaitingTime = Duration("60 seconds")
 
     val createService = s"""{"serviceName" : "$testServiceName"}"""

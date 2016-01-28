@@ -52,7 +52,7 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
 //      case "v" => vertexCfHandler
 //      case _ => throw new RuntimeException(s"not supported column family. $cf")
 //    }
-    logger.debug(s"$rpc")
+//    logger.debug(s"$rpc")
     rpc.operation match {
       case SKeyValue.Put => db.put(rpc.row, rpc.value)
       case SKeyValue.Delete => db.remove(rpc.row)

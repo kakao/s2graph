@@ -465,7 +465,7 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
                               queryParam: QueryParam,
                               cacheElementOpt: Option[IndexEdge],
                               parentEdges: Seq[EdgeWithScore]): Option[Edge] = {
-    logger.debug(s"toEdge: $kv")
+//    logger.debug(s"toEdge: $kv")
     try {
       val indexEdge = indexEdgeDeserializer.fromKeyValues(queryParam, Seq(kv), queryParam.label.schemaVersion, cacheElementOpt)
 
@@ -482,7 +482,7 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
                                       cacheElementOpt: Option[SnapshotEdge] = None,
                                       isInnerCall: Boolean,
                                       parentEdges: Seq[EdgeWithScore]): Option[Edge] = {
-    logger.debug(s"toEdge: $kv")
+//    logger.debug(s"toEdge: $kv")
     val snapshotEdge = snapshotEdgeDeserializer.fromKeyValues(queryParam, Seq(kv), queryParam.label.schemaVersion, cacheElementOpt)
 
     if (isInnerCall) {

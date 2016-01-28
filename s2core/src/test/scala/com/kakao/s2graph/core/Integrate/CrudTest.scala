@@ -1,6 +1,7 @@
 package com.kakao.s2graph.core.Integrate
 
 import com.kakao.s2graph.core.mysqls._
+import com.kakao.s2graph.core.utils.logger
 import play.api.libs.json.{JsObject, Json}
 
 class CrudTest extends IntegrateCommon {
@@ -32,122 +33,122 @@ class CrudTest extends IntegrateCommon {
 
     tcRunner.run(tcNum, tcString, bulkQueries, expected)
 
-    tcNum = 2
-    tcString = "[t1 -> t2 -> t3 test case] insert(t1) delete(t2) insert(t3) test "
-    bulkQueries = List(
-      (t1, "insert", "{\"time\": 10}"),
-      (t3, "insert", "{\"time\": 10, \"weight\": 20}"),
-      (t2, "delete", ""))
-    expected = Map("time" -> "10", "weight" -> "20")
-
-    tcRunner.run(tcNum, tcString, bulkQueries, expected)
-
-    tcNum = 3
-    tcString = "[t3 -> t2 -> t1 test case] insert(t3) delete(t2) insert(t1) test "
-    bulkQueries = List(
-      (t3, "insert", "{\"time\": 10, \"weight\": 20}"),
-      (t2, "delete", ""),
-      (t1, "insert", "{\"time\": 10}"))
-    expected = Map("time" -> "10", "weight" -> "20")
-
-    tcRunner.run(tcNum, tcString, bulkQueries, expected)
-
-    tcNum = 4
-    tcString = "[t3 -> t1 -> t2 test case] insert(t3) insert(t1) delete(t2) test "
-    bulkQueries = List(
-      (t3, "insert", "{\"time\": 10, \"weight\": 20}"),
-      (t1, "insert", "{\"time\": 10}"),
-      (t2, "delete", ""))
-    expected = Map("time" -> "10", "weight" -> "20")
-
-    tcRunner.run(tcNum, tcString, bulkQueries, expected)
-
-    tcNum = 5
-    tcString = "[t2 -> t1 -> t3 test case] delete(t2) insert(t1) insert(t3) test"
-    bulkQueries = List(
-      (t2, "delete", ""),
-      (t1, "insert", "{\"time\": 10}"),
-      (t3, "insert", "{\"time\": 10, \"weight\": 20}"))
-    expected = Map("time" -> "10", "weight" -> "20")
-
-    tcRunner.run(tcNum, tcString, bulkQueries, expected)
-
-    tcNum = 6
-    tcString = "[t2 -> t3 -> t1 test case] delete(t2) insert(t3) insert(t1) test "
-    bulkQueries = List(
-      (t2, "delete", ""),
-      (t3, "insert", "{\"time\": 10, \"weight\": 20}"),
-      (t1, "insert", "{\"time\": 10}"))
-    expected = Map("time" -> "10", "weight" -> "20")
-
-    tcRunner.run(tcNum, tcString, bulkQueries, expected)
-
-    tcNum = 7
-    tcString = "[t1 -> t2 -> t3 test case] update(t1) delete(t2) update(t3) test "
-    bulkQueries = List(
-      (t1, "update", "{\"time\": 10}"),
-      (t2, "delete", ""),
-      (t3, "update", "{\"time\": 10, \"weight\": 20}"))
-    expected = Map("time" -> "10", "weight" -> "20")
-
-    tcRunner.run(tcNum, tcString, bulkQueries, expected)
-    tcNum = 8
-    tcString = "[t1 -> t3 -> t2 test case] update(t1) update(t3) delete(t2) test "
-    bulkQueries = List(
-      (t1, "update", "{\"time\": 10}"),
-      (t3, "update", "{\"time\": 10, \"weight\": 20}"),
-      (t2, "delete", ""))
-    expected = Map("time" -> "10", "weight" -> "20")
-
-    tcRunner.run(tcNum, tcString, bulkQueries, expected)
-    tcNum = 9
-    tcString = "[t2 -> t1 -> t3 test case] delete(t2) update(t1) update(t3) test "
-    bulkQueries = List(
-      (t2, "delete", ""),
-      (t1, "update", "{\"time\": 10}"),
-      (t3, "update", "{\"time\": 10, \"weight\": 20}"))
-    expected = Map("time" -> "10", "weight" -> "20")
-
-    tcRunner.run(tcNum, tcString, bulkQueries, expected)
-    tcNum = 10
-    tcString = "[t2 -> t3 -> t1 test case] delete(t2) update(t3) update(t1) test"
-    bulkQueries = List(
-      (t2, "delete", ""),
-      (t3, "update", "{\"time\": 10, \"weight\": 20}"),
-      (t1, "update", "{\"time\": 10}"))
-    expected = Map("time" -> "10", "weight" -> "20")
-
-    tcRunner.run(tcNum, tcString, bulkQueries, expected)
-    tcNum = 11
-    tcString = "[t3 -> t2 -> t1 test case] update(t3) delete(t2) update(t1) test "
-    bulkQueries = List(
-      (t3, "update", "{\"time\": 10, \"weight\": 20}"),
-      (t2, "delete", ""),
-      (t1, "update", "{\"time\": 10}"))
-    expected = Map("time" -> "10", "weight" -> "20")
-
-    tcRunner.run(tcNum, tcString, bulkQueries, expected)
-    tcNum = 12
-    tcString = "[t3 -> t1 -> t2 test case] update(t3) update(t1) delete(t2) test "
-    bulkQueries = List(
-      (t3, "update", "{\"time\": 10, \"weight\": 20}"),
-      (t1, "update", "{\"time\": 10}"),
-      (t2, "delete", ""))
-    expected = Map("time" -> "10", "weight" -> "20")
-
-    tcRunner.run(tcNum, tcString, bulkQueries, expected)
-
-    tcNum = 13
-    tcString = "[t5 -> t1 -> t3 -> t2 -> t4 test case] update(t5) insert(t1) insert(t3) delete(t2) update(t4) test "
-    bulkQueries = List(
-      (t5, "update", "{\"is_blocked\": true}"),
-      (t1, "insert", "{\"is_hidden\": false}"),
-      (t3, "insert", "{\"is_hidden\": false, \"weight\": 10}"),
-      (t2, "delete", ""),
-      (t4, "update", "{\"time\": 1, \"weight\": -10}"))
-    expected = Map("time" -> "1", "weight" -> "-10", "is_hidden" -> "false", "is_blocked" -> "true")
-
-    tcRunner.run(tcNum, tcString, bulkQueries, expected)
+//    tcNum = 2
+//    tcString = "[t1 -> t2 -> t3 test case] insert(t1) delete(t2) insert(t3) test "
+//    bulkQueries = List(
+//      (t1, "insert", "{\"time\": 10}"),
+//      (t3, "insert", "{\"time\": 10, \"weight\": 20}"),
+//      (t2, "delete", ""))
+//    expected = Map("time" -> "10", "weight" -> "20")
+//
+//    tcRunner.run(tcNum, tcString, bulkQueries, expected)
+//
+//    tcNum = 3
+//    tcString = "[t3 -> t2 -> t1 test case] insert(t3) delete(t2) insert(t1) test "
+//    bulkQueries = List(
+//      (t3, "insert", "{\"time\": 10, \"weight\": 20}"),
+//      (t2, "delete", ""),
+//      (t1, "insert", "{\"time\": 10}"))
+//    expected = Map("time" -> "10", "weight" -> "20")
+//
+//    tcRunner.run(tcNum, tcString, bulkQueries, expected)
+//
+//    tcNum = 4
+//    tcString = "[t3 -> t1 -> t2 test case] insert(t3) insert(t1) delete(t2) test "
+//    bulkQueries = List(
+//      (t3, "insert", "{\"time\": 10, \"weight\": 20}"),
+//      (t1, "insert", "{\"time\": 10}"),
+//      (t2, "delete", ""))
+//    expected = Map("time" -> "10", "weight" -> "20")
+//
+//    tcRunner.run(tcNum, tcString, bulkQueries, expected)
+//
+//    tcNum = 5
+//    tcString = "[t2 -> t1 -> t3 test case] delete(t2) insert(t1) insert(t3) test"
+//    bulkQueries = List(
+//      (t2, "delete", ""),
+//      (t1, "insert", "{\"time\": 10}"),
+//      (t3, "insert", "{\"time\": 10, \"weight\": 20}"))
+//    expected = Map("time" -> "10", "weight" -> "20")
+//
+//    tcRunner.run(tcNum, tcString, bulkQueries, expected)
+//
+//    tcNum = 6
+//    tcString = "[t2 -> t3 -> t1 test case] delete(t2) insert(t3) insert(t1) test "
+//    bulkQueries = List(
+//      (t2, "delete", ""),
+//      (t3, "insert", "{\"time\": 10, \"weight\": 20}"),
+//      (t1, "insert", "{\"time\": 10}"))
+//    expected = Map("time" -> "10", "weight" -> "20")
+//
+//    tcRunner.run(tcNum, tcString, bulkQueries, expected)
+//
+//    tcNum = 7
+//    tcString = "[t1 -> t2 -> t3 test case] update(t1) delete(t2) update(t3) test "
+//    bulkQueries = List(
+//      (t1, "update", "{\"time\": 10}"),
+//      (t2, "delete", ""),
+//      (t3, "update", "{\"time\": 10, \"weight\": 20}"))
+//    expected = Map("time" -> "10", "weight" -> "20")
+//
+//    tcRunner.run(tcNum, tcString, bulkQueries, expected)
+//    tcNum = 8
+//    tcString = "[t1 -> t3 -> t2 test case] update(t1) update(t3) delete(t2) test "
+//    bulkQueries = List(
+//      (t1, "update", "{\"time\": 10}"),
+//      (t3, "update", "{\"time\": 10, \"weight\": 20}"),
+//      (t2, "delete", ""))
+//    expected = Map("time" -> "10", "weight" -> "20")
+//
+//    tcRunner.run(tcNum, tcString, bulkQueries, expected)
+//    tcNum = 9
+//    tcString = "[t2 -> t1 -> t3 test case] delete(t2) update(t1) update(t3) test "
+//    bulkQueries = List(
+//      (t2, "delete", ""),
+//      (t1, "update", "{\"time\": 10}"),
+//      (t3, "update", "{\"time\": 10, \"weight\": 20}"))
+//    expected = Map("time" -> "10", "weight" -> "20")
+//
+//    tcRunner.run(tcNum, tcString, bulkQueries, expected)
+//    tcNum = 10
+//    tcString = "[t2 -> t3 -> t1 test case] delete(t2) update(t3) update(t1) test"
+//    bulkQueries = List(
+//      (t2, "delete", ""),
+//      (t3, "update", "{\"time\": 10, \"weight\": 20}"),
+//      (t1, "update", "{\"time\": 10}"))
+//    expected = Map("time" -> "10", "weight" -> "20")
+//
+//    tcRunner.run(tcNum, tcString, bulkQueries, expected)
+//    tcNum = 11
+//    tcString = "[t3 -> t2 -> t1 test case] update(t3) delete(t2) update(t1) test "
+//    bulkQueries = List(
+//      (t3, "update", "{\"time\": 10, \"weight\": 20}"),
+//      (t2, "delete", ""),
+//      (t1, "update", "{\"time\": 10}"))
+//    expected = Map("time" -> "10", "weight" -> "20")
+//
+//    tcRunner.run(tcNum, tcString, bulkQueries, expected)
+//    tcNum = 12
+//    tcString = "[t3 -> t1 -> t2 test case] update(t3) update(t1) delete(t2) test "
+//    bulkQueries = List(
+//      (t3, "update", "{\"time\": 10, \"weight\": 20}"),
+//      (t1, "update", "{\"time\": 10}"),
+//      (t2, "delete", ""))
+//    expected = Map("time" -> "10", "weight" -> "20")
+//
+//    tcRunner.run(tcNum, tcString, bulkQueries, expected)
+//
+//    tcNum = 13
+//    tcString = "[t5 -> t1 -> t3 -> t2 -> t4 test case] update(t5) insert(t1) insert(t3) delete(t2) update(t4) test "
+//    bulkQueries = List(
+//      (t5, "update", "{\"is_blocked\": true}"),
+//      (t1, "insert", "{\"is_hidden\": false}"),
+//      (t3, "insert", "{\"is_hidden\": false, \"weight\": 10}"),
+//      (t2, "delete", ""),
+//      (t4, "update", "{\"time\": 1, \"weight\": -10}"))
+//    expected = Map("time" -> "1", "weight" -> "-10", "is_hidden" -> "false", "is_blocked" -> "true")
+//
+//    tcRunner.run(tcNum, tcString, bulkQueries, expected)
   }
 
 
@@ -172,7 +173,7 @@ class CrudTest extends IntegrateCommon {
           val bulkEdges = (for ((ts, op, props) <- opWithProps) yield {
             TestUtil.toEdge(ts, op, "e", srcId, tgtId, labelName, props)
           })
-
+          println(bulkEdges)
           TestUtil.insertEdgesSync(bulkEdges: _*)
 
           for {
@@ -189,7 +190,7 @@ class CrudTest extends IntegrateCommon {
             val query = queryJson(serviceName, columnName, labelName, qId, direction, cacheTTL)
 
             val jsResult = TestUtil.getEdgesSync(query)
-
+            logger.debug(s"$jsResult")
             val results = jsResult \ "results"
             val deegrees = (jsResult \ "degrees").as[List[JsObject]]
             val propsLs = (results \\ "props").seq
