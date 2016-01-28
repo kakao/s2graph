@@ -3,9 +3,9 @@ package com.kakao.s2graph.core.utils
 import com.stumbleupon.async.{Callback, Deferred}
 import com.typesafe.config.Config
 import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.util.{Failure, Success}
 
 object Extensions {
-
 
   def retryOnSuccess[T](maxRetryNum: Int, n: Int = 1)(fn: => Future[T])(shouldStop: T => Boolean)(implicit ex: ExecutionContext): Future[T] = n match {
     case i if n <= maxRetryNum =>
@@ -29,7 +29,17 @@ object Extensions {
     case _ =>
       Future.successful(fallback)
   }
-
+//
+//  implicit class FutureOps[T](f: Future[T])(implicit ex: ExecutionContext) {
+//    def toDefer: Deferred[T] = {
+//      val promise = new Deferred[T]()
+//      f.onComplete {
+//        case Success(v) => promise.callback(v)
+//        case Failure(ex) => promise.callback(ex)
+//      }
+//      promise
+//    }
+//  }
 
   implicit class DeferOps[T](d: Deferred[T])(implicit ex: ExecutionContext) {
 

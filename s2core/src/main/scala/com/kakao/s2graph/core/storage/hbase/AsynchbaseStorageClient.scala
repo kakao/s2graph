@@ -23,7 +23,7 @@ class AsynchbaseStorageClient(config: Config)(implicit ec: ExecutionContext)
       case _ => Future.failed(ex)
     }
 
-  override def checkAndSet(rpc: HBaseRpc, expected: Array[Byte]): Future[Boolean] = {
+  override def compareAndSet(rpc: HBaseRpc, expected: Array[Byte]): Future[Boolean] = {
     rpc match {
       case p: PutRequest => client.compareAndSet(p, expected).withCallback(_ => true).recoverWith { ex =>
         logger.error(s"mutation failed. $rpc", ex)

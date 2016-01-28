@@ -188,7 +188,7 @@ object PostProcess extends JSONParser {
         queryRequestWithResult <- queryRequestWithResultLs
         (queryRequest, queryResult) = QueryRequestWithResult.unapply(queryRequestWithResult).get
         queryParam = queryRequest.queryParam
-        edgeWithScore = queryResult.edgeWithScoreLs.last
+        edgeWithScore <- queryResult.edgeWithScoreLs.lastOption
         (edge, score) = EdgeWithScore.unapply(edgeWithScore).get
       } {
         // edge to json
