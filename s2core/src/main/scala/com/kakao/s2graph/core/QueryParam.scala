@@ -6,7 +6,7 @@ import com.kakao.s2graph.core.parsers.{Where, WhereParser}
 import com.kakao.s2graph.core.types._
 import org.apache.hadoop.hbase.util.Bytes
 import org.hbase.async.ColumnRangeFilter
-import play.api.libs.json.{JsNumber, JsValue, Json}
+import play.api.libs.json.{JsNull, JsNumber, JsValue, Json}
 
 import scala.util.hashing.MurmurHash3
 import scala.util.{Success, Try}
@@ -44,7 +44,8 @@ case class Query(vertices: Seq[Vertex] = Seq.empty[Vertex],
                  withScore: Boolean = true,
                  returnTree: Boolean = false,
                  limitOpt: Option[Int] = None,
-                 returnAgg: Boolean = true) {
+                 returnAgg: Boolean = true,
+                 jsonQuery: JsValue = JsNull) {
 
   def cacheKeyBytes: Array[Byte] = {
     val selectBytes = Bytes.toBytes(selectColumns.toString)
@@ -78,6 +79,7 @@ case class Query(vertices: Seq[Vertex] = Seq.empty[Vertex],
   }
 
   def cursorStrings(): Seq[Seq[String]] = {
+    //Don`t know how to replace all cursor keys in json
     steps.map { step =>
       step.queryParams.map { queryParam =>
         queryParam.cursorOpt.getOrElse("")

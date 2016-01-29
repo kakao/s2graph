@@ -238,7 +238,8 @@ class RequestParser(config: Config) extends JSONParser {
         withScore = withScore,
         returnTree = returnTree,
         limitOpt = limitOpt,
-        returnAgg = returnAgg
+        returnAgg = returnAgg,
+        jsonQuery = jsValue
       )
       //      logger.debug(ret.toString)
       ret
