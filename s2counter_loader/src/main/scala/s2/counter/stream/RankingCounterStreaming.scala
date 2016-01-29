@@ -59,13 +59,6 @@ object RankingCounterStreaming extends SparkApp with WithKafka {
       }
 
       streamHelper.commitConsumerOffsets(nextRdd.asInstanceOf[HasOffsetRanges])
-//      CounterFunctions.makeRankingRdd(rdd, offsets.length).foreachPartitionWithIndex { (i, part) =>
-//        // update ranking counter
-//        CounterFunctions.updateRankingCounter(part, acc)
-//
-//        // commit offset range
-//        streamHelper.commitConsumerOffset(offsets(i))
-//      }
     }
 
     ssc.start()

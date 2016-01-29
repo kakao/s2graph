@@ -2,7 +2,6 @@ package s2.counter.stream
 
 import kafka.serializer.StringDecoder
 import org.apache.spark.streaming.Durations._
-import org.apache.spark.streaming.kafka.KafkaRDDFunctions.rddToKafkaRDDFunctions
 import org.apache.spark.streaming.kafka.{HasOffsetRanges, StreamHelper}
 import s2.config.{S2ConfigFactory, S2CounterConfig, StreamingConfig}
 import s2.counter.core.CounterFunctions
@@ -26,7 +25,6 @@ object ExactCounterStreaming extends SparkApp with WithKafka {
   val strInputTopics = inputTopics.mkString(",")
   val groupId = buildKafkaGroupId(strInputTopics, "counter_v2")
   val kafkaParam = Map(
-//    "auto.offset.reset" -> "smallest",
     "group.id" -> groupId,
     "metadata.broker.list" -> StreamingConfig.KAFKA_BROKERS,
     "zookeeper.connect" -> StreamingConfig.KAFKA_ZOOKEEPER,
@@ -62,19 +60,6 @@ object ExactCounterStreaming extends SparkApp with WithKafka {
       }
 
       streamHelper.commitConsumerOffsets(nextRdd.asInstanceOf[HasOffsetRanges])
-//      val offsets = rdd.asInstanceOf[HasOffsetRanges].offsetRanges
-//
-//      val exactRDD = CounterFunctions.makeExactRdd(rdd, offsets.length)
-//
-//      // for at-least once semantic
-//      exactRDD.foreachPartitionWithIndex { (i, part) =>
-//        // update exact counter
-//        val trxLogs = CounterFunctions.updateExactCounter(part.toSeq, acc)
-//        CounterFunctions.produceTrxLog(trxLogs)
-//
-//        // commit offset range
-//        streamHelper.commitConsumerOffset(offsets(i))
-//      }
     }
 
     ssc.start()

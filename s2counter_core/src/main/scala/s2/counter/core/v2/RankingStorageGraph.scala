@@ -317,6 +317,7 @@ class RankingStorageGraph(config: Config) extends RankingStorage {
                 "label" -> labelName,
                 "props" -> Json.obj(
                   "time_unit" -> rankingKey.eq.tq.q.toString,
+                  "time_value" -> rankingKey.eq.tq.ts,
                   "date_time" -> rankingKey.eq.tq.dateTime
                 )
               )
