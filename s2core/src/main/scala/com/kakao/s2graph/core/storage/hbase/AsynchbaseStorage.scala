@@ -447,9 +447,6 @@ class AsynchbaseStorage(override val config: Config)(implicit ec: ExecutionConte
     client(withWait = true).compareAndSet(put, expected).withCallback(ret => ret.booleanValue()).toFuture
   }
 
-  private def toPutRequest(snapshotEdge: SnapshotEdge): PutRequest =
-    buildPutAsync(snapshotEdge).head.asInstanceOf[PutRequest]
-
 
   private def toCacheKeyBytes(hbaseRpc: AnyRef): Array[Byte] = {
     hbaseRpc match {

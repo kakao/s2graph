@@ -1,5 +1,7 @@
 package com.kakao.s2graph.core.storage
 
+import java.util.Base64
+
 import com.google.common.cache.{CacheBuilder, Cache}
 import com.kakao.s2graph.core.ExceptionHandler.{Key, Val, KafkaMessage}
 import com.kakao.s2graph.core.GraphExceptions.FetchTimeoutException
@@ -16,7 +18,7 @@ import scala.annotation.tailrec
 import scala.collection.Seq
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.{Random, Try}
+import scala.util.{Success, Random, Try}
 
 abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) {
 
@@ -896,6 +898,7 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
       Future.successful(q.vertices.map(v => QueryRequestWithResult(queryRequest, QueryResult())))
     }
     Try {
+
       if (q.steps.isEmpty) {
         // TODO: this should be get vertex query.
         fallback
@@ -903,7 +906,13 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
         // current stepIdx = -1
         val startQueryResultLs = QueryResult.fromVertices(q)
         q.steps.foldLeft(Future.successful(startQueryResultLs)) { case (acc, step) =>
-          fetchStepFuture(q, acc)
+          fetchStepFuture(q, acc).map { stepResults =>
+            step.queryParams.zip(stepResults).foreach { case (qParam, queryRequestWithResult)  =>
+              val cursor = Base64.getEncoder.encodeToString(queryRequestWithResult.queryResult.tailCursor)
+              qParam.cursorOpt = Option(cursor)
+            }
+            stepResults
+          }
         }
       }
     } recover {

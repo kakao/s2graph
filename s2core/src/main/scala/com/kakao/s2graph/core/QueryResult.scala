@@ -22,6 +22,9 @@ object QueryResult {
     }
   }
 }
+
+case class CursorsWithQueryRequestWithResult(cursors: Seq[Seq[String]], queryRequestWithResult: QueryRequestWithResult)
+
 case class QueryRequestWithResult(queryRequest: QueryRequest, queryResult: QueryResult)
 
 case class QueryRequest(query: Query,

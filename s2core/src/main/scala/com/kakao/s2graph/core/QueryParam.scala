@@ -76,6 +76,14 @@ case class Query(vertices: Seq[Vertex] = Seq.empty[Vertex],
     val hash = MurmurHash3.stringHash(templateId().toString())
     JsNumber(hash)
   }
+
+  def cursorStrings(): Seq[Seq[String]] = {
+    steps.map { step =>
+      step.queryParams.map { queryParam =>
+        queryParam.cursorOpt.getOrElse("")
+      }
+    }
+  }
 }
 
 object EdgeTransformer {
@@ -279,6 +287,7 @@ case class QueryParam(labelWithDir: LabelWithDirection, timestamp: Long = System
 
   lazy val srcColumnWithDir = label.srcColumnWithDir(labelWithDir.dir)
   lazy val tgtColumnWithDir = label.tgtColumnWithDir(labelWithDir.dir)
+
 
   def toBytes(idxSeq: Byte, offset: Int, limit: Int, isInverted: Boolean): Array[Byte] = {
     val front = Array[Byte](idxSeq, if (isInverted) 1.toByte else 0.toByte)

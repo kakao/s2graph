@@ -323,8 +323,8 @@ class Graph(_config: Config)(implicit val ec: ExecutionContext) {
   Model.loadCache()
 
   // TODO: Make storage client by config param
-//  val storage = new AsynchbaseStorage(config)(ec)
-  val storage = new RocksDBStorage(config)(ec)
+  val storage = new AsynchbaseStorage(config)(ec)
+//  val storage = new RocksDBStorage(config)(ec)
 
   for {
     entry <- config.entrySet() if Graph.DefaultConfigs.contains(entry.getKey)

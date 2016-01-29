@@ -131,8 +131,8 @@ object PostProcess extends JSONParser {
     sortWithFormatted(jsons, queryRequestWithResultLs = queryRequestWithResultLs)
   }
 
-  def toSimpleVertexArrJson(queryRequestWithResultLs: Seq[QueryRequestWithResult]): JsValue = {
-    toSimpleVertexArrJson(queryRequestWithResultLs, Seq.empty[QueryRequestWithResult])
+  def toSimpleVertexArrJson(q: Query, queryRequestWithResultLs: Seq[QueryRequestWithResult]): JsValue = {
+    toSimpleVertexArrJson(q, queryRequestWithResultLs, Seq.empty[QueryRequestWithResult])
   }
 
   private def orderBy(q: Query,
@@ -161,7 +161,7 @@ object PostProcess extends JSONParser {
     }
   }
 
-  def toSimpleVertexArrJson(queryRequestWithResultLs: Seq[QueryRequestWithResult], exclude: Seq[QueryRequestWithResult]): JsValue = {
+  def toSimpleVertexArrJson(q: Query, queryRequestWithResultLs: Seq[QueryRequestWithResult], exclude: Seq[QueryRequestWithResult]): JsValue = {
     val excludeIds = resultInnerIds(exclude).map(innerId => innerId -> true).toMap
 
     val degrees = ListBuffer[JsValue]()
@@ -184,23 +184,23 @@ object PostProcess extends JSONParser {
       }
 
       /** build result jsons */
-      for {
-        queryRequestWithResult <- queryRequestWithResultLs
-        (queryRequest, queryResult) = QueryRequestWithResult.unapply(queryRequestWithResult).get
-        queryParam = queryRequest.queryParam
-        edgeWithScore <- queryResult.edgeWithScoreLs.lastOption
-        (edge, score) = EdgeWithScore.unapply(edgeWithScore).get
-      } {
-        // edge to json
-        val (srcColumn, _) = queryParam.label.srcTgtColumn(edge.labelWithDir.dir)
-        val fromOpt = innerValToJsValue(edge.srcVertex.id.innerId, srcColumn.columnType)
-        cursors += Json.obj(
-          "from" -> fromOpt.get,
-          "label" -> queryRequest.queryParam.label.label,
-          "direction" -> GraphUtil.fromDirection(edge.labelWithDir.dir),
-          "cursor" -> Base64.getEncoder.encodeToString(queryResult.tailCursor)
-        )
-      }
+//      for {
+//        queryRequestWithResult <- queryRequestWithResultLs
+//        (queryRequest, queryResult) = QueryRequestWithResult.unapply(queryRequestWithResult).get
+//        queryParam = queryRequest.queryParam
+//        edgeWithScore <- queryResult.edgeWithScoreLs.lastOption
+//        (edge, score) = EdgeWithScore.unapply(edgeWithScore).get
+//      } {
+//        // edge to json
+//        val (srcColumn, _) = queryParam.label.srcTgtColumn(edge.labelWithDir.dir)
+//        val fromOpt = innerValToJsValue(edge.srcVertex.id.innerId, srcColumn.columnType)
+//        cursors += Json.obj(
+//          "from" -> fromOpt.get,
+//          "label" -> queryRequest.queryParam.label.label,
+//          "direction" -> GraphUtil.fromDirection(edge.labelWithDir.dir),
+//          "cursor" -> Base64.getEncoder.encodeToString(queryResult.tailCursor)
+//        )
+//      }
       for {
         queryRequestWithResult <- queryRequestWithResultLs
         (queryRequest, queryResult) = QueryRequestWithResult.unapply(queryRequestWithResult).get
@@ -266,7 +266,7 @@ object PostProcess extends JSONParser {
         Json.obj(
           "size" -> edges.size,
           "degrees" -> degrees,
-          "cursors" -> cursors,
+          "cursors" -> q.cursorStrings,
           "results" -> edges,
           "impressionId" -> query.impressionId()
         )
@@ -317,7 +317,7 @@ object PostProcess extends JSONParser {
         Json.obj(
           "size" -> groupedSortedJsons.size,
           "degrees" -> degrees,
-          "cursors" -> cursors,
+          "cursors" -> q.cursorStrings,
           "results" -> groupedSortedJsons,
           "impressionId" -> query.impressionId()
         )

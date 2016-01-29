@@ -32,9 +32,9 @@ class RestHandler(graph: Graph)(implicit ec: ExecutionContext) {
   def doPost(uri: String, jsQuery: JsValue): HandlerResult = {
     try {
       uri match {
-        case "/graphs/getEdges" => HandlerResult(getEdgesAsync(jsQuery)(PostProcess.toSimpleVertexArrJson))
+        case "/graphs/getEdges" => HandlerResult(getEdgesAsyncMulti(jsQuery)(PostProcess.toSimpleVertexArrJson))
         case "/graphs/getEdges/grouped" => HandlerResult(getEdgesAsync(jsQuery)(PostProcess.summarizeWithListFormatted))
-        case "/graphs/getEdgesExcluded" => HandlerResult(getEdgesExcludedAsync(jsQuery)(PostProcess.toSimpleVertexArrJson))
+//        case "/graphs/getEdgesExcluded" => HandlerResult(getEdgesExcludedAsync(jsQuery)(PostProcess.toSimpleVertexArrJson))
         case "/graphs/getEdgesExcluded/grouped" => HandlerResult(getEdgesExcludedAsync(jsQuery)(PostProcess.summarizeWithListExcludeFormatted))
         case "/graphs/checkEdges" => checkEdges(jsQuery)
         case "/graphs/getEdgesGrouped" => HandlerResult(getEdgesAsync(jsQuery)(PostProcess.summarizeWithList))
@@ -127,10 +127,36 @@ class RestHandler(graph: Graph)(implicit ec: ExecutionContext) {
     }
   }
 
+  private def eachQueryMulti(post: (Query, Seq[QueryRequestWithResult], Seq[QueryRequestWithResult]) => JsValue)(q: Query): Future[JsValue] = {
+    val filterOutQueryResultsLs = q.filterOutQuery match {
+      case Some(filterOutQuery) => graph.getEdges(filterOutQuery)
+      case None => Future.successful(Seq.empty)
+    }
+
+    for {
+      queryResultsLs <- graph.getEdges(q)
+      filterOutResultsLs <- filterOutQueryResultsLs
+    } yield {
+      val json = post(q, queryResultsLs, filterOutResultsLs)
+      json
+    }
+  }
+
   private def getEdgesAsync(jsonQuery: JsValue)
                            (post: (Seq[QueryRequestWithResult], Seq[QueryRequestWithResult]) => JsValue): Future[JsValue] = {
 
     val fetch = eachQuery(post) _
+    jsonQuery match {
+      case JsArray(arr) => Future.traverse(arr.map(s2Parser.toQuery(_)))(fetch).map(JsArray)
+      case obj@JsObject(_) => fetch(s2Parser.toQuery(obj))
+      case _ => throw BadQueryException("Cannot support")
+    }
+  }
+
+  private def getEdgesAsyncMulti(jsonQuery: JsValue)
+                           (post: (Query, Seq[QueryRequestWithResult], Seq[QueryRequestWithResult]) => JsValue): Future[JsValue] = {
+
+    val fetch = eachQueryMulti(post) _
     jsonQuery match {
       case JsArray(arr) => Future.traverse(arr.map(s2Parser.toQuery(_)))(fetch).map(JsArray)
       case obj@JsObject(_) => fetch(s2Parser.toQuery(obj))
