@@ -44,18 +44,6 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
   /** Mutation Logics */
   def writeToStorage(rpc: W, withWait: Boolean): Future[Boolean]
 
-  def acquireLock(statusCode: Byte,
-                  edge: Edge,
-                  lockEdge: SnapshotEdge,
-                  oldBytes: Array[Byte]): Future[Boolean]
-
-  def releaseLock(predicate: Boolean,
-                  edge: Edge,
-                  lockEdge: SnapshotEdge,
-                  releaseLockEdge: SnapshotEdge,
-                  _edgeMutate: EdgeMutate,
-                  oldBytes: Array[Byte]): Future[Boolean]
-
   def incrementCounts(edges: Seq[Edge], withWait: Boolean): Future[Seq[(Boolean, Long)]]
 
   /** Build backend storage specific RPC */
@@ -68,6 +56,7 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
 
   /** End of Mutation */
 
+  def writeLock(rpc: W, expectedOpt: Option[W]): Future[Boolean]
 
   /** Management Logic */
   def flush(): Unit
@@ -591,6 +580,89 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
     base.copy(version = newVersion, statusCode = 0, pendingEdgeOpt = None)
   }
 
+  protected def acquireLock(statusCode: Byte,
+                            edge: Edge,
+                            oldSnapshotEdgeOpt: Option[Edge],
+                            lockEdge: SnapshotEdge,
+                            oldBytes: Array[Byte]): Future[Boolean] = {
+    if (statusCode >= 1) {
+      logger.debug(s"skip acquireLock: [$statusCode]\n${edge.toLogString}")
+      Future.successful(true)
+    } else {
+      val p = Random.nextDouble()
+      if (p < FailProb) throw new PartialFailureException(edge, 0, s"$p")
+      else {
+        val lockEdgePut = buildPutAsync(lockEdge).head
+        val oldPut = oldSnapshotEdgeOpt.map(e => buildPutAsync(e.toSnapshotEdge).head)
+        writeLock(lockEdgePut, oldPut).recoverWith { case ex: Exception =>
+            logger.error(s"AcquireLock RPC Failed.")
+            throw new PartialFailureException(edge, 0, "AcquireLock RPC Failed")
+        }.map { ret =>
+          if (ret) {
+            val log = Seq(
+              "\n",
+              "=" * 50,
+              s"[Success]: acquireLock",
+              s"[RequestEdge]: ${edge.toLogString}",
+              s"[LockEdge]: ${lockEdge.toLogString()}",
+              s"[PendingEdge]: ${lockEdge.pendingEdgeOpt.map(_.toLogString).getOrElse("")}",
+              "=" * 50, "\n").mkString("\n")
+
+            logger.debug(log)
+            //            debug(ret, "acquireLock", edge.toSnapshotEdge)
+          } else {
+            throw new PartialFailureException(edge, 0, "hbase fail.")
+          }
+          true
+        }
+      }
+    }
+  }
+
+
+
+  protected def releaseLock(predicate: Boolean,
+                           edge: Edge,
+                           lockEdge: SnapshotEdge,
+                           releaseLockEdge: SnapshotEdge,
+                           _edgeMutate: EdgeMutate,
+                           oldBytes: Array[Byte]): Future[Boolean] = {
+    if (!predicate) {
+      throw new PartialFailureException(edge, 3, "predicate failed.")
+    }
+    val p = Random.nextDouble()
+    if (p < FailProb) throw new PartialFailureException(edge, 3, s"$p")
+    else {
+      val releaseLockEdgePut = buildPutAsync(releaseLockEdge).head
+      val lockEdgePut = buildPutAsync(lockEdge).head
+      writeLock(releaseLockEdgePut, Option(lockEdgePut)).recoverWith {
+//      client(withWait = true).compareAndSet(releaseLockEdgePut, lockEdgePut.value()).toFuture.recoverWith {
+        case ex: Exception =>
+          logger.error(s"ReleaseLock RPC Failed.")
+          throw new PartialFailureException(edge, 3, "ReleaseLock RPC Failed")
+      }.map { ret =>
+        if (ret) {
+          debug(ret, "releaseLock", edge.toSnapshotEdge)
+        } else {
+          val msg = Seq("\nFATAL ERROR\n",
+            "=" * 50,
+            oldBytes.toList,
+            lockEdgePut,
+            releaseLockEdgePut,
+//            lockEdgePut.value.toList,
+//            releaseLockEdgePut.value().toList,
+            "=" * 50,
+            "\n"
+          )
+          logger.error(msg.mkString("\n"))
+          //          error(ret, "releaseLock", edge.toSnapshotEdge)
+          throw new PartialFailureException(edge, 3, "hbase fail.")
+        }
+        true
+      }
+    }
+    Future.successful(true)
+  }
 
 
   protected def mutate(predicate: Boolean,
@@ -640,6 +712,20 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
   }
 
 
+  /** this may be overrided by specific storage implementation */
+  protected def commitProcess(edge: Edge, statusCode: Byte)
+                             (snapshotEdgeOpt: Option[Edge], kvOpt: Option[SKeyValue])
+                             (lockEdge: SnapshotEdge, releaseLockEdge: SnapshotEdge, _edgeMutate: EdgeMutate): Future[Boolean] = {
+    val oldBytes = kvOpt.map(kv => kv.value).getOrElse(Array.empty[Byte])
+    for {
+      locked <- acquireLock(statusCode, edge, snapshotEdgeOpt, lockEdge, oldBytes)
+      mutated <- mutate(locked, edge, statusCode, _edgeMutate)
+      incremented <- increment(mutated, edge, statusCode, _edgeMutate)
+      released <- releaseLock(incremented, edge, lockEdge, releaseLockEdge, _edgeMutate, oldBytes)
+    } yield {
+      released
+    }
+  }
 
   protected def commitUpdate(edge: Edge,
                    statusCode: Byte)(snapshotEdgeOpt: Option[Edge],
@@ -647,37 +733,22 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
                                      edgeUpdate: EdgeMutate): Future[Boolean] = {
     val label = edge.label
     def oldBytes = kvOpt.map(_.value).getOrElse(Array.empty)
-    //    def oldBytes = snapshotEdgeOpt.map { e =>
-    //      snapshotEdgeSerializer(e.toSnapshotEdge).toKeyValues.head.value
-    //    }.getOrElse(Array.empty)
-    def process(lockEdge: SnapshotEdge,
-                releaseLockEdge: SnapshotEdge,
-                _edgeMutate: EdgeMutate,
-                statusCode: Byte): Future[Boolean] = {
-
-      for {
-        locked <- acquireLock(statusCode, edge, lockEdge, oldBytes)
-        mutated <- mutate(locked, edge, statusCode, _edgeMutate)
-        incremented <- increment(mutated, edge, statusCode, _edgeMutate)
-        released <- releaseLock(incremented, edge, lockEdge, releaseLockEdge, _edgeMutate, oldBytes)
-      } yield {
-        released
-      }
-    }
-
 
     val lockEdge = buildLockEdge(snapshotEdgeOpt, edge, kvOpt)
     val releaseLockEdge = buildReleaseLockEdge(snapshotEdgeOpt, lockEdge, edgeUpdate)
+    val _process = commitProcess(edge, statusCode)(snapshotEdgeOpt, kvOpt)_
     snapshotEdgeOpt match {
       case None =>
         // no one ever did success on acquire lock.
-        process(lockEdge, releaseLockEdge, edgeUpdate, statusCode)
+        _process(lockEdge, releaseLockEdge, edgeUpdate)
+//        process(lockEdge, releaseLockEdge, edgeUpdate, statusCode)
       case Some(snapshotEdge) =>
         // someone did success on acquire lock at least one.
         snapshotEdge.pendingEdgeOpt match {
           case None =>
             // not locked
-            process(lockEdge, releaseLockEdge, edgeUpdate, statusCode)
+            _process(lockEdge, releaseLockEdge, edgeUpdate)
+//            process(lockEdge, releaseLockEdge, edgeUpdate, statusCode)
           case Some(pendingEdge) =>
             def isLockExpired = pendingEdge.lockTs.get + LockExpireDuration < System.currentTimeMillis()
             if (isLockExpired) {
@@ -685,7 +756,8 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
               val (_, newEdgeUpdate) = Edge.buildOperation(oldSnapshotEdge, Seq(pendingEdge))
               val newLockEdge = buildLockEdge(snapshotEdgeOpt, pendingEdge, kvOpt)
               val newReleaseLockEdge = buildReleaseLockEdge(snapshotEdgeOpt, newLockEdge, newEdgeUpdate)
-              process(newLockEdge, newReleaseLockEdge, newEdgeUpdate, statusCode = 0).flatMap { ret =>
+              commitProcess(edge, statusCode = 0)(snapshotEdgeOpt, kvOpt)(newLockEdge, newReleaseLockEdge, newEdgeUpdate).flatMap { ret =>
+//              process(newLockEdge, newReleaseLockEdge, newEdgeUpdate, statusCode = 0).flatMap { ret =>
                 val log = s"[Success]: Resolving expired pending edge.\n${pendingEdge.toLogString}"
                 throw new PartialFailureException(edge, 0, log)
               }
@@ -698,7 +770,8 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
                 val newReleaseLockEdge = buildReleaseLockEdge(snapshotEdgeOpt, lockEdge, newEdgeUpdate)
 
                 /** lockEdge will be ignored */
-                process(lockEdge, newReleaseLockEdge, newEdgeUpdate, statusCode)
+                _process(lockEdge, newReleaseLockEdge, newEdgeUpdate)
+//                process(lockEdge, newReleaseLockEdge, newEdgeUpdate, statusCode)
               } else {
                 throw new PartialFailureException(edge, statusCode, s"others[${pendingEdge.ts}] is mutating. me[${edge.ts}]")
               }

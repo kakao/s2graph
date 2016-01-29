@@ -99,81 +99,6 @@ class AsynchbaseStorage(override val config: Config)(implicit ec: ExecutionConte
   }
 
 
-  override def acquireLock(statusCode: Byte, edge: Edge,
-                  lockEdge: SnapshotEdge, oldBytes: Array[Byte]): Future[Boolean] =
-    if (statusCode >= 1) {
-      logger.debug(s"skip acquireLock: [$statusCode]\n${edge.toLogString}")
-      Future.successful(true)
-    } else {
-      val p = Random.nextDouble()
-      if (p < FailProb) throw new PartialFailureException(edge, 0, s"$p")
-      else {
-        val lockEdgePut = toPutRequest(lockEdge)
-        client(withWait = true).compareAndSet(lockEdgePut, oldBytes).toFuture.recoverWith {
-          case ex: Exception =>
-            logger.error(s"AcquireLock RPC Failed.")
-            throw new PartialFailureException(edge, 0, "AcquireLock RPC Failed")
-        }.map { ret =>
-          if (ret) {
-            val log = Seq(
-              "\n",
-              "=" * 50,
-              s"[Success]: acquireLock",
-              s"[RequestEdge]: ${edge.toLogString}",
-              s"[LockEdge]: ${lockEdge.toLogString()}",
-              s"[PendingEdge]: ${lockEdge.pendingEdgeOpt.map(_.toLogString).getOrElse("")}",
-              "=" * 50, "\n").mkString("\n")
-
-            logger.debug(log)
-            //            debug(ret, "acquireLock", edge.toSnapshotEdge)
-          } else {
-            throw new PartialFailureException(edge, 0, "hbase fail.")
-          }
-          true
-        }
-      }
-    }
-
-  override def releaseLock(predicate: Boolean,
-                  edge: Edge,
-                  lockEdge: SnapshotEdge,
-                  releaseLockEdge: SnapshotEdge,
-                  _edgeMutate: EdgeMutate,
-                  oldBytes: Array[Byte]): Future[Boolean] = {
-    if (!predicate) {
-      throw new PartialFailureException(edge, 3, "predicate failed.")
-    }
-    val p = Random.nextDouble()
-    if (p < FailProb) throw new PartialFailureException(edge, 3, s"$p")
-    else {
-      val releaseLockEdgePut = toPutRequest(releaseLockEdge)
-      val lockEdgePut = toPutRequest(lockEdge)
-
-      client(withWait = true).compareAndSet(releaseLockEdgePut, lockEdgePut.value()).toFuture.recoverWith {
-        case ex: Exception =>
-          logger.error(s"ReleaseLock RPC Failed.")
-          throw new PartialFailureException(edge, 3, "ReleaseLock RPC Failed")
-      }.map { ret =>
-        if (ret) {
-          debug(ret, "releaseLock", edge.toSnapshotEdge)
-        } else {
-          val msg = Seq("\nFATAL ERROR\n",
-            "=" * 50,
-            oldBytes.toList,
-            lockEdgePut.value.toList,
-            releaseLockEdgePut.value().toList,
-            "=" * 50,
-            "\n"
-          )
-          logger.error(msg.mkString("\n"))
-          //          error(ret, "releaseLock", edge.toSnapshotEdge)
-          throw new PartialFailureException(edge, 3, "hbase fail.")
-        }
-        true
-      }
-    }
-    //      }
-  }
   /** Mutation Builder */
   override def put(kvs: Seq[SKeyValue]): Seq[HBaseRpc] =
     kvs.map { kv => new PutRequest(kv.table, kv.row, kv.cf, kv.qualifier, kv.value, kv.timestamp) }
@@ -514,6 +439,12 @@ class AsynchbaseStorage(override val config: Config)(implicit ec: ExecutionConte
         }
       case _ => Deferred.fromError(new RuntimeException(s"fetchKeyValues failed. $rpc"))
     }
+  }
+
+  override def writeLock(rpc: HBaseRpc, expectedOpt: Option[HBaseRpc]): Future[Boolean] = {
+    val put = rpc.asInstanceOf[PutRequest]
+    val expected = expectedOpt.map(_.asInstanceOf[PutRequest].value()).getOrElse(Array.empty)
+    client(withWait = true).compareAndSet(put, expected).withCallback(ret => ret.booleanValue()).toFuture
   }
 
   private def toPutRequest(snapshotEdge: SnapshotEdge): PutRequest =

@@ -181,6 +181,35 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
     Future.sequence(futures)
   }
 
+  override def writeLock(rpc: SKeyValue, expectedOpt: Option[SKeyValue]): Future[Boolean] = {
+    Future.successful(true)
+  }
+
+  override def commitProcess(edge: Edge, statusCode: Byte)
+                            (snapshotEdgeOpt: Option[Edge], kvOpt: Option[SKeyValue])
+                            (lockEdge: SnapshotEdge, releaseLockEdge: SnapshotEdge, _edgeMutate: EdgeMutate): Future[Boolean] = {
+    val writeBatch = new WriteBatch()
+    val lockEdgePut = buildPutAsync(lockEdge).head
+
+    val indexEdgeMutations = indexedEdgeMutations(_edgeMutate)
+//    val incrementMutations = increments(_edgeMutate)
+
+    val releaseLockEdgePut = buildPutAsync(releaseLockEdge).head
+
+    writeBatch.put(lockEdgePut.row, lockEdgePut.value)
+    indexEdgeMutations.foreach { kv => writeBatch.put(kv.row, kv.value) }
+    //    incrementMutations.foreach { kv => writeBatch.put(kv, row, kv.value)}
+    writeBatch.put(releaseLockEdgePut.row, releaseLockEdgePut.value)
+    Future {
+      try {
+        db.write(new WriteOptions(), writeBatch)
+        true
+      } catch {
+        case e: RocksDBException => false
+      }
+    }
+  }
+
   /** Build backend storage specific RPC */
   override def put(kvs: Seq[SKeyValue]): Seq[SKeyValue] = kvs.map { kv => kv.copy(operation = SKeyValue.Put)}
 
@@ -192,25 +221,10 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
   /** Management Logic */
   override def flush(): Unit = db.close()
 
-
-  override def releaseLock(predicate: Boolean,
-                           edge: Edge,
-                           lockEdge: SnapshotEdge,
-                           releaseLockEdge: SnapshotEdge,
-                           _edgeMutate: EdgeMutate,
-                           oldBytes: Array[Byte]): Future[Boolean] = {
-    Future.successful(true)
-  }
-
-  override def acquireLock(statusCode: Byte,
-                           edge: Edge,
-                           lockEdge: SnapshotEdge,
-                           oldBytes: Array[Byte]): Future[Boolean] = {
-    Future.successful(true)
-  }
-
   override def incrementCounts(edges: Seq[Edge], withWait: Boolean): Future[Seq[(Boolean, Long)]] = {
     Future.successful(Seq.empty)
   }
+
+  /** End of Mutation */
 
 }
