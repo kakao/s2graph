@@ -183,25 +183,6 @@ object PostProcess extends JSONParser {
         }
       }
 
-      /** build result jsons */
-      //      for {
-      //        queryRequestWithResult <- queryRequestWithResultLs
-      //        (queryRequest, queryResult) = QueryRequestWithResult.unapply(queryRequestWithResult).get
-      //        queryParam = queryRequest.queryParam
-      //        edgeWithScore <- queryResult.edgeWithScoreLs.lastOption
-      //        (edge, score) = EdgeWithScore.unapply(edgeWithScore).get
-      //      } {
-      //        // edge to json
-      //        val (srcColumn, _) = queryParam.label.srcTgtColumn(edge.labelWithDir.dir)
-      //        val fromOpt = innerValToJsValue(edge.srcVertex.id.innerId, srcColumn.columnType)
-      //        cursors += Json.obj(
-      //          "from" -> fromOpt.get,
-      //          "label" -> queryRequest.queryParam.label.label,
-      //          "direction" -> GraphUtil.fromDirection(edge.labelWithDir.dir),
-      //          "cursor" -> Base64.getEncoder.encodeToString(queryResult.tailCursor)
-      //        )
-      //      }
-
       def buildNextQuery(_cursors: Seq[Seq[String]]): JsValue = {
         val cursors = _cursors.flatten.iterator
 
