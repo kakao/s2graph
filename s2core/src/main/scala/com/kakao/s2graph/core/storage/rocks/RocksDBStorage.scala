@@ -20,46 +20,36 @@ import scala.concurrent.{Future, ExecutionContext}
 class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
   extends Storage[SKeyValue, Future[QueryRequestWithResult]](config) {
 
+  import HSerializable._
+
   val emptyBytes = Array.empty[Byte]
   val table = Array.empty[Byte]
-//  val cf = Array.empty[Byte]
-  val cf = HSerializable.edgeCf
   val qualifier = Array.empty[Byte]
 
   RocksDB.loadLibrary()
 
-  val options = new Options().setCreateIfMissing(true)
+  val options = new Options()
+    .setCreateIfMissing(true)
+    .setWriteBufferSize(100)
+    .setMergeOperatorName("uint64add")
+
   var db: RocksDB = null
-//  var edgeCfHandler: ColumnFamilyHandle = null
-//  var vertexCfHandler: ColumnFamilyHandle = null
 
   try {
     // a factory method that returns a RocksDB instance
     db = RocksDB.open(options, "/tmp/rocks")
-//    edgeCfHandler = db.createColumnFamily(new ColumnFamilyDescriptor(HSerializable.edgeCf))
-//    vertexCfHandler = db.createColumnFamily(new ColumnFamilyDescriptor(HSerializable.vertexCf))
-    // do something
+
   } catch {
     case e: RocksDBException =>
-
+      logger.error(s"initialize rocks db storage failed.", e)
   }
 
   /** Mutation Logics */
   override def writeToStorage(rpc: SKeyValue, withWait: Boolean): Future[Boolean] = Future {
-//    val cf = Bytes.toString(rpc.cf)
-//    val cfHandler = cf match {
-//      case "e" => edgeCfHandler
-//      case "v" => vertexCfHandler
-//      case _ => throw new RuntimeException(s"not supported column family. $cf")
-//    }
-//    logger.debug(s"$rpc")
     rpc.operation match {
       case SKeyValue.Put => db.put(rpc.row, rpc.value)
       case SKeyValue.Delete => db.remove(rpc.row)
-      case SKeyValue.Increment =>
-//      case SKeyValue.Put => db.put(cfHandler, rpc.row, rpc.value)
-//      case SKeyValue.Delete => db.remove(cfHandler, rpc.row)
-//      case SKeyValue.Increment => db.merge(cfHandler, )
+      case SKeyValue.Increment => db.merge(rpc.row, rpc.value)
       case _ => throw new RuntimeException(s"not supported rpc operation. ${rpc.operation}")
     }
     true
@@ -75,17 +65,19 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
   }
 
   /** Query Logic */
+  val HardLimit = 10000
   override def fetchKeyValues(startStopKeyRange: AnyRef): Future[Seq[SKeyValue]] = Future {
     startStopKeyRange match {
       case (startKey: Array[Byte], stopKey: Array[Byte]) =>
         val iter = db.newIterator()
         var idx = 0
         iter.seek(startKey)
-        val HardLimit = 10000
+
         val kvs = new ListBuffer[SKeyValue]()
         val ts = System.currentTimeMillis()
-        while (iter.isValid && Bytes.compareTo(iter.key, stopKey) <= 0 && idx <= HardLimit) {
-          kvs += SKeyValue(table, cf, iter.key(), qualifier, iter.value(), ts)
+        iter.seek(startKey)
+        while (iter.isValid && Bytes.compareTo(iter.key, stopKey) <= 0 && idx < HardLimit) {
+          kvs += SKeyValue(table, iter.key, edgeCf, qualifier, iter.value, System.currentTimeMillis())
           iter.next()
           idx += 1
         }
@@ -131,43 +123,16 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
   override def fetch(queryRequest: QueryRequest,
                      prevStepScore: Double,
                      isInnerCall: Boolean,
-                     parentEdges: Seq[EdgeWithScore]): Future[QueryRequestWithResult] = Future {
+                     parentEdges: Seq[EdgeWithScore]): Future[QueryRequestWithResult] = {
 
-    val queryParam = queryRequest.queryParam
-//    val edge = toRequestEdge(queryRequest)
-//    val indexEdgeOpt = edge.edgesWithIndex.filter(edgeWithIndex => edgeWithIndex.labelIndex.seq == queryParam.labelOrderSeq).headOption
-//    val indexEdge = indexEdgeOpt.getOrElse(throw new RuntimeException(s"Can`t find index for query $queryParam"))
-//    val srcIdBytes = VertexId.toSourceVertexId(indexEdge.srcVertex.id).bytes
-//    val labelWithDirBytes = indexEdge.labelWithDir.bytes
-//    val labelIndexSeqWithIsInvertedBytes = StorageSerializable.labelOrderSeqWithIsInverted(indexEdge.labelIndexSeq, isInverted = false)
+    fetchKeyValues(buildRequest(queryRequest)) map { kvs =>
+      val edgeWithScores = toEdges(kvs, queryRequest.queryParam, prevStepScore, isInnerCall, parentEdges)
+      val resultEdgesWithScores =
+        if (queryRequest.queryParam.sample >= 0) sample(queryRequest, edgeWithScores, queryRequest.queryParam.sample)
+        else edgeWithScores
 
-//    val baseKey = Bytes.add(srcIdBytes, labelWithDirBytes, Bytes.add(labelIndexSeqWithIsInvertedBytes, Array.fill(1)(edge.op)))
-//    val (startKey, stopKey) = (baseKey, Bytes.add(baseKey, Array.fill(1)(-1)))
-    val (startKey, stopKey) = buildRequest(queryRequest)
-    val iter = db.newIterator()
-    val kvs = new ListBuffer[SKeyValue]()
-    var idx = 0
-    iter.seek(startKey)
-    while (iter.isValid && Bytes.compareTo(iter.key(), stopKey) <= 0 && idx < queryParam.limit) {
-      kvs += SKeyValue(table, iter.key, cf, qualifier, iter.value, System.currentTimeMillis())
-      iter.next()
-      idx += 1
+      QueryRequestWithResult(queryRequest, QueryResult(resultEdgesWithScores, tailCursor = kvs.lastOption.map(_.row).getOrElse(Array.empty)))
     }
-    val edgeWithScores = toEdges(kvs.toSeq, queryRequest.queryParam, prevStepScore, isInnerCall, parentEdges)
-    val resultEdgesWithScores =
-      if (queryRequest.queryParam.sample >= 0 ) sample(queryRequest, edgeWithScores, queryRequest.queryParam.sample)
-      else edgeWithScores
-
-    QueryRequestWithResult(queryRequest, QueryResult(resultEdgesWithScores, tailCursor = kvs.lastOption.map(_.row).getOrElse(Array.empty)))
-
-//    fetchKeyValues(buildRequest(queryRequest)) map { kvs =>
-//      val edgeWithScores = toEdges(kvs.toSeq, queryRequest.queryParam, prevStepScore, isInnerCall, parentEdges)
-//      val resultEdgesWithScores =
-//        if (queryRequest.queryParam.sample >= 0 ) sample(queryRequest, edgeWithScores, queryRequest.queryParam.sample)
-//        else edgeWithScores
-//
-//      QueryRequestWithResult(queryRequest, QueryResult(resultEdgesWithScores, tailCursor = kvs.lastOption.map(_.row).getOrElse(Array.empty)))
-//    }
   }
 
 
@@ -192,13 +157,12 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
     val lockEdgePut = buildPutAsync(lockEdge).head
 
     val indexEdgeMutations = indexedEdgeMutations(_edgeMutate)
-//    val incrementMutations = increments(_edgeMutate)
-
+    val incrementMutations = increment(increments(_edgeMutate))
     val releaseLockEdgePut = buildPutAsync(releaseLockEdge).head
 
     writeBatch.put(lockEdgePut.row, lockEdgePut.value)
     indexEdgeMutations.foreach { kv => writeBatch.put(kv.row, kv.value) }
-    //    incrementMutations.foreach { kv => writeBatch.put(kv, row, kv.value)}
+    incrementMutations.foreach { kv => writeBatch.merge(kv.row, kv.value) }
     writeBatch.put(releaseLockEdgePut.row, releaseLockEdgePut.value)
     Future {
       try {
@@ -213,7 +177,13 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
   /** Build backend storage specific RPC */
   override def put(kvs: Seq[SKeyValue]): Seq[SKeyValue] = kvs.map { kv => kv.copy(operation = SKeyValue.Put)}
 
-  override def increment(kvs: Seq[SKeyValue]): Seq[SKeyValue] = kvs.map { kv => kv.copy(operation = SKeyValue.Increment)}
+  override def increment(kvs: Seq[SKeyValue]): Seq[SKeyValue] = kvs.map { kv => kv.copy(operation = SKeyValue.Increment) }
+//    val oldBytes = db.get(kv.row)
+//    val oldVal = if (oldBytes == null) 0L else Bytes.toLong(oldBytes)
+//    val newVal = oldVal + Bytes.toLong(kv.value)
+//    val newBytes = Bytes.toBytes(newVal)
+//    kv.copy(operation = SKeyValue.Put, value = newBytes)
+//  }
 
   override def delete(kvs: Seq[SKeyValue]): Seq[SKeyValue] = kvs.map { kv => kv.copy(operation = SKeyValue.Delete)}
 
