@@ -154,9 +154,7 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
           val zkQuorum = edge.label.hbaseZkAddr
           val (_, edgeUpdate) = Edge.buildDeleteBulk(None, edge)
           val mutations =
-            indexedEdgeMutations(edgeUpdate) ++
-              snapshotEdgeMutations(edgeUpdate) ++
-              increments(edgeUpdate)
+            indexedEdgeMutations(edgeUpdate) ++ snapshotEdgeMutations(edgeUpdate) ++ increments(edgeUpdate)
           writeAsyncSimple(zkQuorum, mutations, withWait)
         } else {
           mutateEdgesInner(Seq(edge), strongConsistency, withWait)(Edge.buildOperation)
@@ -168,35 +166,43 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
     Future.sequence(Seq(edgeFuture, vertexFuture)).map(_.forall(identity))
   }
 
-  def mutateEdges(edges: Seq[Edge], withWait: Boolean = false): Future[Seq[Boolean]] = {
-    val edgeGrouped = edges.groupBy { edge => (edge.label, edge.srcVertex.innerId, edge.tgtVertex.innerId) } toSeq
+  def mutateEdges(_edges: Seq[Edge], withWait: Boolean): Future[Seq[Boolean]] = {
+    val grouped = _edges.groupBy { edge => (edge.label, edge.srcVertex.innerId, edge.tgtVertex.innerId) } toSeq
 
-    val ret = edgeGrouped.map { case ((label, srcId, tgtId), edges) =>
-      val head = edges.head
+    val mutateEdges = grouped.map { case ((_, _, _), edgeGroup) =>
+      val (deleteAllEdges, edges) = edgeGroup.partition(_.op == GraphUtil.operations("deleteAll"))
 
-      if (head.op == GraphUtil.operations("deleteAll")) {
-        val deleteAllFutures = edges.map { edge =>
-          deleteAllAdjacentEdges(Seq(edge.srcVertex), Seq(edge.label), edge.labelWithDir.dir, edge.ts)
-        }
-        Future.sequence(deleteAllFutures).map(_.forall(identity))
-      } else {
-        val strongConsistency = head.label.consistencyLevel == "strong"
-
-        if (strongConsistency) {
-          val edgeFuture = mutateEdgesInner(edges, strongConsistency, withWait)(Edge.buildOperation)
-
-          //TODO: decide what we will do on failure on vertex put
-          val vertexFuture = writeAsyncSimple(head.label.hbaseZkAddr, buildVertexPutsAsync(head), withWait)
-          Future.sequence(Seq(edgeFuture, vertexFuture)).map(_.forall(identity))
-        } else {
-          Future.sequence(edges.map { edge =>
-            mutateEdge(edge, withWait = withWait)
-          }).map(_.forall(identity))
-        }
+      // DeleteAll first
+      val deleteAllFutures = deleteAllEdges.map { edge =>
+        deleteAllAdjacentEdges(Seq(edge.srcVertex), Seq(edge.label), edge.labelWithDir.dir, edge.ts)
       }
+
+      // After deleteAll, process others
+      lazy val mutateEdgeFutures = edges.toList match {
+        case head :: tail =>
+          val strongConsistency = edges.head.label.consistencyLevel == "strong"
+          if (strongConsistency) {
+            val edgeFuture = mutateEdgesInner(edges, strongConsistency, withWait)(Edge.buildOperation)
+
+            //TODO: decide what we will do on failure on vertex put
+            val puts = buildVertexPutsAsync(head)
+            val vertexFuture = writeAsyncSimple(head.label.hbaseZkAddr, puts, withWait)
+            Seq(edgeFuture, vertexFuture)
+          } else {
+            edges.map { edge => mutateEdge(edge, withWait = withWait) }
+          }
+        case Nil => Nil
+      }
+
+      val composed = for {
+        deleteRet <- Future.sequence(deleteAllFutures)
+        mutateRet <- Future.sequence(mutateEdgeFutures)
+      } yield deleteRet ++ mutateRet
+
+      composed.map(_.forall(identity))
     }
 
-    Future.sequence(ret)
+    Future.sequence(mutateEdges)
   }
 
 
@@ -238,6 +244,7 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
         fetchSnapshotEdge(_edges.head) flatMap { case (queryParam, snapshotEdgeOpt, kvOpt) =>
 
           val (newEdge, edgeUpdate) = f(snapshotEdgeOpt, _edges)
+          logger.debug(s"${snapshotEdgeOpt}\n${edgeUpdate.toLogString}")
           //shouldReplace false.
           if (edgeUpdate.newSnapshotEdge.isEmpty && statusCode <= 0) {
             logger.debug(s"${newEdge.toLogString} drop.")
@@ -359,13 +366,16 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
     } yield {
         val label = queryRequest.queryParam.label
         label.schemaVersion match {
-          case HBaseType.VERSION3 if label.consistencyLevel == "strong" =>
-
-            /**
-             * read: snapshotEdge on queryResult = O(N)
-             * write: N x (relatedEdges x indices(indexedEdge) + 1(snapshotEdge))
-             */
-            mutateEdges(deleteQueryResult.edgeWithScoreLs.map(_.edge), withWait = true).map(_.forall(identity))
+          case HBaseType.VERSION3 | HBaseType.VERSION4 =>
+            if (label.consistencyLevel == "strong") {
+              /**
+               * read: snapshotEdge on queryResult = O(N)
+               * write: N x (relatedEdges x indices(indexedEdge) + 1(snapshotEdge))
+               */
+              mutateEdges(deleteQueryResult.edgeWithScoreLs.map(_.edge), withWait = true).map(_.forall(identity))
+            } else {
+              deleteAllFetchedEdgesAsyncOld(queryRequest, deleteQueryResult, requestTs, MaxRetryNum)
+            }
           case _ =>
 
             /**

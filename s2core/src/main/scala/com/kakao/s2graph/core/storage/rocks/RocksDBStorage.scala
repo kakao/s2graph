@@ -1,5 +1,6 @@
 package com.kakao.s2graph.core.storage.rocks
 
+import java.nio.{ByteOrder, ByteBuffer}
 import java.util.Base64
 
 import com.google.common.cache.Cache
@@ -16,10 +17,26 @@ import org.rocksdb._
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.{Future, ExecutionContext}
 
-
+object RocksDBHelper {
+  def longToBytes(value: Long): Array[Byte] = {
+    val longBuffer = ByteBuffer.allocate(8).order(ByteOrder.nativeOrder())
+    longBuffer.clear()
+    longBuffer.putLong(value)
+    longBuffer.array()
+  }
+  def bytesToLong(data: Array[Byte]): Long = {
+    if (data != null) {
+      val longBuffer = ByteBuffer.allocate(8).order(ByteOrder.nativeOrder())
+      longBuffer.put(data, 0, 8)
+      longBuffer.flip()
+      longBuffer.getLong()
+    } else 0L
+  }
+}
 class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
   extends Storage[SKeyValue, Future[QueryRequestWithResult]](config) {
 
+  import RocksDBHelper._
   import HSerializable._
 
   val emptyBytes = Array.empty[Byte]
@@ -170,8 +187,17 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
     val releaseLockEdgePut = buildPutAsync(releaseLockEdge).head
 
     writeBatch.put(lockEdgePut.row, lockEdgePut.value)
-    indexEdgeMutations.foreach { kv => writeBatch.put(kv.row, kv.value) }
-    incrementMutations.foreach { kv => writeBatch.merge(kv.row, kv.value) }
+    indexEdgeMutations.foreach { kv =>
+      kv.operation match {
+        case SKeyValue.Put => writeBatch.put(kv.row, kv.value)
+        case SKeyValue.Delete => writeBatch.remove(kv.row)
+        case _ => throw new RuntimeException(s"not supported rpc operation. ${kv.operation}")
+      }
+    }
+    incrementMutations.foreach { kv =>
+      logger.debug(s"increment: ${Bytes.toLong(kv.value)}")
+      writeBatch.merge(kv.row, kv.value)
+    }
     writeBatch.put(releaseLockEdgePut.row, releaseLockEdgePut.value)
     Future {
       try {
@@ -183,16 +209,16 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
     }
   }
 
+
+
+
   /** Build backend storage specific RPC */
   override def put(kvs: Seq[SKeyValue]): Seq[SKeyValue] = kvs.map { kv => kv.copy(operation = SKeyValue.Put)}
 
-  override def increment(kvs: Seq[SKeyValue]): Seq[SKeyValue] = kvs.map { kv => kv.copy(operation = SKeyValue.Increment) }
-//    val oldBytes = db.get(kv.row)
-//    val oldVal = if (oldBytes == null) 0L else Bytes.toLong(oldBytes)
-//    val newVal = oldVal + Bytes.toLong(kv.value)
-//    val newBytes = Bytes.toBytes(newVal)
-//    kv.copy(operation = SKeyValue.Put, value = newBytes)
+  override def increment(kvs: Seq[SKeyValue]): Seq[SKeyValue] = kvs.map { kv => kv.copy(operation = SKeyValue.Increment)}
+//    kv.copy(operation = SKeyValue.Increment, value = longToBytes(Bytes.toLong(kv.value)))
 //  }
+
 
   override def delete(kvs: Seq[SKeyValue]): Seq[SKeyValue] = kvs.map { kv => kv.copy(operation = SKeyValue.Delete)}
 
