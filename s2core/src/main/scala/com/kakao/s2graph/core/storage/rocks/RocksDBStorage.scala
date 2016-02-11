@@ -126,7 +126,16 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
                      parentEdges: Seq[EdgeWithScore]): Future[QueryRequestWithResult] = {
 
     fetchKeyValues(buildRequest(queryRequest)) map { kvs =>
-      val edgeWithScores = toEdges(kvs, queryRequest.queryParam, prevStepScore, isInnerCall, parentEdges)
+      val queryParam = queryRequest.queryParam
+      val edgeWithScores = toEdges(kvs, queryParam, prevStepScore, isInnerCall, parentEdges)
+//
+//      val filteredEdgeWithScores = queryParam.duration match {
+//        case None => edgeWithScores
+//        case Some((minTs, maxTs)) => edgeWithScores.filter { edgeWithScore =>
+//          edgeWithScore.edge.isDegree || (edgeWithScore.edge.ts >= minTs && edgeWithScore.edge.ts < maxTs)
+//        }
+//      }
+
       val resultEdgesWithScores =
         if (queryRequest.queryParam.sample >= 0) sample(queryRequest, edgeWithScores, queryRequest.queryParam.sample)
         else edgeWithScores

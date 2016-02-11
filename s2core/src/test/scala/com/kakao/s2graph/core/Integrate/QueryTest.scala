@@ -132,8 +132,9 @@ class QueryTest extends IntegrateCommon with BeforeAndAfterEach {
     }
 
     val result = getEdgesSync(queryGroupBy(0, Seq("weight")))
+    println(result)
     (result \ "size").as[Int] should be(2)
-    val weights = (result \\ "groupBy").map { js =>
+    val weights = ((result \ "results") \\ "groupBy").map { js =>
       (js \ "weight").as[Int]
     }
     weights should contain(30)
@@ -164,11 +165,11 @@ class QueryTest extends IntegrateCommon with BeforeAndAfterEach {
     (result \ "results").as[List[JsValue]].size should be(2)
 
     result = getEdgesSync(queryTransform(0, "[[\"weight\"]]"))
-    (result \\ "to").map(_.toString).sorted should be((result \\ "weight").map(_.toString).sorted)
+    ((result \ "results") \\ "to").map(_.toString).sorted should be((result \\ "weight").map(_.toString).sorted)
 
     result = getEdgesSync(queryTransform(0, "[[\"_from\"]]"))
     val results = (result \ "results").as[JsValue]
-    (result \\ "to").map(_.toString).sorted should be((results \\ "from").map(_.toString).sorted)
+    ((result \ "results") \\ "to").map(_.toString).sorted should be((results \\ "from").map(_.toString).sorted)
   }
 
   test("index") {
@@ -193,32 +194,32 @@ class QueryTest extends IntegrateCommon with BeforeAndAfterEach {
     result = getEdgesSync(queryIndex(Seq(0), "idx_2"))
     ((result \ "results").as[List[JsValue]].head \\ "weight").head should be(JsNumber(30))
   }
-//
-//  //    "checkEdges" in {
-//  //      running(FakeApplication()) {
-//  //        val json = Json.parse( s"""
-//  //         [{"from": 0, "to": 1, "label": "$testLabelName"},
-//  //          {"from": 0, "to": 2, "label": "$testLabelName"}]
-//  //        """)
-//  //
-//  //        def checkEdges(queryJson: JsValue): JsValue = {
-//  //          val ret = route(FakeRequest(POST, "/graphs/checkEdges").withJsonBody(queryJson)).get
-//  //          contentAsJson(ret)
-//  //        }
-//  //
-//  //        val res = checkEdges(json)
-//  //        val typeRes = res.isInstanceOf[JsArray]
-//  //        typeRes must equalTo(true)
-//  //
-//  //        val fst = res.as[Seq[JsValue]].head \ "to"
-//  //        fst.as[Int] must equalTo(1)
-//  //
-//  //        val snd = res.as[Seq[JsValue]].last \ "to"
-//  //        snd.as[Int] must equalTo(2)
-//  //      }
-//  //    }
-//
-//
+////
+////  //    "checkEdges" in {
+////  //      running(FakeApplication()) {
+////  //        val json = Json.parse( s"""
+////  //         [{"from": 0, "to": 1, "label": "$testLabelName"},
+////  //          {"from": 0, "to": 2, "label": "$testLabelName"}]
+////  //        """)
+////  //
+////  //        def checkEdges(queryJson: JsValue): JsValue = {
+////  //          val ret = route(FakeRequest(POST, "/graphs/checkEdges").withJsonBody(queryJson)).get
+////  //          contentAsJson(ret)
+////  //        }
+////  //
+////  //        val res = checkEdges(json)
+////  //        val typeRes = res.isInstanceOf[JsArray]
+////  //        typeRes must equalTo(true)
+////  //
+////  //        val fst = res.as[Seq[JsValue]].head \ "to"
+////  //        fst.as[Int] must equalTo(1)
+////  //
+////  //        val snd = res.as[Seq[JsValue]].last \ "to"
+////  //        snd.as[Int] must equalTo(2)
+////  //      }
+////  //    }
+////
+////
   test("duration") {
     def queryDuration(ids: Seq[Int], from: Int, to: Int) = {
       val $from = Json.arr(
@@ -240,9 +241,11 @@ class QueryTest extends IntegrateCommon with BeforeAndAfterEach {
     (result \ "results").as[List[JsValue]].size should be(4)
     // inclusive, exclusive
     result = getEdgesSync(queryDuration(Seq(0, 2), from = 1000, to = 4000))
+    println(result)
     (result \ "results").as[List[JsValue]].size should be(3)
 
     result = getEdgesSync(queryDuration(Seq(0, 2), from = 1000, to = 2000))
+    println(result)
     (result \ "results").as[List[JsValue]].size should be(1)
 
     val bulkEdges = Seq(
@@ -256,13 +259,16 @@ class QueryTest extends IntegrateCommon with BeforeAndAfterEach {
     // duration test after udpate
     // get all
     result = getEdgesSync(queryDuration(Seq(0, 2), from = 0, to = 5000))
+    println(result)
     (result \ "results").as[List[JsValue]].size should be(4)
 
     // inclusive, exclusive
     result = getEdgesSync(queryDuration(Seq(0, 2), from = 1000, to = 4000))
+    println(result)
     (result \ "results").as[List[JsValue]].size should be(3)
 
     result = getEdgesSync(queryDuration(Seq(0, 2), from = 1000, to = 2000))
+    println(result)
     (result \ "results").as[List[JsValue]].size should be(1)
 
     def a: JsValue = getEdgesSync(queryDuration(Seq(0, 2), from = 3000, to = 2000))

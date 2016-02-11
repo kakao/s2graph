@@ -195,7 +195,7 @@ class CrudTest extends IntegrateCommon {
             val results = jsResult \ "results"
             val deegrees = (jsResult \ "degrees").as[List[JsObject]]
             val propsLs = (results \\ "props").seq
-//            (deegrees.head \ LabelMeta.degree.name).as[Int] should be(1)
+            (deegrees.head \ LabelMeta.degree.name).as[Int] should be(1)
 
             val from = (results \\ "from").seq.last.toString.replaceAll("\"", "")
             val to = (results \\ "to").seq.last.toString.replaceAll("\"", "")
