@@ -2,6 +2,7 @@ package com.kakao.s2graph.core.storage.hbase
 
 import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.mysqls.LabelMeta
+import com.kakao.s2graph.core.storage.rocks.RocksDBHelper
 import com.kakao.s2graph.core.storage.{CanSKeyValue, StorageDeserializable, SKeyValue}
 import com.kakao.s2graph.core.types._
 import com.kakao.s2graph.core.utils.logger
@@ -146,7 +147,8 @@ class IndexEdgeDeserializable extends HDeserializable[IndexEdge] {
 
     if (pos == kv.row.length) {
       // degree
-      val degreeVal = Bytes.toLong(kv.value)
+      val degreeVal = RocksDBHelper.bytesToLong(kv.value)
+//      val degreeVal = Bytes.toLong(kv.value)
       val ts = kv.timestamp
       val props = Map(LabelMeta.timeStampSeq -> InnerVal.withLong(ts, version),
         LabelMeta.degreeSeq -> InnerVal.withLong(degreeVal, version))

@@ -2,6 +2,7 @@ package com.kakao.s2graph.core.storage.rocks
 
 import java.nio.{ByteOrder, ByteBuffer}
 import java.util.Base64
+import java.util.concurrent.atomic.AtomicBoolean
 
 import com.google.common.cache.Cache
 import com.kakao.s2graph.core.mysqls.Label
@@ -14,6 +15,7 @@ import com.typesafe.config.Config
 import org.apache.hadoop.hbase.util.Bytes
 import org.rocksdb._
 
+import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.{Future, ExecutionContext}
 
@@ -60,6 +62,8 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
     case e: RocksDBException =>
       logger.error(s"initialize rocks db storage failed.", e)
   }
+
+  val rowKeyLocks = new mutable.HashMap[Seq[Byte], AtomicBoolean]
 
   /** Mutation Logics */
   override def writeToStorage(rpc: SKeyValue, withWait: Boolean): Future[Boolean] = Future {
@@ -179,6 +183,7 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
   override def commitProcess(edge: Edge, statusCode: Byte)
                             (snapshotEdgeOpt: Option[Edge], kvOpt: Option[SKeyValue])
                             (lockEdge: SnapshotEdge, releaseLockEdge: SnapshotEdge, _edgeMutate: EdgeMutate): Future[Boolean] = {
+
     val writeBatch = new WriteBatch()
     val lockEdgePut = buildPutAsync(lockEdge).head
 
@@ -195,18 +200,25 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
       }
     }
     incrementMutations.foreach { kv =>
-      logger.debug(s"increment: ${Bytes.toLong(kv.value)}")
-      writeBatch.merge(kv.row, kv.value)
+      val newValue = Bytes.toLong(kv.value) match {
+        case 1L => longToBytes(1L)
+        case -1L => longToBytes(-1L)
+        case _ => throw new RuntimeException("!!!!!!")
+      }
+      writeBatch.merge(kv.row, newValue)
     }
     writeBatch.put(releaseLockEdgePut.row, releaseLockEdgePut.value)
-    Future {
+    val ret =
       try {
-        db.write(new WriteOptions(), writeBatch)
+        val writeOption = new WriteOptions()
+        db.write(writeOption, writeBatch)
         true
       } catch {
-        case e: RocksDBException => false
+        case e: RocksDBException =>
+          logger.error(s"CommitProcess failed.", e)
+          false
       }
-    }
+    Future.successful(ret)
   }
 
 
@@ -215,10 +227,7 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
   /** Build backend storage specific RPC */
   override def put(kvs: Seq[SKeyValue]): Seq[SKeyValue] = kvs.map { kv => kv.copy(operation = SKeyValue.Put)}
 
-  override def increment(kvs: Seq[SKeyValue]): Seq[SKeyValue] = kvs.map { kv => kv.copy(operation = SKeyValue.Increment)}
-//    kv.copy(operation = SKeyValue.Increment, value = longToBytes(Bytes.toLong(kv.value)))
-//  }
-
+  override def increment(kvs: Seq[SKeyValue]): Seq[SKeyValue] = kvs.map { kv => kv.copy(operation = SKeyValue.Increment) }
 
   override def delete(kvs: Seq[SKeyValue]): Seq[SKeyValue] = kvs.map { kv => kv.copy(operation = SKeyValue.Delete)}
 
