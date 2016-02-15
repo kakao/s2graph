@@ -137,4 +137,3 @@ class SnapshotEdgeDeserializable extends HDeserializable[SnapshotEdge] {
       pendingEdgeOpt = _pendingEdgeOpt, lockTs = None)
   }
 }
-

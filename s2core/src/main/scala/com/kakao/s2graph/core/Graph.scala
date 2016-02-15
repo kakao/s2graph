@@ -37,6 +37,7 @@ object Graph {
     "hbase.rpcs.buffered_flush_interval" -> java.lang.Short.valueOf(100.toShort),
     "hbase.rpc.timeout" -> java.lang.Integer.valueOf(1000),
     "max.retry.number" -> java.lang.Integer.valueOf(100),
+    "lock.expire.time" -> java.lang.Integer.valueOf(1000 * 60 * 10),
     "max.back.off" -> java.lang.Integer.valueOf(100),
     "hbase.fail.prob" -> java.lang.Double.valueOf(-0.1),
     "delete.all.fetch.size" -> java.lang.Integer.valueOf(1000),
@@ -86,7 +87,28 @@ object Graph {
     val tsVal = queryParam.timeDecay match {
       case None => 1.0
       case Some(timeDecay) =>
-        val timeDiff = queryParam.timestamp - edge.ts
+        val tsVal = try {
+          val labelMeta = edge.label.metaPropsMap(timeDecay.labelMetaSeq)
+          val innerValWithTsOpt = edge.propsWithTs.get(timeDecay.labelMetaSeq)
+          innerValWithTsOpt.map { innerValWithTs =>
+            val innerVal = innerValWithTs.innerVal
+            labelMeta.dataType match {
+              case InnerVal.LONG => innerVal.value match {
+                case n: BigDecimal => n.bigDecimal.longValue()
+                case _ => innerVal.toString().toLong
+              }
+              case _ => innerVal.toString().toLong
+            }
+          } getOrElse(edge.ts)
+//          val innerVal = edge.propsWithTs(timeDecay.labelMetaSeq).innerVal
+//
+//          edge.propsWithTs.get(timeDecay.labelMetaSeq).map(_.toString.toLong).getOrElse(edge.ts)
+        } catch {
+          case e: Exception =>
+            logger.error(s"processTimeDecay error. ${edge.toLogString}", e)
+            edge.ts
+        }
+        val timeDiff = queryParam.timestamp - tsVal
         timeDecay.decay(timeDiff)
     }
 
@@ -141,7 +163,7 @@ object Graph {
       (duplicateEdge, aggregatedScore) <- fetchDuplicatedEdges(edge, score, hashKey, duplicateEdges) if aggregatedScore >= queryParam.threshold
     } yield EdgeWithScore(duplicateEdge, aggregatedScore)
 
-    QueryRequestWithResult(queryRequest, queryResult.copy(edgeWithScoreLs = edgesWithScores))
+    QueryRequestWithResult(queryRequest, QueryResult(edgesWithScores))
   }
 
   def fetchDuplicatedEdges(edge: Edge,
@@ -315,16 +337,13 @@ object Graph {
 
 class Graph(_config: Config)(implicit val ec: ExecutionContext) {
   val config = _config.withFallback(Graph.DefaultConfig)
-//  val cacheSize = config.getInt("cache.max.size")
-//  val cache = CacheBuilder.newBuilder().maximumSize(cacheSize).build[java.lang.Integer, Seq[QueryResult]]()
-//  val vertexCache = CacheBuilder.newBuilder().maximumSize(cacheSize).build[java.lang.Integer, Option[Vertex]]()
 
   Model.apply(config)
   Model.loadCache()
 
   // TODO: Make storage client by config param
-//  val storage = new AsynchbaseStorage(config)(ec)
-  val storage = new RocksDBStorage(config)(ec)
+  val storage = new AsynchbaseStorage(config)(ec)
+//  val storage = new RocksDBStorage(config)(ec)
 
   for {
     entry <- config.entrySet() if Graph.DefaultConfigs.contains(entry.getKey)

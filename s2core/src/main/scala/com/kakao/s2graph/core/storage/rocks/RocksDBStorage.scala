@@ -26,10 +26,10 @@ object RocksDBHelper {
     longBuffer.putLong(value)
     longBuffer.array()
   }
-  def bytesToLong(data: Array[Byte]): Long = {
+  def bytesToLong(data: Array[Byte], offset: Int): Long = {
     if (data != null) {
       val longBuffer = ByteBuffer.allocate(8).order(ByteOrder.nativeOrder())
-      longBuffer.put(data, 0, 8)
+      longBuffer.put(data, offset, 8)
       longBuffer.flip()
       longBuffer.getLong()
     } else 0L
@@ -41,6 +41,7 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
   import RocksDBHelper._
   import HSerializable._
 
+  override val indexEdgeDeserializer = new IndexEdgeDeserializable(bytesToLong)
   val emptyBytes = Array.empty[Byte]
   val table = Array.empty[Byte]
   val qualifier = Array.empty[Byte]

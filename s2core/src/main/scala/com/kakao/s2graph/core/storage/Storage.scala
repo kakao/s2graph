@@ -2,11 +2,11 @@ package com.kakao.s2graph.core.storage
 
 import java.util.Base64
 
-import com.google.common.cache.{CacheBuilder, Cache}
+
 import com.kakao.s2graph.core.ExceptionHandler.{Key, Val, KafkaMessage}
 import com.kakao.s2graph.core.GraphExceptions.FetchTimeoutException
 import com.kakao.s2graph.core._
-import com.kakao.s2graph.core.mysqls.{LabelMeta, Service, Label}
+import com.kakao.s2graph.core.mysqls._
 import com.kakao.s2graph.core.storage.hbase._
 import com.kakao.s2graph.core.types._
 import com.kakao.s2graph.core.utils.{Extensions, logger}
@@ -18,15 +18,15 @@ import scala.annotation.tailrec
 import scala.collection.Seq
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.{Success, Random, Try}
+import scala.util.{Random, Try}
 
 abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) {
 
-  val MaxRetryNum = config.getInt("max.retry.number")
+  val MaxRetryNum = 10000000 // config.getInt("max.retry.number")
   val MaxBackOff = config.getInt("max.back.off")
   val DeleteAllFetchSize = config.getInt("delete.all.fetch.size")
   val FailProb = config.getDouble("hbase.fail.prob")
-  val LockExpireDuration = Math.max(MaxRetryNum * MaxBackOff * 2, 10000)
+  val LockExpireDuration = Math.max(MaxRetryNum * MaxBackOff * 2, Int.MaxValue)
   val maxSize = config.getInt("future.cache.max.size")
   val expireAfterWrite = config.getInt("future.cache.expire.after.write")
   val expireAfterAccess = config.getInt("future.cache.expire.after.access")
@@ -313,9 +313,9 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
 
   /** Delete All */
   protected def deleteAllFetchedEdgesAsyncOld(queryRequest: QueryRequest,
-                                    queryResult: QueryResult,
-                                    requestTs: Long,
-                                    retryNum: Int): Future[Boolean] = {
+                                              queryResult: QueryResult,
+                                              requestTs: Long,
+                                              retryNum: Int): Future[Boolean] = {
     val queryParam = queryRequest.queryParam
     val zkQuorum = queryParam.label.hbaseZkAddr
     val futures = for {
@@ -343,12 +343,24 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
       (edgeWithScore.edge.ts < requestTs) && !edgeWithScore.edge.isDegree
     }.map { edgeWithScore =>
       val label = queryRequest.queryParam.label
-      val newPropsWithTs = edgeWithScore.edge.propsWithTs ++
-        Map(LabelMeta.timeStampSeq -> InnerValLikeWithTs.withLong(requestTs, requestTs, label.schemaVersion))
-      val copiedEdge = edgeWithScore.edge.copy(op = GraphUtil.operations("delete"), version = requestTs,
-        propsWithTs = newPropsWithTs)
-      edgeWithScore.copy(edge = copiedEdge)
+      val (newOp, newVersion, newPropsWithTs) = label.consistencyLevel match {
+        case "strong" =>
+          val _newPropsWithTs = edgeWithScore.edge.propsWithTs ++
+            Map(LabelMeta.timeStampSeq -> InnerValLikeWithTs.withLong(requestTs, requestTs, label.schemaVersion))
+          (GraphUtil.operations("delete"), requestTs, _newPropsWithTs)
+        case _ =>
+          val oldEdge = edgeWithScore.edge
+          (oldEdge.op, oldEdge.version, oldEdge.propsWithTs)
+      }
+
+      val copiedEdge =
+        edgeWithScore.edge.copy(op = newOp, version = newVersion, propsWithTs = newPropsWithTs)
+
+      val edgeToDelete = edgeWithScore.copy(edge = copiedEdge)
+//      logger.debug(s"delete edge from deleteAll: ${edgeToDelete.edge.toLogString}")
+      edgeToDelete
     }
+
     queryResult.copy(edgeWithScoreLs = edgeWithScoreLs)
   }
 
@@ -357,7 +369,6 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
     queryResultLs.foreach { queryResult =>
       if (queryResult.isFailure) throw new RuntimeException("fetched result is fallback.")
     }
-
     val futures = for {
       queryRequestWithResult <- queryRequestWithResultLs
       (queryRequest, _) = QueryRequestWithResult.unapply(queryRequestWithResult).get
@@ -385,6 +396,7 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
             deleteAllFetchedEdgesAsyncOld(queryRequest, deleteQueryResult, requestTs, MaxRetryNum)
         }
       }
+
     if (futures.isEmpty) {
       // all deleted.
       Future.successful(true -> true)
@@ -397,7 +409,10 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
     val future = for {
       queryRequestWithResultLs <- getEdges(query)
       (allDeleted, ret) <- deleteAllFetchedEdgesLs(queryRequestWithResultLs, requestTs)
-    } yield (allDeleted, ret)
+    } yield {
+//        logger.debug(s"fetchAndDeleteAll: ${allDeleted}, ${ret}")
+        (allDeleted, ret)
+      }
 
     Extensions.retryOnFailure(MaxRetryNum) {
       future
@@ -466,14 +481,14 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
                               queryParam: QueryParam,
                               cacheElementOpt: Option[IndexEdge],
                               parentEdges: Seq[EdgeWithScore]): Option[Edge] = {
-//    logger.debug(s"toEdge: $kv")
+//        logger.debug(s"toEdge: $kv")
     try {
       val indexEdge = indexEdgeDeserializer.fromKeyValues(queryParam, Seq(kv), queryParam.label.schemaVersion, cacheElementOpt)
 
       Option(indexEdge.toEdge.copy(parentEdges = parentEdges))
     } catch {
       case ex: Exception =>
-        logger.error(s"Fail on toEdge: ${kv.toString}, ${queryParam}")
+        logger.error(s"Fail on toEdge: ${kv.toString}, ${queryParam}", ex)
         None
     }
   }
@@ -483,7 +498,7 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
                                       cacheElementOpt: Option[SnapshotEdge] = None,
                                       isInnerCall: Boolean,
                                       parentEdges: Seq[EdgeWithScore]): Option[Edge] = {
-//    logger.debug(s"toEdge: $kv")
+//        logger.debug(s"SnapshottoEdge: $kv")
     val snapshotEdge = snapshotEdgeDeserializer.fromKeyValues(queryParam, Seq(kv), queryParam.label.schemaVersion, cacheElementOpt)
 
     if (isInnerCall) {
@@ -580,7 +595,7 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
   }
 
   protected def buildReleaseLockEdge(snapshotEdgeOpt: Option[Edge], lockEdge: SnapshotEdge,
-                           edgeMutate: EdgeMutate) = {
+                                     edgeMutate: EdgeMutate) = {
     val newVersion = lockEdge.version + 1
     val base = edgeMutate.newSnapshotEdge match {
       case None =>
@@ -607,8 +622,8 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
         val lockEdgePut = buildPutAsync(lockEdge).head
         val oldPut = oldSnapshotEdgeOpt.map(e => buildPutAsync(e.toSnapshotEdge).head)
         writeLock(lockEdgePut, oldPut).recoverWith { case ex: Exception =>
-            logger.error(s"AcquireLock RPC Failed.")
-            throw new PartialFailureException(edge, 0, "AcquireLock RPC Failed")
+          logger.error(s"AcquireLock RPC Failed.")
+          throw new PartialFailureException(edge, 0, "AcquireLock RPC Failed")
         }.map { ret =>
           if (ret) {
             val log = Seq(
@@ -634,11 +649,11 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
 
 
   protected def releaseLock(predicate: Boolean,
-                           edge: Edge,
-                           lockEdge: SnapshotEdge,
-                           releaseLockEdge: SnapshotEdge,
-                           _edgeMutate: EdgeMutate,
-                           oldBytes: Array[Byte]): Future[Boolean] = {
+                            edge: Edge,
+                            lockEdge: SnapshotEdge,
+                            releaseLockEdge: SnapshotEdge,
+                            _edgeMutate: EdgeMutate,
+                            oldBytes: Array[Byte]): Future[Boolean] = {
     if (!predicate) {
       throw new PartialFailureException(edge, 3, "predicate failed.")
     }
@@ -648,7 +663,7 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
       val releaseLockEdgePut = buildPutAsync(releaseLockEdge).head
       val lockEdgePut = buildPutAsync(lockEdge).head
       writeLock(releaseLockEdgePut, Option(lockEdgePut)).recoverWith {
-//      client(withWait = true).compareAndSet(releaseLockEdgePut, lockEdgePut.value()).toFuture.recoverWith {
+        //      client(withWait = true).compareAndSet(releaseLockEdgePut, lockEdgePut.value()).toFuture.recoverWith {
         case ex: Exception =>
           logger.error(s"ReleaseLock RPC Failed.")
           throw new PartialFailureException(edge, 3, "ReleaseLock RPC Failed")
@@ -661,8 +676,8 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
             oldBytes.toList,
             lockEdgePut,
             releaseLockEdgePut,
-//            lockEdgePut.value.toList,
-//            releaseLockEdgePut.value().toList,
+            //            lockEdgePut.value.toList,
+            //            releaseLockEdgePut.value().toList,
             "=" * 50,
             "\n"
           )
@@ -678,9 +693,9 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
 
 
   protected def mutate(predicate: Boolean,
-             edge: Edge,
-             statusCode: Byte,
-             _edgeMutate: EdgeMutate): Future[Boolean] = {
+                       edge: Edge,
+                       statusCode: Byte,
+                       _edgeMutate: EdgeMutate): Future[Boolean] = {
     if (!predicate) throw new PartialFailureException(edge, 1, "predicate failed.")
 
     if (statusCode >= 2) {
@@ -702,8 +717,8 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
   }
 
   protected def increment(predicate: Boolean,
-                edge: Edge,
-                statusCode: Byte, _edgeMutate: EdgeMutate): Future[Boolean] = {
+                          edge: Edge,
+                          statusCode: Byte, _edgeMutate: EdgeMutate): Future[Boolean] = {
     if (!predicate) throw new PartialFailureException(edge, 2, "predicate failed.")
     if (statusCode >= 3) {
       logger.debug(s"skip increment: [$statusCode]\n${edge.toLogString}")
@@ -740,9 +755,9 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
   }
 
   protected def commitUpdate(edge: Edge,
-                   statusCode: Byte)(snapshotEdgeOpt: Option[Edge],
-                                     kvOpt: Option[SKeyValue],
-                                     edgeUpdate: EdgeMutate): Future[Boolean] = {
+                             statusCode: Byte)(snapshotEdgeOpt: Option[Edge],
+                                               kvOpt: Option[SKeyValue],
+                                               edgeUpdate: EdgeMutate): Future[Boolean] = {
     val label = edge.label
     def oldBytes = kvOpt.map(_.value).getOrElse(Array.empty)
 
@@ -753,14 +768,14 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
       case None =>
         // no one ever did success on acquire lock.
         _process(lockEdge, releaseLockEdge, edgeUpdate)
-//        process(lockEdge, releaseLockEdge, edgeUpdate, statusCode)
+      //        process(lockEdge, releaseLockEdge, edgeUpdate, statusCode)
       case Some(snapshotEdge) =>
         // someone did success on acquire lock at least one.
         snapshotEdge.pendingEdgeOpt match {
           case None =>
             // not locked
             _process(lockEdge, releaseLockEdge, edgeUpdate)
-//            process(lockEdge, releaseLockEdge, edgeUpdate, statusCode)
+          //            process(lockEdge, releaseLockEdge, edgeUpdate, statusCode)
           case Some(pendingEdge) =>
             def isLockExpired = pendingEdge.lockTs.get + LockExpireDuration < System.currentTimeMillis()
             if (isLockExpired) {
@@ -769,7 +784,7 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
               val newLockEdge = buildLockEdge(snapshotEdgeOpt, pendingEdge, kvOpt)
               val newReleaseLockEdge = buildReleaseLockEdge(snapshotEdgeOpt, newLockEdge, newEdgeUpdate)
               commitProcess(edge, statusCode = 0)(snapshotEdgeOpt, kvOpt)(newLockEdge, newReleaseLockEdge, newEdgeUpdate).flatMap { ret =>
-//              process(newLockEdge, newReleaseLockEdge, newEdgeUpdate, statusCode = 0).flatMap { ret =>
+                //              process(newLockEdge, newReleaseLockEdge, newEdgeUpdate, statusCode = 0).flatMap { ret =>
                 val log = s"[Success]: Resolving expired pending edge.\n${pendingEdge.toLogString}"
                 throw new PartialFailureException(edge, 0, log)
               }
@@ -783,7 +798,7 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
 
                 /** lockEdge will be ignored */
                 _process(lockEdge, newReleaseLockEdge, newEdgeUpdate)
-//                process(lockEdge, newReleaseLockEdge, newEdgeUpdate, statusCode)
+                //                process(lockEdge, newReleaseLockEdge, newEdgeUpdate, statusCode)
               } else {
                 throw new PartialFailureException(edge, statusCode, s"others[${pendingEdge.ts}] is mutating. me[${edge.ts}]")
               }
@@ -795,7 +810,7 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
   /** end of methods for consistency */
 
 
-//  def futureCache[T] = Cache[Long, (Long, T)]
+  //  def futureCache[T] = Cache[Long, (Long, T)]
 
   protected def toRequestEdge(queryRequest: QueryRequest): Edge = {
     val srcVertex = queryRequest.vertex
@@ -916,13 +931,14 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
         // current stepIdx = -1
         val startQueryResultLs = QueryResult.fromVertices(q)
         q.steps.foldLeft(Future.successful(startQueryResultLs)) { case (acc, step) =>
-          fetchStepFuture(q, acc).map { stepResults =>
-            step.queryParams.zip(stepResults).foreach { case (qParam, queryRequestWithResult)  =>
-              val cursor = Base64.getEncoder.encodeToString(queryRequestWithResult.queryResult.tailCursor)
-              qParam.cursorOpt = Option(cursor)
-            }
-            stepResults
-          }
+            fetchStepFuture(q, acc)
+//          fetchStepFuture(q, acc).map { stepResults =>
+//            step.queryParams.zip(stepResults).foreach { case (qParam, queryRequestWithResult)  =>
+//              val cursor = Base64.getEncoder.encodeToString(queryRequestWithResult.queryResult.tailCursor)
+//              qParam.cursorOpt = Option(cursor)
+//            }
+//            stepResults
+//          }
         }
       }
     } recover {
@@ -1065,4 +1081,3 @@ abstract class Storage[W, R](val config: Config)(implicit ec: ExecutionContext) 
     }
   }
 }
-

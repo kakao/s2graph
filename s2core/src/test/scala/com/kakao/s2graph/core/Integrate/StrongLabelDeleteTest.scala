@@ -200,7 +200,7 @@ class StrongLabelDeleteTest extends IntegrateCommon {
     val labelName = testLabelName
     val maxTgtId = 10
     val batchSize = 10
-    val testNum = 3
+    val testNum = 100
     val numOfBatch = 10
 
     def testInner(startTs: Long, src: Long) = {
