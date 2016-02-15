@@ -15,7 +15,7 @@ import com.typesafe.config.Config
 import org.apache.hadoop.hbase.util.Bytes
 import org.rocksdb._
 
-import scala.collection.mutable
+import scala.collection.{Seq, mutable}
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.{Future, ExecutionContext}
 
@@ -50,10 +50,12 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
 
   val options = new Options()
     .setCreateIfMissing(true)
-    .setWriteBufferSize(100)
+    .setWriteBufferSize(0)
     .setMergeOperatorName("uint64add")
 
+
   var db: RocksDB = null
+  val writeOptions = new WriteOptions().setSync(true)
 
   try {
     // a factory method that returns a RocksDB instance
@@ -69,16 +71,51 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
   val rowKeyLocks = new mutable.HashMap[Seq[Byte], AtomicBoolean]
 
   /** Mutation Logics */
-  override def writeToStorage(rpc: SKeyValue, withWait: Boolean): Future[Boolean] = Future {
-    rpc.operation match {
-      case SKeyValue.Put => db.put(rpc.row, rpc.value)
-      case SKeyValue.Delete => db.remove(rpc.row)
-      case SKeyValue.Increment =>
-        val javaLong = Bytes.toLong(rpc.value)
-        db.merge(rpc.row, longToBytes(javaLong))
-      case _ => throw new RuntimeException(s"not supported rpc operation. ${rpc.operation}")
+  override def writeAsyncSimple(zkQuorum: String, elementRpcs: Seq[SKeyValue], withWait: Boolean): Future[Boolean] = {
+    if (elementRpcs.isEmpty) {
+      Future.successful(true)
+    } else {
+      val ret =
+        try {
+          val writeBatch = new WriteBatch()
+          elementRpcs.map { rpc =>
+            rpc.operation match {
+              case SKeyValue.Put => writeBatch.put(rpc.row, rpc.value)
+              case SKeyValue.Delete => writeBatch.remove(rpc.row)
+              case SKeyValue.Increment =>
+                val javaLong = Bytes.toLong(rpc.value)
+                writeBatch.merge(rpc.row, longToBytes(javaLong))
+              case _ => throw new RuntimeException(s"not supported rpc operation. ${rpc.operation}")
+            }
+          }
+          db.write(writeOptions, writeBatch)
+          true
+        } catch {
+          case e: Exception =>
+            false
+        }
+
+
+      Future.successful(ret)
     }
-    true
+  }
+  override def writeToStorage(rpc: SKeyValue, withWait: Boolean): Future[Boolean] = {
+
+    val ret = try {
+      rpc.operation match {
+        case SKeyValue.Put => db.put(writeOptions, rpc.row, rpc.value)
+        case SKeyValue.Delete => db.remove(writeOptions, rpc.row)
+        case SKeyValue.Increment =>
+          val javaLong = Bytes.toLong(rpc.value)
+          db.merge(writeOptions, rpc.row, longToBytes(javaLong))
+        case _ => throw new RuntimeException(s"not supported rpc operation. ${rpc.operation}")
+      }
+      true
+    } catch {
+      case e: Exception =>
+        false
+    }
+    Future.successful(ret)
   }
 
   override def createTable(zkAddr: String,
@@ -178,8 +215,9 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
 
   override def writeLock(rpc: SKeyValue, expectedOpt: Option[SKeyValue]): Future[Boolean] = {
     val lockKey = Bytes.toString(rpc.row)
-    
+
     val lock = lockMap.getOrDefault(lockKey, new AtomicBoolean(true))
+    
 
     db.synchronized {
       val ret = lockMap.putIfAbsent(lockKey, new AtomicBoolean(true)) match {
@@ -188,7 +226,7 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
           val innerRet = expectedOpt match {
             case None =>
               if (fetchedValue == null) {
-                db.put(rpc.row, rpc.value)
+                db.put(writeOptions, rpc.row, rpc.value)
                 true
               } else {
                 false
@@ -198,7 +236,7 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
                 false
               } else {
                 if (Bytes.compareTo(fetchedValue, kv.value) == 0) {
-                  db.put(rpc.row, rpc.value)
+                  db.put(writeOptions, rpc.row, rpc.value)
                   true
                 } else {
                   false
