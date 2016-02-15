@@ -70,7 +70,9 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
     rpc.operation match {
       case SKeyValue.Put => db.put(rpc.row, rpc.value)
       case SKeyValue.Delete => db.remove(rpc.row)
-      case SKeyValue.Increment => db.merge(rpc.row, rpc.value)
+      case SKeyValue.Increment =>
+        val javaLong = Bytes.toLong(rpc.value)
+        db.merge(rpc.row, longToBytes(javaLong))
       case _ => throw new RuntimeException(s"not supported rpc operation. ${rpc.operation}")
     }
     true
@@ -176,50 +178,82 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
     Future.sequence(futures)
   }
 
+  val lockMap = new java.util.concurrent.ConcurrentHashMap[String, AtomicBoolean]()
+
   override def writeLock(rpc: SKeyValue, expectedOpt: Option[SKeyValue]): Future[Boolean] = {
-    Future.successful(true)
-  }
+    val lockKey = Bytes.toString(rpc.row)
+    val ret = lockMap.putIfAbsent(lockKey, new AtomicBoolean(true)) match {
+      case null =>
+        val fetchedValue = db.get(rpc.row)
+        val innerRet = expectedOpt match {
+          case None =>
+            if (fetchedValue == null) {
+              db.put(rpc.row, rpc.value)
+              true
+            } else {
+              false
+            }
+          case Some(kv) =>
+            if (fetchedValue == null) {
+              false
+            } else {
+              if (Bytes.compareTo(fetchedValue, kv.value) == 0) {
+                db.put(rpc.row, rpc.value)
+                true
+              } else {
+                false
+              }
+            }
+        }
 
-  override def commitProcess(edge: Edge, statusCode: Byte)
-                            (snapshotEdgeOpt: Option[Edge], kvOpt: Option[SKeyValue])
-                            (lockEdge: SnapshotEdge, releaseLockEdge: SnapshotEdge, _edgeMutate: EdgeMutate): Future[Boolean] = {
-
-    val writeBatch = new WriteBatch()
-    val lockEdgePut = buildPutAsync(lockEdge).head
-
-    val indexEdgeMutations = indexedEdgeMutations(_edgeMutate)
-    val incrementMutations = increment(increments(_edgeMutate))
-    val releaseLockEdgePut = buildPutAsync(releaseLockEdge).head
-
-    writeBatch.put(lockEdgePut.row, lockEdgePut.value)
-    indexEdgeMutations.foreach { kv =>
-      kv.operation match {
-        case SKeyValue.Put => writeBatch.put(kv.row, kv.value)
-        case SKeyValue.Delete => writeBatch.remove(kv.row)
-        case _ => throw new RuntimeException(s"not supported rpc operation. ${kv.operation}")
-      }
+        lockMap.remove(lockKey)
+        innerRet
+      case _ => false
     }
-    incrementMutations.foreach { kv =>
-      val newValue = Bytes.toLong(kv.value) match {
-        case 1L => longToBytes(1L)
-        case -1L => longToBytes(-1L)
-        case _ => throw new RuntimeException("!!!!!!")
-      }
-      writeBatch.merge(kv.row, newValue)
-    }
-    writeBatch.put(releaseLockEdgePut.row, releaseLockEdgePut.value)
-    val ret =
-      try {
-        val writeOption = new WriteOptions()
-        db.write(writeOption, writeBatch)
-        true
-      } catch {
-        case e: RocksDBException =>
-          logger.error(s"CommitProcess failed.", e)
-          false
-      }
+
     Future.successful(ret)
   }
+
+//  override def commitProcess(edge: Edge, statusCode: Byte)
+//                            (snapshotEdgeOpt: Option[Edge], kvOpt: Option[SKeyValue])
+//                            (lockEdge: SnapshotEdge, releaseLockEdge: SnapshotEdge, _edgeMutate: EdgeMutate): Future[Boolean] = {
+//
+//    val writeBatch = new WriteBatch()
+//    val lockEdgePut = buildPutAsync(lockEdge).head
+//
+//    val indexEdgeMutations = indexedEdgeMutations(_edgeMutate)
+//    val incrementMutations = increment(increments(_edgeMutate))
+//    val releaseLockEdgePut = buildPutAsync(releaseLockEdge).head
+//
+//    writeBatch.put(lockEdgePut.row, lockEdgePut.value)
+//    indexEdgeMutations.foreach { kv =>
+//      kv.operation match {
+//        case SKeyValue.Put => writeBatch.put(kv.row, kv.value)
+//        case SKeyValue.Delete => writeBatch.remove(kv.row)
+//        case _ => throw new RuntimeException(s"not supported rpc operation. ${kv.operation}")
+//      }
+//    }
+//    incrementMutations.foreach { kv =>
+//      val newValue = Bytes.toLong(kv.value) match {
+//        case 1L => longToBytes(1L)
+//        case -1L => longToBytes(-1L)
+//        case _ => throw new RuntimeException("!!!!!!")
+//      }
+//      writeBatch.merge(kv.row, newValue)
+//    }
+//    writeBatch.put(releaseLockEdgePut.row, releaseLockEdgePut.value)
+//    val ret =
+//      try {
+//        val writeOption = new WriteOptions()
+//        db.write(writeOption, writeBatch)
+//        true
+//      } catch {
+//        case e: RocksDBException =>
+//          logger.error(s"CommitProcess failed.", e)
+//          false
+//      }
+//    Future.successful(ret)
+//  }
 
 
 
