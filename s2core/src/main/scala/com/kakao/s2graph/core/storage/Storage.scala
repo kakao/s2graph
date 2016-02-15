@@ -22,11 +22,11 @@ import scala.util.{Random, Try}
 
 abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
 
-  val MaxRetryNum = 10000000 // config.getInt("max.retry.number")
+  val MaxRetryNum = config.getInt("max.retry.number")
   val MaxBackOff = config.getInt("max.back.off")
   val DeleteAllFetchSize = config.getInt("delete.all.fetch.size")
   val FailProb = config.getDouble("hbase.fail.prob")
-  val LockExpireDuration = Math.max(MaxRetryNum * MaxBackOff * 2, Int.MaxValue)
+  val LockExpireDuration = Math.max(MaxRetryNum * MaxBackOff * 2, 10000)
   val maxSize = config.getInt("future.cache.max.size")
   val expireAfterWrite = config.getInt("future.cache.expire.after.write")
   val expireAfterAccess = config.getInt("future.cache.expire.after.access")

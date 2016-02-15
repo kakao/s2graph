@@ -36,7 +36,7 @@ object RocksDBHelper {
   }
 }
 class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
-  extends Storage[SKeyValue, Future[QueryRequestWithResult]](config) {
+  extends Storage[Future[QueryRequestWithResult]](config) {
 
   import RocksDBHelper._
   import HSerializable._
@@ -57,6 +57,8 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
 
   try {
     // a factory method that returns a RocksDB instance
+    // only for testing now.
+
     db = RocksDB.open(options, "/tmp/rocks")
 
   } catch {
@@ -152,13 +154,6 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
     fetchKeyValues(buildRequest(queryRequest)) map { kvs =>
       val queryParam = queryRequest.queryParam
       val edgeWithScores = toEdges(kvs, queryParam, prevStepScore, isInnerCall, parentEdges)
-//
-//      val filteredEdgeWithScores = queryParam.duration match {
-//        case None => edgeWithScores
-//        case Some((minTs, maxTs)) => edgeWithScores.filter { edgeWithScore =>
-//          edgeWithScore.edge.isDegree || (edgeWithScore.edge.ts >= minTs && edgeWithScore.edge.ts < maxTs)
-//        }
-//      }
 
       val resultEdgesWithScores =
         if (queryRequest.queryParam.sample >= 0) sample(queryRequest, edgeWithScores, queryRequest.queryParam.sample)
@@ -183,6 +178,9 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
 
   override def writeLock(rpc: SKeyValue, expectedOpt: Option[SKeyValue]): Future[Boolean] = {
     val lockKey = Bytes.toString(rpc.row)
+    
+    val lock = lockMap.getOrDefault(lockKey, new AtomicBoolean(true))
+
     db.synchronized {
       val ret = lockMap.putIfAbsent(lockKey, new AtomicBoolean(true)) match {
         case null =>
@@ -215,62 +213,16 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
 
       Future.successful(ret)
     }
+
+
   }
-
-//  override def commitProcess(edge: Edge, statusCode: Byte)
-//                            (snapshotEdgeOpt: Option[Edge], kvOpt: Option[SKeyValue])
-//                            (lockEdge: SnapshotEdge, releaseLockEdge: SnapshotEdge, _edgeMutate: EdgeMutate): Future[Boolean] = {
-//
-//    val writeBatch = new WriteBatch()
-//    val lockEdgePut = buildPutAsync(lockEdge).head
-//
-//    val indexEdgeMutations = indexedEdgeMutations(_edgeMutate)
-//    val incrementMutations = increment(increments(_edgeMutate))
-//    val releaseLockEdgePut = buildPutAsync(releaseLockEdge).head
-//
-//    writeBatch.put(lockEdgePut.row, lockEdgePut.value)
-//    indexEdgeMutations.foreach { kv =>
-//      kv.operation match {
-//        case SKeyValue.Put => writeBatch.put(kv.row, kv.value)
-//        case SKeyValue.Delete => writeBatch.remove(kv.row)
-//        case _ => throw new RuntimeException(s"not supported rpc operation. ${kv.operation}")
-//      }
-//    }
-//    incrementMutations.foreach { kv =>
-//      val newValue = Bytes.toLong(kv.value) match {
-//        case 1L => longToBytes(1L)
-//        case -1L => longToBytes(-1L)
-//        case _ => throw new RuntimeException("!!!!!!")
-//      }
-//      writeBatch.merge(kv.row, newValue)
-//    }
-//    writeBatch.put(releaseLockEdgePut.row, releaseLockEdgePut.value)
-//    val ret =
-//      try {
-//        val writeOption = new WriteOptions()
-//        db.write(writeOption, writeBatch)
-//        true
-//      } catch {
-//        case e: RocksDBException =>
-//          logger.error(s"CommitProcess failed.", e)
-//          false
-//      }
-//    Future.successful(ret)
-//  }
-
-
-
-
-  /** Build backend storage specific RPC */
-  override def put(kvs: Seq[SKeyValue]): Seq[SKeyValue] = kvs.map { kv => kv.copy(operation = SKeyValue.Put)}
-
-  override def increment(kvs: Seq[SKeyValue]): Seq[SKeyValue] = kvs.map { kv => kv.copy(operation = SKeyValue.Increment) }
-
-  override def delete(kvs: Seq[SKeyValue]): Seq[SKeyValue] = kvs.map { kv => kv.copy(operation = SKeyValue.Delete)}
 
 
   /** Management Logic */
-  override def flush(): Unit = db.close()
+  override def flush(): Unit = {
+    db.flush(new FlushOptions().setWaitForFlush(true))
+    db.close()
+  }
 
   override def incrementCounts(edges: Seq[Edge], withWait: Boolean): Future[Seq[(Boolean, Long)]] = {
     Future.successful(Seq.empty)
