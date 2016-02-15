@@ -183,36 +183,38 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
 
   override def writeLock(rpc: SKeyValue, expectedOpt: Option[SKeyValue]): Future[Boolean] = {
     val lockKey = Bytes.toString(rpc.row)
-    val ret = lockMap.putIfAbsent(lockKey, new AtomicBoolean(true)) match {
-      case null =>
-        val fetchedValue = db.get(rpc.row)
-        val innerRet = expectedOpt match {
-          case None =>
-            if (fetchedValue == null) {
-              db.put(rpc.row, rpc.value)
-              true
-            } else {
-              false
-            }
-          case Some(kv) =>
-            if (fetchedValue == null) {
-              false
-            } else {
-              if (Bytes.compareTo(fetchedValue, kv.value) == 0) {
+    db.synchronized {
+      val ret = lockMap.putIfAbsent(lockKey, new AtomicBoolean(true)) match {
+        case null =>
+          val fetchedValue = db.get(rpc.row)
+          val innerRet = expectedOpt match {
+            case None =>
+              if (fetchedValue == null) {
                 db.put(rpc.row, rpc.value)
                 true
               } else {
                 false
               }
-            }
-        }
+            case Some(kv) =>
+              if (fetchedValue == null) {
+                false
+              } else {
+                if (Bytes.compareTo(fetchedValue, kv.value) == 0) {
+                  db.put(rpc.row, rpc.value)
+                  true
+                } else {
+                  false
+                }
+              }
+          }
 
-        lockMap.remove(lockKey)
-        innerRet
-      case _ => false
+          lockMap.remove(lockKey)
+          innerRet
+        case _ => false
+      }
+
+      Future.successful(ret)
     }
-
-    Future.successful(ret)
   }
 
 //  override def commitProcess(edge: Edge, statusCode: Byte)
