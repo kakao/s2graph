@@ -5,14 +5,16 @@ import java.util.Base64
 import java.util.concurrent.atomic.AtomicBoolean
 
 import com.google.common.cache.Cache
+import com.kakao.s2graph.core.GraphExceptions.{SnapshotEdgeLockedException, FetchTimeoutException}
 import com.kakao.s2graph.core.mysqls.Label
 import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.storage.hbase._
-import com.kakao.s2graph.core.storage.{SKeyValue, StorageDeserializable, StorageSerializable, Storage}
+import com.kakao.s2graph.core.storage._
 import com.kakao.s2graph.core.types.VertexId
-import com.kakao.s2graph.core.utils.logger
+import com.kakao.s2graph.core.utils.{Extensions, logger}
 import com.typesafe.config.Config
 import org.apache.hadoop.hbase.util.Bytes
+import org.hbase.async.{PutRequest, KeyValue, GetRequest}
 import org.rocksdb._
 
 import scala.collection.{Seq, mutable}
@@ -56,6 +58,8 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
 
   var db: RocksDB = null
   val writeOptions = new WriteOptions().setSync(true)
+
+  val client = AsynchbaseStorage.makeClient(config)
 
   try {
     // a factory method that returns a RocksDB instance
@@ -129,9 +133,42 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
 
   /** Query Logic */
   val HardLimit = 10000
-  override def fetchKeyValues(startStopKeyRange: AnyRef): Future[Seq[SKeyValue]] = Future {
-    startStopKeyRange match {
-      case (startKey: Array[Byte], stopKey: Array[Byte]) =>
+  override def fetchSnapshotEdgeKeyValues(queryParamWithStartStopKeyRange: AnyRef): Future[Seq[SKeyValue]] = {
+    import Extensions.DeferOps
+    import collection.JavaConversions._
+    queryParamWithStartStopKeyRange match {
+      case (queryParam: QueryParam, (startKey: Array[Byte], stopKey: Array[Byte])) =>
+        val label = queryParam.label
+        val get = new GetRequest(label.hbaseTableName.getBytes, startKey, edgeCf, Array.empty[Byte])
+        client.get(get).toFuture.map { kvs =>
+          kvs.map { kv => implicitly[CanSKeyValue[KeyValue]].toSKeyValue(kv) }.toSeq
+        }
+//        val lockKey = Bytes.toString(startKey)
+//        val lock = lockMap.getOrDefault(lockKey, new AtomicBoolean(false))
+//        if (lock.getAndSet(true)) {
+//          Future.failed(new SnapshotEdgeLockedException("read for fetchSnapshotEdgeKeyValues is locked."))
+//        } else {
+//          try {
+//            val fetched = db.get(startKey)
+//            val ret =
+//              if (fetched == null) Seq.empty
+//              else {
+//                Seq(
+//                  SKeyValue(table, startKey, edgeCf, qualifier, fetched, System.currentTimeMillis())
+//                )
+//              }
+//            Future.successful(ret)
+//          } finally {
+//            lockMap.remove(lock)
+//          }
+//        }
+      case _ => Future.failed(new RuntimeException("wrong class type for startStopKeyRange on fetchSnapshotEdgeKeyValues"))
+    }
+  }
+  override def fetchIndexEdgeKeyValues(queryParamWithStartStopKeyRange: AnyRef): Future[Seq[SKeyValue]] =  {
+
+    val ret = queryParamWithStartStopKeyRange match {
+      case (queryParam: QueryParam, (startKey: Array[Byte], stopKey: Array[Byte])) =>
         val iter = db.newIterator()
         var idx = 0
         iter.seek(startKey)
@@ -147,9 +184,10 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
         kvs.toSeq
       case _ => Seq.empty
     }
+    Future.successful(ret)
   }
 
-  override def buildRequest(queryRequest: QueryRequest): (Array[Byte], Array[Byte]) = {
+  override def buildRequest(queryRequest: QueryRequest): (QueryParam, (Array[Byte], Array[Byte])) = {
     queryRequest.queryParam.tgtVertexInnerIdOpt match {
       case None => // indexEdges
         val queryParam = queryRequest.queryParam
@@ -175,10 +213,10 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
             }
             (_startKey, Bytes.add(baseKey, Array.fill(1)(-1)))
           }
-        (startKey, stopKey)
+        (queryRequest.queryParam, (startKey, stopKey))
       case Some(tgtId) => // snapshotEdge
         val kv = snapshotEdgeSerializer(toRequestEdge(queryRequest).toSnapshotEdge).toKeyValues.head
-        (kv.row, kv.row)
+        (queryRequest.queryParam, (kv.row, kv.row))
     }
   }
 
@@ -188,7 +226,7 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
                      isInnerCall: Boolean,
                      parentEdges: Seq[EdgeWithScore]): Future[QueryRequestWithResult] = {
 
-    fetchKeyValues(buildRequest(queryRequest)) map { kvs =>
+    fetchIndexEdgeKeyValues(buildRequest(queryRequest)) map { kvs =>
       val queryParam = queryRequest.queryParam
       val edgeWithScores = toEdges(kvs, queryParam, prevStepScore, isInnerCall, parentEdges)
 
@@ -214,43 +252,43 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
   val lockMap = new java.util.concurrent.ConcurrentHashMap[String, AtomicBoolean]()
 
   override def writeLock(rpc: SKeyValue, expectedOpt: Option[SKeyValue]): Future[Boolean] = {
-    val lockKey = Bytes.toString(rpc.row)
-
-    val lock = lockMap.getOrDefault(lockKey, new AtomicBoolean(true))
-    
-
-    db.synchronized {
-      val ret = lockMap.putIfAbsent(lockKey, new AtomicBoolean(true)) match {
-        case null =>
-          val fetchedValue = db.get(rpc.row)
-          val innerRet = expectedOpt match {
-            case None =>
-              if (fetchedValue == null) {
-                db.put(writeOptions, rpc.row, rpc.value)
-                true
-              } else {
-                false
-              }
-            case Some(kv) =>
-              if (fetchedValue == null) {
-                false
-              } else {
-                if (Bytes.compareTo(fetchedValue, kv.value) == 0) {
-                  db.put(writeOptions, rpc.row, rpc.value)
-                  true
-                } else {
-                  false
-                }
-              }
-          }
-
-          lockMap.remove(lockKey)
-          innerRet
-        case _ => false
-      }
-
-      Future.successful(ret)
-    }
+    import Extensions.DeferOps
+    val put = new PutRequest(rpc.table, rpc.row, rpc.cf, rpc.qualifier, rpc.value, rpc.timestamp)
+    client.compareAndSet(put, expectedOpt.map(_.value).getOrElse(Array.empty)).toFuture.map(_.booleanValue())
+//    val lockKey = Bytes.toString(rpc.row)
+//
+////    db.synchronized {
+//      val ret = lockMap.putIfAbsent(lockKey, new AtomicBoolean(true)) match {
+//        case null =>
+//          val fetchedValue = db.get(rpc.row)
+//          val innerRet = expectedOpt match {
+//            case None =>
+//              if (fetchedValue == null) {
+//                db.put(writeOptions, rpc.row, rpc.value)
+//                true
+//              } else {
+//                false
+//              }
+//            case Some(kv) =>
+//              if (fetchedValue == null) {
+//                false
+//              } else {
+//                if (Bytes.compareTo(fetchedValue, kv.value) == 0) {
+//                  db.put(writeOptions, rpc.row, rpc.value)
+//                  true
+//                } else {
+//                  false
+//                }
+//              }
+//          }
+//
+//          lockMap.remove(lockKey)
+//          innerRet
+//        case _ => false
+//      }
+//
+//      Future.successful(ret)
+////    }
 
 
   }

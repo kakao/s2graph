@@ -4,7 +4,7 @@ import java.util.Base64
 
 
 import com.kakao.s2graph.core.ExceptionHandler.{Key, Val, KafkaMessage}
-import com.kakao.s2graph.core.GraphExceptions.FetchTimeoutException
+import com.kakao.s2graph.core.GraphExceptions.{SnapshotEdgeLockedException, FetchTimeoutException}
 import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.mysqls._
 import com.kakao.s2graph.core.storage.hbase._
@@ -238,7 +238,7 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
         fetchSnapshotEdge(_edges.head) flatMap { case (queryParam, snapshotEdgeOpt, kvOpt) =>
 
           val (newEdge, edgeUpdate) = f(snapshotEdgeOpt, _edges)
-          logger.debug(s"${snapshotEdgeOpt}\n${edgeUpdate.toLogString}")
+
           //shouldReplace false.
           if (edgeUpdate.newSnapshotEdge.isEmpty && statusCode <= 0) {
             logger.debug(s"${newEdge.toLogString} drop.")
@@ -269,8 +269,8 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
               logger.debug(s"Finished. [$tryNum]\n${edges.head.toLogString}\n")
           }
           future recoverWith {
-            case FetchTimeoutException(retryEdge) =>
-              logger.info(s"[Try: $tryNum], Fetch fail.\n${retryEdge}")
+            case FetchTimeoutException(errorMsg) =>
+              logger.info(s"[Try: $tryNum], Fetch fail.\n${errorMsg}")
               retry(tryNum + 1)(edges, statusCode)(fn)
 
             case PartialFailureException(retryEdge, failedStatusCode, faileReason) =>
@@ -285,6 +285,11 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
               Thread.sleep(Random.nextInt(MaxBackOff))
               logger.info(s"[Try: $tryNum], [Status: $status] partial fail.\n${retryEdge.toLogString}\nFailReason: ${faileReason}")
               retry(tryNum + 1)(Seq(retryEdge), failedStatusCode)(fn)
+
+            case SnapshotEdgeLockedException(errorMsg) =>
+              logger.info(s"[Try: $tryNum], Fetch fail.\n${errorMsg}")
+              retry(tryNum + 1)(edges, statusCode)(fn)
+
             case ex: Exception =>
               logger.error("Unknown exception", ex)
               Future.successful(false)
@@ -845,7 +850,7 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
     val q = Query.toQuery(Seq(edge.srcVertex), _queryParam)
     val queryRequest = QueryRequest(q, 0, edge.srcVertex, _queryParam)
 
-    fetchSnapshotEdgeKeyValue(buildRequest(queryRequest)).map { kvs =>
+    fetchSnapshotEdgeKeyValues(buildRequest(queryRequest)).map { kvs =>
 //    fetchIndexEdgeKeyValues(buildRequest(queryRequest)).map { kvs =>
       val (edgeOpt, kvOpt) =
         if (kvs.isEmpty) (None, None)
@@ -856,9 +861,12 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
         }
       (queryParam, edgeOpt, kvOpt)
     } recoverWith { case ex: Throwable =>
-      logger.error(s"fetchQueryParam failed. fallback return.", ex)
-      throw new FetchTimeoutException(s"${edge.toLogString}")
+        throw ex
     }
+//    recoverWith { case ex: Throwable =>
+//      logger.error(s"fetchSnapshotEdge failed. fallback return.", ex)
+//      throw new FetchTimeoutException(s"${edge.toLogString}")
+//    }
   }
 
   protected def fetchStep(orgQuery: Query, queryRequestWithResultsLs: Seq[QueryRequestWithResult]): Future[Seq[QueryRequestWithResult]] = {
