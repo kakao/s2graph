@@ -108,17 +108,19 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
     if (elementRpcs.isEmpty) {
       Future.successful(true)
     } else {
-      val ret =
+      val ret = {
+        val writeBatch = buildWriteBatch(elementRpcs)
         try {
-          val writeBatch = buildWriteBatch(elementRpcs)
           db.write(writeOptions, writeBatch)
           true
         } catch {
           case e: Exception =>
             logger.error(s"writeAsyncSimple failed.", e)
             false
+        } finally {
+          writeBatch.dispose()
         }
-
+      }
       Future.successful(ret)
     }
   }
@@ -142,24 +144,17 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
     queryParamWithStartStopKeyRange match {
       case (queryParam: QueryParam, (startKey: Array[Byte], stopKey: Array[Byte])) =>
         def op = {
-          val iter = db.newIterator()
-          var idx = 0
-          iter.seek(startKey)
-
-          val kvs = new ListBuffer[SKeyValue]()
-          val ts = System.currentTimeMillis()
-          iter.seek(startKey)
-          while (iter.isValid && Bytes.compareTo(iter.key, stopKey) <= 0 && idx < queryParam.limit) {
-            kvs += SKeyValue(table, iter.key, edgeCf, qualifier, iter.value, System.currentTimeMillis())
-            iter.next()
-            idx += 1
-          }
-          Future.successful(kvs.toSeq)
+          val v = db.get(startKey)
+          val kvs =
+            if (v == null) Seq.empty
+            else {
+              Seq(
+                SKeyValue(table, startKey, edgeCf, qualifier, v, System.currentTimeMillis())
+              )
+            }
+          Future.successful(kvs)
         }
         withLock(startKey)(op)
-      // sync only snapshot update
-      //        if (Bytes.compareTo(startKey, stopKey) == 0) withLock(startKey)(op)
-      //        else op
 
       case _ => Future.successful(Seq.empty)
     }
@@ -169,24 +164,24 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
       case (queryParam: QueryParam, (startKey: Array[Byte], stopKey: Array[Byte])) =>
         def op = {
           val iter = db.newIterator()
-          var idx = 0
-          iter.seek(startKey)
+          try {
+            var idx = 0
+            iter.seek(startKey)
 
-          val kvs = new ListBuffer[SKeyValue]()
-          val ts = System.currentTimeMillis()
-          iter.seek(startKey)
-          while (iter.isValid && Bytes.compareTo(iter.key, stopKey) <= 0 && idx < queryParam.limit) {
-            kvs += SKeyValue(table, iter.key, edgeCf, qualifier, iter.value, System.currentTimeMillis())
-            iter.next()
-            idx += 1
+            val kvs = new ListBuffer[SKeyValue]()
+            val ts = System.currentTimeMillis()
+            iter.seek(startKey)
+            while (iter.isValid && Bytes.compareTo(iter.key, stopKey) <= 0 && idx < queryParam.limit) {
+              kvs += SKeyValue(table, iter.key, edgeCf, qualifier, iter.value, System.currentTimeMillis())
+              iter.next()
+              idx += 1
+            }
+            Future.successful(kvs.toSeq)
+          } finally {
+            iter.dispose()
           }
-          Future.successful(kvs.toSeq)
         }
         op
-        // sync only snapshot update
-//        if (Bytes.compareTo(startKey, stopKey) == 0) withLock(startKey)(op)
-//        else op
-
       case _ => Future.successful(Seq.empty)
     }
   }
