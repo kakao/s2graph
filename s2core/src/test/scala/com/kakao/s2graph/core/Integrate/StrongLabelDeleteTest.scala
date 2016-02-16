@@ -278,6 +278,4 @@ class StrongLabelDeleteTest extends IntegrateCommon {
       ((jsValue \ "degrees") \\ "_degree").headOption.map(_.as[Long]).getOrElse(0L)
     }
   }
-
-
 }

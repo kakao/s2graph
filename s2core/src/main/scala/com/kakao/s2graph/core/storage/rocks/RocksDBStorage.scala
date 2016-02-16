@@ -26,6 +26,7 @@ object RocksDBHelper {
     longBuffer.putLong(value)
     longBuffer.array()
   }
+
   def bytesToLong(data: Array[Byte], offset: Int): Long = {
     if (data != null) {
       val longBuffer = ByteBuffer.allocate(8).order(ByteOrder.nativeOrder())
@@ -35,6 +36,7 @@ object RocksDBHelper {
     } else 0L
   }
 }
+
 class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
   extends Storage[Future[QueryRequestWithResult]](config) {
 
@@ -77,18 +79,22 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
     } else {
       val ret =
         try {
-          val writeBatch = new WriteBatch()
-          elementRpcs.map { rpc =>
-            rpc.operation match {
-              case SKeyValue.Put => writeBatch.put(rpc.row, rpc.value)
-              case SKeyValue.Delete => writeBatch.remove(rpc.row)
-              case SKeyValue.Increment =>
-                val javaLong = Bytes.toLong(rpc.value)
-                writeBatch.merge(rpc.row, longToBytes(javaLong))
-              case _ => throw new RuntimeException(s"not supported rpc operation. ${rpc.operation}")
+          import scala.collection.JavaConversions._
+          elementRpcs.foreach { rpc =>
+            val lockKey = Bytes.toString(rpc.row)
+            val lock = lockMap.getOrElseUpdate(lockKey, new AtomicBoolean(true))
+
+            lock synchronized {
+              rpc.operation match {
+                case SKeyValue.Put => db.put(rpc.row, rpc.value)
+                case SKeyValue.Delete => db.remove(rpc.row)
+                case SKeyValue.Increment =>
+                  val javaLong = Bytes.toLong(rpc.value)
+                  db.merge(rpc.row, longToBytes(javaLong))
+                case _ => throw new RuntimeException(s"not supported rpc operation. ${rpc.operation}")
+              }
             }
           }
-          db.write(writeOptions, writeBatch)
           true
         } catch {
           case e: Exception =>
@@ -99,16 +105,25 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
       Future.successful(ret)
     }
   }
-  override def writeToStorage(rpc: SKeyValue, withWait: Boolean): Future[Boolean] = {
 
+  override def writeToStorage(rpc: SKeyValue, withWait: Boolean): Future[Boolean] = {
+    import scala.collection.JavaConversions._
+    val lockKey = Bytes.toString(rpc.row)
     val ret = try {
-      rpc.operation match {
-        case SKeyValue.Put => db.put(writeOptions, rpc.row, rpc.value)
-        case SKeyValue.Delete => db.remove(writeOptions, rpc.row)
-        case SKeyValue.Increment =>
-          val javaLong = Bytes.toLong(rpc.value)
-          db.merge(writeOptions, rpc.row, longToBytes(javaLong))
-        case _ => throw new RuntimeException(s"not supported rpc operation. ${rpc.operation}")
+      val lock = lockMap.getOrElseUpdate(lockKey, new AtomicBoolean(true))
+      try {
+        lock synchronized {
+          rpc.operation match {
+            case SKeyValue.Put => db.put(writeOptions, rpc.row, rpc.value)
+            case SKeyValue.Delete => db.remove(writeOptions, rpc.row)
+            case SKeyValue.Increment =>
+              val javaLong = Bytes.toLong(rpc.value)
+              db.merge(writeOptions, rpc.row, longToBytes(javaLong))
+            case _ => throw new RuntimeException(s"not supported rpc operation. ${rpc.operation}")
+          }
+        }
+      } finally {
+        //        lockMap.remove(lockKey)
       }
       true
     } catch {
@@ -129,23 +144,36 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
 
   /** Query Logic */
   val HardLimit = 10000
-  override def fetchKeyValues(startStopKeyRange: AnyRef): Future[Seq[SKeyValue]] = Future {
+
+  override def fetchKeyValues(startStopKeyRange: AnyRef): Future[Seq[SKeyValue]] = {
     startStopKeyRange match {
       case (startKey: Array[Byte], stopKey: Array[Byte]) =>
-        val iter = db.newIterator()
-        var idx = 0
-        iter.seek(startKey)
 
-        val kvs = new ListBuffer[SKeyValue]()
-        val ts = System.currentTimeMillis()
-        iter.seek(startKey)
-        while (iter.isValid && Bytes.compareTo(iter.key, stopKey) <= 0 && idx < HardLimit) {
-          kvs += SKeyValue(table, iter.key, edgeCf, qualifier, iter.value, System.currentTimeMillis())
-          iter.next()
-          idx += 1
+        import scala.collection.JavaConversions._
+        val lockKey = Bytes.toString(startKey)
+        val lock = lockMap.getOrElseUpdate(lockKey, new AtomicBoolean(true))
+
+        def op = {
+          val iter = db.newIterator()
+          var idx = 0
+          iter.seek(startKey)
+
+          val kvs = new ListBuffer[SKeyValue]()
+          val ts = System.currentTimeMillis()
+          iter.seek(startKey)
+          while (iter.isValid && Bytes.compareTo(iter.key, stopKey) <= 0 && idx < HardLimit) {
+            kvs += SKeyValue(table, iter.key, edgeCf, qualifier, iter.value, System.currentTimeMillis())
+            iter.next()
+            idx += 1
+          }
+          Future.successful(kvs.toSeq)
         }
-        kvs.toSeq
-      case _ => Seq.empty
+
+        // sync only snapshot update
+        if (Bytes.compareTo(startKey, stopKey) == 0) lock.synchronized(op)
+        else op
+
+      case _ => Future.successful(Seq.empty)
     }
   }
 
@@ -182,7 +210,6 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
     }
   }
 
-
   override def fetch(queryRequest: QueryRequest,
                      prevStepScore: Double,
                      isInnerCall: Boolean,
@@ -200,7 +227,6 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
     }
   }
 
-
   override def fetches(queryRequestWithScoreLs: Seq[(QueryRequest, Double)],
                        prevStepEdges: Map[VertexId, Seq[EdgeWithScore]]): Future[Seq[QueryRequestWithResult]] = {
     val futures = for {
@@ -214,47 +240,36 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
   val lockMap = new java.util.concurrent.ConcurrentHashMap[String, AtomicBoolean]()
 
   override def writeLock(rpc: SKeyValue, expectedOpt: Option[SKeyValue]): Future[Boolean] = {
+    import scala.collection.JavaConversions._
     val lockKey = Bytes.toString(rpc.row)
+    val lock = lockMap.getOrElseUpdate(lockKey, new AtomicBoolean(false))
 
-    val lock = lockMap.getOrDefault(lockKey, new AtomicBoolean(true))
-    
-
-    db.synchronized {
-      val ret = lockMap.putIfAbsent(lockKey, new AtomicBoolean(true)) match {
-        case null =>
-          val fetchedValue = db.get(rpc.row)
-          val innerRet = expectedOpt match {
-            case None =>
-              if (fetchedValue == null) {
-                db.put(writeOptions, rpc.row, rpc.value)
-                true
-              } else {
-                false
-              }
-            case Some(kv) =>
-              if (fetchedValue == null) {
-                false
-              } else {
-                if (Bytes.compareTo(fetchedValue, kv.value) == 0) {
-                  db.put(writeOptions, rpc.row, rpc.value)
-                  true
-                } else {
-                  false
-                }
-              }
+    lock synchronized {
+      val fetchedValue = db.get(rpc.row)
+      val innerRet = expectedOpt match {
+        case None =>
+          if (fetchedValue == null) {
+            db.put(writeOptions, rpc.row, rpc.value)
+            true
+          } else {
+            false
           }
-
-          lockMap.remove(lockKey)
-          innerRet
-        case _ => false
+        case Some(kv) =>
+          if (fetchedValue == null) {
+            false
+          } else {
+            if (Bytes.compareTo(fetchedValue, kv.value) == 0) {
+              db.put(writeOptions, rpc.row, rpc.value)
+              true
+            } else {
+              false
+            }
+          }
       }
 
-      Future.successful(ret)
+      Future.successful(innerRet)
     }
-
-
   }
-
 
   /** Management Logic */
   override def flush(): Unit = {

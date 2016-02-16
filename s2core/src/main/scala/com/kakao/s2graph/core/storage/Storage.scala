@@ -834,8 +834,6 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
     Edge(srcV, tgtV, labelWithDir, propsWithTs = propsWithTs)
   }
 
-
-
   protected def fetchSnapshotEdge(edge: Edge): Future[(QueryParam, Option[Edge], Option[SKeyValue])] = {
     val labelWithDir = edge.labelWithDir
     val queryParam = QueryParam(labelWithDir)
