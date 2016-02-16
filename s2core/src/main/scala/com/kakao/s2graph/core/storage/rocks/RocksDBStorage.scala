@@ -54,12 +54,13 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
 
   val options = new Options()
     .setCreateIfMissing(true)
-    .setWriteBufferSize(0)
+    .setWriteBufferSize(100)
     .setMergeOperatorName("uint64add")
 
 
   var db: RocksDB = null
-  val writeOptions = new WriteOptions().setSync(true)
+  val writeOptions = new WriteOptions()
+//    .setSync(true)
 
   try {
     // a factory method that returns a RocksDB instance
@@ -88,56 +89,45 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
       case obj => obj.synchronized(op)
     }
   }
+  def buildWriteBatch(kvs: Seq[SKeyValue]): WriteBatch = {
+    val writeBatch = new WriteBatch()
+    kvs.foreach { kv =>
+      kv.operation match {
+        case SKeyValue.Put => writeBatch.put(kv.row, kv.value)
+        case SKeyValue.Delete => writeBatch.remove(kv.row)
+        case SKeyValue.Increment =>
+          val javaLong = Bytes.toLong(kv.value)
+          writeBatch.merge(kv.row, longToBytes(javaLong))
+        case _ => throw new RuntimeException(s"not supported rpc operation. ${kv.operation}")
+      }
+    }
+    writeBatch
+  }
 
-  /** Mutation Logics */
   override def writeAsyncSimple(zkQuorum: String, elementRpcs: Seq[SKeyValue], withWait: Boolean): Future[Boolean] = {
     if (elementRpcs.isEmpty) {
       Future.successful(true)
     } else {
       val ret =
         try {
-          elementRpcs.foreach { rpc =>
-            withLock(rpc.row) {
-              rpc.operation match {
-                case SKeyValue.Put => db.put(rpc.row, rpc.value)
-                case SKeyValue.Delete => db.remove(rpc.row)
-                case SKeyValue.Increment =>
-                  val javaLong = Bytes.toLong(rpc.value)
-                  db.merge(rpc.row, longToBytes(javaLong))
-                case _ => throw new RuntimeException(s"not supported rpc operation. ${rpc.operation}")
-              }
-            }
-          }
+          val writeBatch = buildWriteBatch(elementRpcs)
+          db.write(writeOptions, writeBatch)
           true
         } catch {
-          case e: Exception => false
+          case e: Exception =>
+            logger.error(s"writeAsyncSimple failed.", e)
+            false
         }
 
       Future.successful(ret)
     }
   }
 
-  override def writeToStorage(rpc: SKeyValue, withWait: Boolean): Future[Boolean] = {
-    val ret = try {
-      try {
-        withLock(rpc.row) {
-          rpc.operation match {
-            case SKeyValue.Put => db.put(writeOptions, rpc.row, rpc.value)
-            case SKeyValue.Delete => db.remove(writeOptions, rpc.row)
-            case SKeyValue.Increment =>
-              val javaLong = Bytes.toLong(rpc.value)
-              db.merge(writeOptions, rpc.row, longToBytes(javaLong))
-            case _ => throw new RuntimeException(s"not supported rpc operation. ${rpc.operation}")
-          }
-        }
-      }
-      true
-    } catch {
-      case e: Exception =>
-        false
-    }
-    Future.successful(ret)
-  }
+  /**
+   * originally storage should implement this since this will be called by writeAsyncSimple
+   */
+  override def writeToStorage(rpc: SKeyValue, withWait: Boolean): Future[Boolean] =
+    Future.successful(true)
 
   override def createTable(zkAddr: String,
                            tableName: String,
@@ -148,12 +138,9 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
     // nothing to do for now.
   }
 
-  /** Query Logic */
-  val HardLimit = 10000
-
-  override def fetchKeyValues(startStopKeyRange: AnyRef): Future[Seq[SKeyValue]] = {
-    startStopKeyRange match {
-      case (startKey: Array[Byte], stopKey: Array[Byte]) =>
+  override def fetchSnapshotEdgeKeyValues(queryParamWithStartStopKeyRange: AnyRef): Future[Seq[SKeyValue]] = {
+    queryParamWithStartStopKeyRange match {
+      case (queryParam: QueryParam, (startKey: Array[Byte], stopKey: Array[Byte])) =>
         def op = {
           val iter = db.newIterator()
           var idx = 0
@@ -162,23 +149,49 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
           val kvs = new ListBuffer[SKeyValue]()
           val ts = System.currentTimeMillis()
           iter.seek(startKey)
-          while (iter.isValid && Bytes.compareTo(iter.key, stopKey) <= 0 && idx < HardLimit) {
+          while (iter.isValid && Bytes.compareTo(iter.key, stopKey) <= 0 && idx < queryParam.limit) {
             kvs += SKeyValue(table, iter.key, edgeCf, qualifier, iter.value, System.currentTimeMillis())
             iter.next()
             idx += 1
           }
           Future.successful(kvs.toSeq)
         }
+        withLock(startKey)(op)
+      // sync only snapshot update
+      //        if (Bytes.compareTo(startKey, stopKey) == 0) withLock(startKey)(op)
+      //        else op
 
+      case _ => Future.successful(Seq.empty)
+    }
+  }
+  override def fetchIndexEdgeKeyValues(queryParamWithStartStopKeyRange: AnyRef): Future[Seq[SKeyValue]] = {
+    queryParamWithStartStopKeyRange match {
+      case (queryParam: QueryParam, (startKey: Array[Byte], stopKey: Array[Byte])) =>
+        def op = {
+          val iter = db.newIterator()
+          var idx = 0
+          iter.seek(startKey)
+
+          val kvs = new ListBuffer[SKeyValue]()
+          val ts = System.currentTimeMillis()
+          iter.seek(startKey)
+          while (iter.isValid && Bytes.compareTo(iter.key, stopKey) <= 0 && idx < queryParam.limit) {
+            kvs += SKeyValue(table, iter.key, edgeCf, qualifier, iter.value, System.currentTimeMillis())
+            iter.next()
+            idx += 1
+          }
+          Future.successful(kvs.toSeq)
+        }
+        op
         // sync only snapshot update
-        if (Bytes.compareTo(startKey, stopKey) == 0) withLock(startKey)(op)
-        else op
+//        if (Bytes.compareTo(startKey, stopKey) == 0) withLock(startKey)(op)
+//        else op
 
       case _ => Future.successful(Seq.empty)
     }
   }
 
-  override def buildRequest(queryRequest: QueryRequest): (Array[Byte], Array[Byte]) = {
+  override def buildRequest(queryRequest: QueryRequest): (QueryParam, (Array[Byte], Array[Byte])) = {
     queryRequest.queryParam.tgtVertexInnerIdOpt match {
       case None => // indexEdges
         val queryParam = queryRequest.queryParam
@@ -204,10 +217,10 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
             }
             (_startKey, Bytes.add(baseKey, Array.fill(1)(-1)))
           }
-        (startKey, stopKey)
+        (queryRequest.queryParam, (startKey, stopKey))
       case Some(tgtId) => // snapshotEdge
         val kv = snapshotEdgeSerializer(toRequestEdge(queryRequest).toSnapshotEdge).toKeyValues.head
-        (kv.row, kv.row)
+        (queryRequest.queryParam, (kv.row, kv.row))
     }
   }
 
@@ -216,7 +229,7 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
                      isInnerCall: Boolean,
                      parentEdges: Seq[EdgeWithScore]): Future[QueryRequestWithResult] = {
 
-    fetchKeyValues(buildRequest(queryRequest)) map { kvs =>
+    fetchIndexEdgeKeyValues(buildRequest(queryRequest)) map { kvs =>
       val queryParam = queryRequest.queryParam
       val edgeWithScores = toEdges(kvs, queryParam, prevStepScore, isInnerCall, parentEdges)
 
@@ -279,7 +292,5 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
   override def incrementCounts(edges: Seq[Edge], withWait: Boolean): Future[Seq[(Boolean, Long)]] = {
     Future.successful(Seq.empty)
   }
-
-  /** End of Mutation */
 
 }
