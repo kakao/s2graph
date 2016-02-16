@@ -54,7 +54,7 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
 
   val options = new Options()
     .setCreateIfMissing(true)
-    .setWriteBufferSize(100)
+    .setWriteBufferSize(1024 * 1024 * 512)
     .setMergeOperatorName("uint64add")
 
 
