@@ -22,6 +22,7 @@ import scala.util.{Random, Try}
 
 abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
 
+  /** storage dependent configurations */
   val MaxRetryNum = config.getInt("max.retry.number")
   val MaxBackOff = config.getInt("max.back.off")
   val DeleteAllFetchSize = config.getInt("delete.all.fetch.size")
@@ -32,28 +33,74 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
   val expireAfterAccess = config.getInt("future.cache.expire.after.access")
 
 
-  /** Serializer/Deserializer */
-  // default serializer/deserializer. override this if any other backend system need special serialization.
+  /**
+   * create serializer that knows how to convert given snapshotEdge into kvs: Seq[SKeyValue]
+   * so we can store this kvs.
+   * @param snapshotEdge
+   * @return
+   */
   def snapshotEdgeSerializer(snapshotEdge: SnapshotEdge) = new SnapshotEdgeSerializable(snapshotEdge)
+
+  /**
+   * create serializer that knows how to convert given indexEdge into kvs: Seq[SKeyValue]
+   * @param indexedEdge
+   * @return
+   */
   def indexEdgeSerializer(indexedEdge: IndexEdge) = new IndexEdgeSerializable(indexedEdge)
+
+  /**
+   * create serializer that knows how to convert given vertex into kvs: Seq[SKeyValue]
+   * @param vertex
+   * @return
+   */
   def vertexSerializer(vertex: Vertex) = new VertexSerializable(vertex)
+
+  /**
+   * create deserializer that can parse stored CanSKeyValue into snapshotEdge.
+   * note that each storage implementation should implement implicit type class CanSKeyValue
+    * */
   val snapshotEdgeDeserializer = new SnapshotEdgeDeserializable
+
+  /** create deserializer that can parse stored CanSKeyValue into indexEdge. */
   val indexEdgeDeserializer = new IndexEdgeDeserializable
+
+  /** create deserializer that can parser stored CanSKeyValue into vertex. */
   val vertexDeserializer = new VertexDeserializable
-  /** End of Serializer/Deserializer */
 
 
-  /** Mutation Logics */
+  
+  /**
+   * decide how to store given SKeyValue into storage.
+   * @param kv
+   * @param withWait
+   * @return
+   */
   def writeToStorage(kv: SKeyValue, withWait: Boolean): Future[Boolean]
 
+  /**
+   * decide how to apply given edges(indexProps values + Map(_count -> countVal)) into storage.
+   * @param edges
+   * @param withWait
+   * @return
+   */
   def incrementCounts(edges: Seq[Edge], withWait: Boolean): Future[Seq[(Boolean, Long)]]
-  /** End of Mutation */
 
-  def writeLock(rpc: SKeyValue, expectedOpt: Option[SKeyValue]): Future[Boolean]
-
-  /** Management Logic */
+  /**
+   * this method need to be called when client shutdown. this is responsible to cleanUp the resources
+   * such as client into storage.
+   */
   def flush(): Unit
 
+  /**
+   * create table on storage.
+   * if storage implementation does not support namespace or table, then there is nothing to be done
+   * @param zkAddr
+   * @param tableName
+   * @param cfs
+   * @param regionMultiplier
+   * @param ttl
+   * @param compressionAlgorithm
+   */
   def createTable(zkAddr: String,
                   tableName: String,
                   cfs: List[String],
@@ -61,32 +108,96 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
                   ttl: Option[Int],
                   compressionAlgorithm: String): Unit
 
-  /** End of Management Logic */
+  /**
+   * responsible for consistency guarantee.
+   * we have optimistic concurrency control example on AsynchbaseStorage.
+   * each storage is responsible to resolve conflict on sanme snapshotEdge in this method.
+   * note that this method can throw few exceptions.
+   * Basic requirement is following.
+   * 1. Fetch snapshotEdge.
+   * 2. Build modification based on indexEdge(request) and fetched snapshotEdge
+   * 3. Atomically mutate theses modifications into storage.
+   *
+   * we can use either pessimistic or optimistic concurrency control.
+   * one example would be storage is RDBMS and use transaction support from storage.
+   *
+   * other example would be use compareAndSet and store lock on storage to guarantee write-write conflict can abort.
+   * when conflict found, implementation can throw PartialFailureException with failed request and statusCode.
+   *
+   * retry logic will call this method for MaxRetryNum until this return Future[true].
+   *
+   * note that fetchSnapshotEdge can be failed because of timeout also so retry logic will catch this exception too.
+   *
+   * other than FetchTimeoutException, PartialFailureException retry logic will not retry even though commitUpdate return false.
+   * so be sure throw proper exception according to failure cases.
+   * 
+   * @param edges
+   * @param statusCode
+   * @return
+   */
+  def commitUpdate(edges: Seq[Edge], statusCode: Byte): Future[Boolean]
 
+  /**
+   * fetch IndexEdges for given request from storage.
+   * @param request
+   * @return
+   */
+  def fetchIndexEdgeKeyValues(request: AnyRef): Future[Seq[SKeyValue]]
 
-  /** Query Logic */
+  /**
+   * fetch SnapshotEdge for given request from storage.
+   * also storage datatype should be converted into SKeyValue.
+   * note that return type is Sequence rather than single SKeyValue for simplicity,
+   * even though there is assertions sequence.length == 1.
+   * @param request
+   * @return
+   */
+  def fetchSnapshotEdgeKeyValues(request: AnyRef): Future[Seq[SKeyValue]]
 
-  def fetchIndexEdgeKeyValues(rpc: AnyRef): Future[Seq[SKeyValue]]
-
-  def fetchSnapshotEdgeKeyValues(rpc: AnyRef): Future[Seq[SKeyValue]]
-
+  /**
+   * build proper request which is specific into storage to call fetchIndexEdgeKeyValues or fetchSnapshotEdgeKeyValues.
+   * for example, Asynchbase use GetRequest, Scanner so this method is responsible to build
+   * client request(GetRequest, Scanner) based on user provided query.
+   * @param queryRequest
+   * @return
+   */
   def buildRequest(queryRequest: QueryRequest): AnyRef
 
+  /**
+   * fetch IndexEdges for given queryParam in queryRequest.
+   * this expect previous step starting score to propagate score into next step.
+   * also parentEdges is necessary to return full bfs tree when query require it.
+   *
+   * note that return type is general type.
+   * for example, currently we wanted to use Asynchbase
+   * so single I/O return type should be Deferred[T].
+   *
+   * if we use native hbase client, then this return type can be Future[T] or just T.
+   * @param queryRequest
+   * @param prevStepScore
+   * @param isInnerCall
+   * @param parentEdges
+   * @return
+   */
   def fetch(queryRequest: QueryRequest,
             prevStepScore: Double,
             isInnerCall: Boolean,
             parentEdges: Seq[EdgeWithScore]): R
 
 
+  /**
+   * responsible to fire parallel fetch call into storage and create future that will return merged result.
+   * @param queryRequestWithScoreLs
+   * @param prevStepEdges
+   * @return
+   */
   def fetches(queryRequestWithScoreLs: Seq[(QueryRequest, Double)],
               prevStepEdges: Map[VertexId, Seq[EdgeWithScore]]): Future[Seq[QueryRequestWithResult]]
 
-  /** End of Query */
 
 
 
   /** Public Interface */
-
   def getVertices(vertices: Seq[Vertex]): Future[Seq[Vertex]] = {
     def fromResult(queryParam: QueryParam,
                    kvs: Seq[SKeyValue],
@@ -150,7 +261,7 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
             indexedEdgeMutations(edgeUpdate) ++ snapshotEdgeMutations(edgeUpdate) ++ increments(edgeUpdate)
           writeAsyncSimple(zkQuorum, mutations, withWait)
         } else {
-          mutateEdgesInner(Seq(edge), strongConsistency, withWait)(Edge.buildOperation)
+          mutateEdgesInner(Seq(edge), strongConsistency, withWait)
         }
       }
 
@@ -175,7 +286,7 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
         case head :: tail =>
           val strongConsistency = edges.head.label.consistencyLevel == "strong"
           if (strongConsistency) {
-            val edgeFuture = mutateEdgesInner(edges, strongConsistency, withWait)(Edge.buildOperation)
+            val edgeFuture = mutateEdgesInner(edges, strongConsistency, withWait)
 
             //TODO: decide what we will do on failure on vertex put
             val puts = buildVertexPutsAsync(head)
@@ -199,6 +310,61 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
   }
 
 
+
+  def mutateEdgesInner(edges: Seq[Edge], checkConsistency: Boolean, withWait: Boolean): Future[Boolean] = {
+    if (!checkConsistency) {
+      val zkQuorum = edges.head.label.hbaseZkAddr
+      val futures = edges.map { edge =>
+        val (_, edgeUpdate) = Edge.buildOperation(None, Seq(edge))
+        val mutations =
+          indexedEdgeMutations(edgeUpdate) ++
+            snapshotEdgeMutations(edgeUpdate) ++
+            increments(edgeUpdate)
+        writeAsyncSimple(zkQuorum, mutations, withWait)
+      }
+      Future.sequence(futures).map { rets => rets.forall(identity) }
+    } else {
+      def retry(tryNum: Int)(edges: Seq[Edge], statusCode: Byte): Future[Boolean] = {
+        if (tryNum >= MaxRetryNum) {
+          edges.foreach { edge =>
+            logger.error(s"commit failed after $MaxRetryNum\n${edge.toLogString}")
+            ExceptionHandler.enqueue(ExceptionHandler.toKafkaMessage(element = edge))
+          }
+          Future.successful(false)
+        } else {
+          val future = commitUpdate(edges, statusCode)
+
+          future.onSuccess {
+            case success =>
+              logger.debug(s"Finished. [$tryNum]\n${edges.head.toLogString}\n")
+          }
+          future recoverWith {
+            case FetchTimeoutException(retryEdge) =>
+              logger.info(s"[Try: $tryNum], Fetch fail.\n${retryEdge}")
+              retry(tryNum + 1)(edges, statusCode)
+
+            case PartialFailureException(retryEdge, failedStatusCode, faileReason) =>
+              val status = failedStatusCode match {
+                case 0 => "AcquireLock failed."
+                case 1 => "Mutation failed."
+                case 2 => "Increment failed."
+                case 3 => "ReleaseLock failed."
+                case 4 => "Unknown"
+              }
+
+              Thread.sleep(Random.nextInt(MaxBackOff))
+              logger.info(s"[Try: $tryNum], [Status: $status] partial fail.\n${retryEdge.toLogString}\nFailReason: ${faileReason}")
+              retry(tryNum + 1)(Seq(retryEdge), failedStatusCode)
+            case ex: Exception =>
+              logger.error("Unknown exception", ex)
+              Future.successful(false)
+          }
+        }
+      }
+      retry(1)(edges, 0)
+    }
+  }
+
   def mutateVertex(vertex: Vertex, withWait: Boolean): Future[Boolean] = {
     if (vertex.op == GraphUtil.operations("delete")) {
       writeAsyncSimple(vertex.hbaseZkAddr,
@@ -216,93 +382,6 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
     val futures = vertices.map { vertex => mutateVertex(vertex, withWait) }
     Future.sequence(futures)
   }
-
-
-  def mutateEdgesInner(edges: Seq[Edge],
-                       checkConsistency: Boolean,
-                       withWait: Boolean)(f: (Option[Edge], Seq[Edge]) => (Edge, EdgeMutate)): Future[Boolean] = {
-    if (!checkConsistency) {
-      val zkQuorum = edges.head.label.hbaseZkAddr
-      val futures = edges.map { edge =>
-        val (_, edgeUpdate) = f(None, Seq(edge))
-        val mutations =
-          indexedEdgeMutations(edgeUpdate) ++
-            snapshotEdgeMutations(edgeUpdate) ++
-            increments(edgeUpdate)
-        writeAsyncSimple(zkQuorum, mutations, withWait)
-      }
-      Future.sequence(futures).map { rets => rets.forall(identity) }
-    } else {
-      def commit(_edges: Seq[Edge], statusCode: Byte): Future[Boolean] = {
-
-        fetchSnapshotEdge(_edges.head) flatMap { case (queryParam, snapshotEdgeOpt, kvOpt) =>
-
-          val (newEdge, edgeUpdate) = f(snapshotEdgeOpt, _edges)
-          logger.debug(s"${snapshotEdgeOpt}\n${edgeUpdate.toLogString}")
-          //shouldReplace false.
-          if (edgeUpdate.newSnapshotEdge.isEmpty && statusCode <= 0) {
-            logger.debug(s"${newEdge.toLogString} drop.")
-            Future.successful(true)
-          } else {
-            commitUpdate(newEdge, statusCode)(snapshotEdgeOpt, kvOpt, edgeUpdate).map { ret =>
-              if (ret) {
-                logger.info(s"[Success] commit: \n${_edges.map(_.toLogString).mkString("\n")}")
-              } else {
-                throw new PartialFailureException(newEdge, 3, "commit failed.")
-              }
-              true
-            }
-          }
-        }
-      }
-      def retry(tryNum: Int)(edges: Seq[Edge], statusCode: Byte)(fn: (Seq[Edge], Byte) => Future[Boolean]): Future[Boolean] = {
-        if (tryNum >= MaxRetryNum) {
-          edges.foreach { edge =>
-            logger.error(s"commit failed after $MaxRetryNum\n${edge.toLogString}")
-            ExceptionHandler.enqueue(ExceptionHandler.toKafkaMessage(element = edge))
-          }
-          Future.successful(false)
-        } else {
-          val future = fn(edges, statusCode)
-          future.onSuccess {
-            case success =>
-              logger.debug(s"Finished. [$tryNum]\n${edges.head.toLogString}\n")
-          }
-          future recoverWith {
-            case FetchTimeoutException(retryEdge) =>
-              logger.info(s"[Try: $tryNum], Fetch fail.\n${retryEdge}")
-              retry(tryNum + 1)(edges, statusCode)(fn)
-
-            case PartialFailureException(retryEdge, failedStatusCode, faileReason) =>
-              val status = failedStatusCode match {
-                case 0 => "AcquireLock failed."
-                case 1 => "Mutation failed."
-                case 2 => "Increment failed."
-                case 3 => "ReleaseLock failed."
-                case 4 => "Unknown"
-              }
-
-              Thread.sleep(Random.nextInt(MaxBackOff))
-              logger.info(s"[Try: $tryNum], [Status: $status] partial fail.\n${retryEdge.toLogString}\nFailReason: ${faileReason}")
-              retry(tryNum + 1)(Seq(retryEdge), failedStatusCode)(fn)
-            case ex: Exception =>
-              logger.error("Unknown exception", ex)
-              Future.successful(false)
-          }
-        }
-      }
-      retry(1)(edges, 0)(commit)
-    }
-  }
-
-  def mutateLog(snapshotEdgeOpt: Option[Edge], edges: Seq[Edge],
-                newEdge: Edge, edgeMutate: EdgeMutate) =
-    Seq("----------------------------------------------",
-      s"SnapshotEdge: ${snapshotEdgeOpt.map(_.toLogString)}",
-      s"requestEdges: ${edges.map(_.toLogString).mkString("\n")}",
-      s"newEdge: ${newEdge.toLogString}",
-      s"mutation: \n${edgeMutate.toLogString}",
-      "----------------------------------------------").mkString("\n")
 
 
   /** Delete All */
@@ -555,260 +634,6 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
 
   case class PartialFailureException(edge: Edge, statusCode: Byte, failReason: String) extends Exception
 
-  protected def debug(ret: Boolean, phase: String, snapshotEdge: SnapshotEdge) = {
-    val msg = Seq(s"[$ret] [$phase]", s"${snapshotEdge.toLogString()}").mkString("\n")
-    logger.debug(msg)
-  }
-
-  protected def debug(ret: Boolean, phase: String, snapshotEdge: SnapshotEdge, edgeMutate: EdgeMutate) = {
-    val msg = Seq(s"[$ret] [$phase]", s"${snapshotEdge.toLogString()}",
-      s"${edgeMutate.toLogString}").mkString("\n")
-    logger.debug(msg)
-  }
-
-  protected def buildLockEdge(snapshotEdgeOpt: Option[Edge], edge: Edge, kvOpt: Option[SKeyValue]) = {
-    val currentTs = System.currentTimeMillis()
-    val lockTs = snapshotEdgeOpt match {
-      case None => Option(currentTs)
-      case Some(snapshotEdge) =>
-        snapshotEdge.pendingEdgeOpt match {
-          case None => Option(currentTs)
-          case Some(pendingEdge) => pendingEdge.lockTs
-        }
-    }
-    val newVersion = kvOpt.map(_.timestamp).getOrElse(edge.ts) + 1
-    //      snapshotEdgeOpt.map(_.version).getOrElse(edge.ts) + 1
-    val pendingEdge = edge.copy(version = newVersion, statusCode = 1, lockTs = lockTs)
-    val base = snapshotEdgeOpt match {
-      case None =>
-        // no one ever mutated on this snapshotEdge.
-        edge.toSnapshotEdge.copy(pendingEdgeOpt = Option(pendingEdge))
-      case Some(snapshotEdge) =>
-        // there is at least one mutation have been succeed.
-        snapshotEdgeOpt.get.toSnapshotEdge.copy(pendingEdgeOpt = Option(pendingEdge))
-    }
-    base.copy(version = newVersion, statusCode = 1, lockTs = None)
-  }
-
-  protected def buildReleaseLockEdge(snapshotEdgeOpt: Option[Edge], lockEdge: SnapshotEdge,
-                                     edgeMutate: EdgeMutate) = {
-    val newVersion = lockEdge.version + 1
-    val base = edgeMutate.newSnapshotEdge match {
-      case None =>
-        // shouldReplace false
-        assert(snapshotEdgeOpt.isDefined)
-        snapshotEdgeOpt.get.toSnapshotEdge
-      case Some(newSnapshotEdge) => newSnapshotEdge
-    }
-    base.copy(version = newVersion, statusCode = 0, pendingEdgeOpt = None)
-  }
-
-  protected def acquireLock(statusCode: Byte,
-                            edge: Edge,
-                            oldSnapshotEdgeOpt: Option[Edge],
-                            lockEdge: SnapshotEdge,
-                            oldBytes: Array[Byte]): Future[Boolean] = {
-    if (statusCode >= 1) {
-      logger.debug(s"skip acquireLock: [$statusCode]\n${edge.toLogString}")
-      Future.successful(true)
-    } else {
-      val p = Random.nextDouble()
-      if (p < FailProb) throw new PartialFailureException(edge, 0, s"$p")
-      else {
-        val lockEdgePut = snapshotEdgeSerializer(lockEdge).toKeyValues.head
-        val oldPut = oldSnapshotEdgeOpt.map(e => snapshotEdgeSerializer(e.toSnapshotEdge).toKeyValues.head)
-//        val lockEdgePut = buildPutAsync(lockEdge).head
-//        val oldPut = oldSnapshotEdgeOpt.map(e => buildPutAsync(e.toSnapshotEdge).head)
-        writeLock(lockEdgePut, oldPut).recoverWith { case ex: Exception =>
-          logger.error(s"AcquireLock RPC Failed.")
-          throw new PartialFailureException(edge, 0, "AcquireLock RPC Failed")
-        }.map { ret =>
-          if (ret) {
-            val log = Seq(
-              "\n",
-              "=" * 50,
-              s"[Success]: acquireLock",
-              s"[RequestEdge]: ${edge.toLogString}",
-              s"[LockEdge]: ${lockEdge.toLogString()}",
-              s"[PendingEdge]: ${lockEdge.pendingEdgeOpt.map(_.toLogString).getOrElse("")}",
-              "=" * 50, "\n").mkString("\n")
-
-            logger.debug(log)
-            //            debug(ret, "acquireLock", edge.toSnapshotEdge)
-          } else {
-            throw new PartialFailureException(edge, 0, "hbase fail.")
-          }
-          true
-        }
-      }
-    }
-  }
-
-
-
-  protected def releaseLock(predicate: Boolean,
-                            edge: Edge,
-                            lockEdge: SnapshotEdge,
-                            releaseLockEdge: SnapshotEdge,
-                            _edgeMutate: EdgeMutate,
-                            oldBytes: Array[Byte]): Future[Boolean] = {
-    if (!predicate) {
-      throw new PartialFailureException(edge, 3, "predicate failed.")
-    }
-    val p = Random.nextDouble()
-    if (p < FailProb) throw new PartialFailureException(edge, 3, s"$p")
-    else {
-      val releaseLockEdgePut = snapshotEdgeSerializer(releaseLockEdge).toKeyValues.head
-      val lockEdgePut = snapshotEdgeSerializer(lockEdge).toKeyValues.head
-      writeLock(releaseLockEdgePut, Option(lockEdgePut)).recoverWith {
-        case ex: Exception =>
-          logger.error(s"ReleaseLock RPC Failed.")
-          throw new PartialFailureException(edge, 3, "ReleaseLock RPC Failed")
-      }.map { ret =>
-        if (ret) {
-          debug(ret, "releaseLock", edge.toSnapshotEdge)
-        } else {
-          val msg = Seq("\nFATAL ERROR\n",
-            "=" * 50,
-            oldBytes.toList,
-            lockEdgePut,
-            releaseLockEdgePut,
-            //            lockEdgePut.value.toList,
-            //            releaseLockEdgePut.value().toList,
-            "=" * 50,
-            "\n"
-          )
-          logger.error(msg.mkString("\n"))
-          //          error(ret, "releaseLock", edge.toSnapshotEdge)
-          throw new PartialFailureException(edge, 3, "hbase fail.")
-        }
-        true
-      }
-    }
-    Future.successful(true)
-  }
-
-
-  protected def mutate(predicate: Boolean,
-                       edge: Edge,
-                       statusCode: Byte,
-                       _edgeMutate: EdgeMutate): Future[Boolean] = {
-    if (!predicate) throw new PartialFailureException(edge, 1, "predicate failed.")
-
-    if (statusCode >= 2) {
-      logger.debug(s"skip mutate: [$statusCode]\n${edge.toLogString}")
-      Future.successful(true)
-    } else {
-      val p = Random.nextDouble()
-      if (p < FailProb) throw new PartialFailureException(edge, 1, s"$p")
-      else
-        writeAsyncSimple(edge.label.hbaseZkAddr, indexedEdgeMutations(_edgeMutate), withWait = true).map { ret =>
-          if (ret) {
-            debug(ret, "mutate", edge.toSnapshotEdge, _edgeMutate)
-          } else {
-            throw new PartialFailureException(edge, 1, "hbase fail.")
-          }
-          true
-        }
-    }
-  }
-
-  protected def increment(predicate: Boolean,
-                          edge: Edge,
-                          statusCode: Byte, _edgeMutate: EdgeMutate): Future[Boolean] = {
-    if (!predicate) throw new PartialFailureException(edge, 2, "predicate failed.")
-    if (statusCode >= 3) {
-      logger.debug(s"skip increment: [$statusCode]\n${edge.toLogString}")
-      Future.successful(true)
-    } else {
-      val p = Random.nextDouble()
-      if (p < FailProb) throw new PartialFailureException(edge, 2, s"$p")
-      else
-        writeAsyncSimple(edge.label.hbaseZkAddr, increments(_edgeMutate), withWait = true).map { ret =>
-          if (ret) {
-            debug(ret, "increment", edge.toSnapshotEdge, _edgeMutate)
-          } else {
-            throw new PartialFailureException(edge, 2, "hbase fail.")
-          }
-          true
-        }
-    }
-  }
-
-
-  /** this may be overrided by specific storage implementation */
-  protected def commitProcess(edge: Edge, statusCode: Byte)
-                             (snapshotEdgeOpt: Option[Edge], kvOpt: Option[SKeyValue])
-                             (lockEdge: SnapshotEdge, releaseLockEdge: SnapshotEdge, _edgeMutate: EdgeMutate): Future[Boolean] = {
-    val oldBytes = kvOpt.map(kv => kv.value).getOrElse(Array.empty[Byte])
-    for {
-      locked <- acquireLock(statusCode, edge, snapshotEdgeOpt, lockEdge, oldBytes)
-      mutated <- mutate(locked, edge, statusCode, _edgeMutate)
-      incremented <- increment(mutated, edge, statusCode, _edgeMutate)
-      released <- releaseLock(incremented, edge, lockEdge, releaseLockEdge, _edgeMutate, oldBytes)
-    } yield {
-      released
-    }
-  }
-
-  protected def commitUpdate(edge: Edge,
-                             statusCode: Byte)(snapshotEdgeOpt: Option[Edge],
-                                               kvOpt: Option[SKeyValue],
-                                               edgeUpdate: EdgeMutate): Future[Boolean] = {
-    val label = edge.label
-    def oldBytes = kvOpt.map(_.value).getOrElse(Array.empty)
-
-    val lockEdge = buildLockEdge(snapshotEdgeOpt, edge, kvOpt)
-    val releaseLockEdge = buildReleaseLockEdge(snapshotEdgeOpt, lockEdge, edgeUpdate)
-    val _process = commitProcess(edge, statusCode)(snapshotEdgeOpt, kvOpt)_
-    snapshotEdgeOpt match {
-      case None =>
-        // no one ever did success on acquire lock.
-        _process(lockEdge, releaseLockEdge, edgeUpdate)
-      //        process(lockEdge, releaseLockEdge, edgeUpdate, statusCode)
-      case Some(snapshotEdge) =>
-        // someone did success on acquire lock at least one.
-        snapshotEdge.pendingEdgeOpt match {
-          case None =>
-            // not locked
-            _process(lockEdge, releaseLockEdge, edgeUpdate)
-          //            process(lockEdge, releaseLockEdge, edgeUpdate, statusCode)
-          case Some(pendingEdge) =>
-            def isLockExpired = pendingEdge.lockTs.get + LockExpireDuration < System.currentTimeMillis()
-            if (isLockExpired) {
-              val oldSnapshotEdge = if (snapshotEdge.ts == pendingEdge.ts) None else Option(snapshotEdge)
-              val (_, newEdgeUpdate) = Edge.buildOperation(oldSnapshotEdge, Seq(pendingEdge))
-              val newLockEdge = buildLockEdge(snapshotEdgeOpt, pendingEdge, kvOpt)
-              val newReleaseLockEdge = buildReleaseLockEdge(snapshotEdgeOpt, newLockEdge, newEdgeUpdate)
-              commitProcess(edge, statusCode = 0)(snapshotEdgeOpt, kvOpt)(newLockEdge, newReleaseLockEdge, newEdgeUpdate).flatMap { ret =>
-                //              process(newLockEdge, newReleaseLockEdge, newEdgeUpdate, statusCode = 0).flatMap { ret =>
-                val log = s"[Success]: Resolving expired pending edge.\n${pendingEdge.toLogString}"
-                throw new PartialFailureException(edge, 0, log)
-              }
-            } else {
-              // locked
-              if (pendingEdge.ts == edge.ts && statusCode > 0) {
-                // self locked
-                val oldSnapshotEdge = if (snapshotEdge.ts == pendingEdge.ts) None else Option(snapshotEdge)
-                val (_, newEdgeUpdate) = Edge.buildOperation(oldSnapshotEdge, Seq(edge))
-                val newReleaseLockEdge = buildReleaseLockEdge(snapshotEdgeOpt, lockEdge, newEdgeUpdate)
-
-                /** lockEdge will be ignored */
-                _process(lockEdge, newReleaseLockEdge, newEdgeUpdate)
-                //                process(lockEdge, newReleaseLockEdge, newEdgeUpdate, statusCode)
-              } else {
-                throw new PartialFailureException(edge, statusCode, s"others[${pendingEdge.ts}] is mutating. me[${edge.ts}]")
-              }
-            }
-        }
-    }
-  }
-
-  /** end of methods for consistency */
-
-
-  //  def futureCache[T] = Cache[Long, (Long, T)]
-
   protected def toRequestEdge(queryRequest: QueryRequest): Edge = {
     val srcVertex = queryRequest.vertex
     //    val tgtVertexOpt = queryRequest.tgtVertexOpt
@@ -845,7 +670,7 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
     val q = Query.toQuery(Seq(edge.srcVertex), _queryParam)
     val queryRequest = QueryRequest(q, 0, edge.srcVertex, _queryParam)
 
-    fetchSnapshotEdgeKeyValue(buildRequest(queryRequest)).map { kvs =>
+    fetchSnapshotEdgeKeyValues(buildRequest(queryRequest)).map { kvs =>
 //    fetchIndexEdgeKeyValues(buildRequest(queryRequest)).map { kvs =>
       val (edgeOpt, kvOpt) =
         if (kvs.isEmpty) (None, None)

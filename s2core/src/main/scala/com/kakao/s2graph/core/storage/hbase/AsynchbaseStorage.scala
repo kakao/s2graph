@@ -101,20 +101,122 @@ class AsynchbaseStorage(override val config: Config)(implicit ec: ExecutionConte
     if (withWait) future else Future.successful(true)
   }
 
+  override def flush(): Unit = clients.foreach { client =>
+    val timeout = Duration((clientFlushInterval + 10) * 20, duration.MILLISECONDS)
+    Await.result(client.flush().toFuture, timeout)
+  }
+
+
+  override def createTable(zkAddr: String,
+                           tableName: String,
+                           cfs: List[String],
+                           regionMultiplier: Int,
+                           ttl: Option[Int],
+                           compressionAlgorithm: String): Unit = {
+    logger.info(s"create table: $tableName on $zkAddr, $cfs, $regionMultiplier, $compressionAlgorithm")
+    val admin = getAdmin(zkAddr)
+    val regionCount = admin.getClusterStatus.getServersSize * regionMultiplier
+    if (!admin.tableExists(TableName.valueOf(tableName))) {
+      try {
+        val desc = new HTableDescriptor(TableName.valueOf(tableName))
+        desc.setDurability(Durability.ASYNC_WAL)
+        for (cf <- cfs) {
+          val columnDesc = new HColumnDescriptor(cf)
+            .setCompressionType(Algorithm.valueOf(compressionAlgorithm.toUpperCase))
+            .setBloomFilterType(BloomType.ROW)
+            .setDataBlockEncoding(DataBlockEncoding.FAST_DIFF)
+            .setMaxVersions(1)
+            .setTimeToLive(2147483647)
+            .setMinVersions(0)
+            .setBlocksize(32768)
+            .setBlockCacheEnabled(true)
+          if (ttl.isDefined) columnDesc.setTimeToLive(ttl.get)
+          desc.addFamily(columnDesc)
+        }
+
+        if (regionCount <= 1) admin.createTable(desc)
+        else admin.createTable(desc, getStartKey(regionCount), getEndKey(regionCount), regionCount)
+      } catch {
+        case e: Throwable =>
+          logger.error(s"$zkAddr, $tableName failed with $e", e)
+          throw e
+      }
+    } else {
+      logger.info(s"$zkAddr, $tableName, $cfs already exist.")
+    }
+  }
 
   /** Mutation Builder */
-//  override def put(kvs: Seq[SKeyValue]): Seq[HBaseRpc] =
-//    kvs.map { kv => new PutRequest(kv.table, kv.row, kv.cf, kv.qualifier, kv.value, kv.timestamp) }
-//
-//  override def increment(kvs: Seq[SKeyValue]): Seq[HBaseRpc] =
-//    kvs.map { kv => new AtomicIncrementRequest(kv.table, kv.row, kv.cf, kv.qualifier, Bytes.toLong(kv.value)) }
-//
-//  override def delete(kvs: Seq[SKeyValue]): Seq[HBaseRpc] =
-//    kvs.map { kv =>
-//      if (kv.qualifier == null) new DeleteRequest(kv.table, kv.row, kv.cf, kv.timestamp)
-//      else new DeleteRequest(kv.table, kv.row, kv.cf, kv.qualifier, kv.timestamp)
-//    }
+  override def commitUpdate(edges: Seq[Edge], statusCode: Byte): Future[Boolean] = {
+    fetchSnapshotEdge(edges.head).flatMap { case (queryParam, snapshotEdgeOpt, kvOpt) =>
+      val (newEdge, edgeUpdate) = Edge.buildOperation(snapshotEdgeOpt, edges)
 
+      /**
+       * there is no need to update so just finish this commit.
+       */
+      if (edgeUpdate.newSnapshotEdge.isEmpty && statusCode <= 0) {
+        logger.debug(s"${newEdge.toLogString} drop.")
+        Future.successful(true)
+      } else {
+        /**
+         * process this commit.
+         */
+
+        val lockEdge = buildLockEdge(snapshotEdgeOpt, newEdge, kvOpt)
+        val releaseLockEdge = buildReleaseLockEdge(snapshotEdgeOpt, lockEdge, edgeUpdate)
+        val _process = commitProcess(newEdge, statusCode)(snapshotEdgeOpt, kvOpt)_
+        val future = snapshotEdgeOpt match {
+          case None =>
+            // no one ever did success on acquire lock.
+            _process(lockEdge, releaseLockEdge, edgeUpdate)
+          //        process(lockEdge, releaseLockEdge, edgeUpdate, statusCode)
+          case Some(snapshotEdge) =>
+            // someone did success on acquire lock at least one.
+            snapshotEdge.pendingEdgeOpt match {
+              case None =>
+                // not locked
+                _process(lockEdge, releaseLockEdge, edgeUpdate)
+              //            process(lockEdge, releaseLockEdge, edgeUpdate, statusCode)
+              case Some(pendingEdge) =>
+                def isLockExpired = pendingEdge.lockTs.get + LockExpireDuration < System.currentTimeMillis()
+                if (isLockExpired) {
+                  val oldSnapshotEdge = if (snapshotEdge.ts == pendingEdge.ts) None else Option(snapshotEdge)
+                  val (_, newEdgeUpdate) = Edge.buildOperation(oldSnapshotEdge, Seq(pendingEdge))
+                  val newLockEdge = buildLockEdge(snapshotEdgeOpt, pendingEdge, kvOpt)
+                  val newReleaseLockEdge = buildReleaseLockEdge(snapshotEdgeOpt, newLockEdge, newEdgeUpdate)
+                  commitProcess(newEdge, statusCode = 0)(snapshotEdgeOpt, kvOpt)(newLockEdge, newReleaseLockEdge, newEdgeUpdate).flatMap { ret =>
+                    //              process(newLockEdge, newReleaseLockEdge, newEdgeUpdate, statusCode = 0).flatMap { ret =>
+                    val log = s"[Success]: Resolving expired pending edge.\n${pendingEdge.toLogString}"
+                    throw new PartialFailureException(newEdge, 0, log)
+                  }
+                } else {
+                  // locked
+                  if (pendingEdge.ts == newEdge.ts && statusCode > 0) {
+                    // self locked
+                    val oldSnapshotEdge = if (snapshotEdge.ts == pendingEdge.ts) None else Option(snapshotEdge)
+                    val (_, newEdgeUpdate) = Edge.buildOperation(oldSnapshotEdge, Seq(newEdge))
+                    val newReleaseLockEdge = buildReleaseLockEdge(snapshotEdgeOpt, lockEdge, newEdgeUpdate)
+
+                    /** lockEdge will be ignored */
+                    _process(lockEdge, newReleaseLockEdge, newEdgeUpdate)
+                    //                process(lockEdge, newReleaseLockEdge, newEdgeUpdate, statusCode)
+                  } else {
+                    throw new PartialFailureException(newEdge, statusCode, s"others[${pendingEdge.ts}] is mutating. me[${newEdge.ts}]")
+                  }
+                }
+            }
+        }
+        future.map { ret =>
+          if (ret) {
+            logger.info(s"[Success] commit: \n${edges.map(_.toLogString).mkString("\n")}")
+          } else {
+            throw new PartialFailureException(newEdge, 3, "commit failed.")
+          }
+          true
+        }
+      }
+    }
+  }
 
 
   override def fetchIndexEdgeKeyValues(hbaseRpc: AnyRef): Future[Seq[SKeyValue]] = {
@@ -364,57 +466,206 @@ class AsynchbaseStorage(override val config: Config)(implicit ec: ExecutionConte
     Future.sequence(futures).map { result => result.toList.flatten }
   }
 
-  override def flush(): Unit = clients.foreach { client =>
-    val timeout = Duration((clientFlushInterval + 10) * 20, duration.MILLISECONDS)
-    Await.result(client.flush().toFuture, timeout)
+  /**
+   * Private Methods which is specific to Asynchbase implementation.
+   */
+
+
+  private  def debug(ret: Boolean, phase: String, snapshotEdge: SnapshotEdge) = {
+    val msg = Seq(s"[$ret] [$phase]", s"${snapshotEdge.toLogString()}").mkString("\n")
+    logger.debug(msg)
   }
 
+  private def debug(ret: Boolean, phase: String, snapshotEdge: SnapshotEdge, edgeMutate: EdgeMutate) = {
+    val msg = Seq(s"[$ret] [$phase]", s"${snapshotEdge.toLogString()}",
+      s"${edgeMutate.toLogString}").mkString("\n")
+    logger.debug(msg)
+  }
 
-  override def createTable(zkAddr: String,
-                           tableName: String,
-                           cfs: List[String],
-                           regionMultiplier: Int,
-                           ttl: Option[Int],
-                           compressionAlgorithm: String): Unit = {
-    logger.info(s"create table: $tableName on $zkAddr, $cfs, $regionMultiplier, $compressionAlgorithm")
-    val admin = getAdmin(zkAddr)
-    val regionCount = admin.getClusterStatus.getServersSize * regionMultiplier
-    if (!admin.tableExists(TableName.valueOf(tableName))) {
-      try {
-        val desc = new HTableDescriptor(TableName.valueOf(tableName))
-        desc.setDurability(Durability.ASYNC_WAL)
-        for (cf <- cfs) {
-          val columnDesc = new HColumnDescriptor(cf)
-            .setCompressionType(Algorithm.valueOf(compressionAlgorithm.toUpperCase))
-            .setBloomFilterType(BloomType.ROW)
-            .setDataBlockEncoding(DataBlockEncoding.FAST_DIFF)
-            .setMaxVersions(1)
-            .setTimeToLive(2147483647)
-            .setMinVersions(0)
-            .setBlocksize(32768)
-            .setBlockCacheEnabled(true)
-          if (ttl.isDefined) columnDesc.setTimeToLive(ttl.get)
-          desc.addFamily(columnDesc)
+  private def buildLockEdge(snapshotEdgeOpt: Option[Edge], edge: Edge, kvOpt: Option[SKeyValue]) = {
+    val currentTs = System.currentTimeMillis()
+    val lockTs = snapshotEdgeOpt match {
+      case None => Option(currentTs)
+      case Some(snapshotEdge) =>
+        snapshotEdge.pendingEdgeOpt match {
+          case None => Option(currentTs)
+          case Some(pendingEdge) => pendingEdge.lockTs
         }
+    }
+    val newVersion = kvOpt.map(_.timestamp).getOrElse(edge.ts) + 1
+    //      snapshotEdgeOpt.map(_.version).getOrElse(edge.ts) + 1
+    val pendingEdge = edge.copy(version = newVersion, statusCode = 1, lockTs = lockTs)
+    val base = snapshotEdgeOpt match {
+      case None =>
+        // no one ever mutated on this snapshotEdge.
+        edge.toSnapshotEdge.copy(pendingEdgeOpt = Option(pendingEdge))
+      case Some(snapshotEdge) =>
+        // there is at least one mutation have been succeed.
+        snapshotEdgeOpt.get.toSnapshotEdge.copy(pendingEdgeOpt = Option(pendingEdge))
+    }
+    base.copy(version = newVersion, statusCode = 1, lockTs = None)
+  }
 
-        if (regionCount <= 1) admin.createTable(desc)
-        else admin.createTable(desc, getStartKey(regionCount), getEndKey(regionCount), regionCount)
-      } catch {
-        case e: Throwable =>
-          logger.error(s"$zkAddr, $tableName failed with $e", e)
-          throw e
-      }
+  private def buildReleaseLockEdge(snapshotEdgeOpt: Option[Edge], lockEdge: SnapshotEdge,
+                                     edgeMutate: EdgeMutate) = {
+    val newVersion = lockEdge.version + 1
+    val base = edgeMutate.newSnapshotEdge match {
+      case None =>
+        // shouldReplace false
+        assert(snapshotEdgeOpt.isDefined)
+        snapshotEdgeOpt.get.toSnapshotEdge
+      case Some(newSnapshotEdge) => newSnapshotEdge
+    }
+    base.copy(version = newVersion, statusCode = 0, pendingEdgeOpt = None)
+  }
+
+  private def acquireLock(statusCode: Byte,
+                            edge: Edge,
+                            oldSnapshotEdgeOpt: Option[Edge],
+                            lockEdge: SnapshotEdge,
+                            oldBytes: Array[Byte]): Future[Boolean] = {
+    if (statusCode >= 1) {
+      logger.debug(s"skip acquireLock: [$statusCode]\n${edge.toLogString}")
+      Future.successful(true)
     } else {
-      logger.info(s"$zkAddr, $tableName, $cfs already exist.")
+      val p = Random.nextDouble()
+      if (p < FailProb) throw new PartialFailureException(edge, 0, s"$p")
+      else {
+        val lockEdgePut = snapshotEdgeSerializer(lockEdge).toKeyValues.head
+        val oldPut = oldSnapshotEdgeOpt.map(e => snapshotEdgeSerializer(e.toSnapshotEdge).toKeyValues.head)
+        //        val lockEdgePut = buildPutAsync(lockEdge).head
+        //        val oldPut = oldSnapshotEdgeOpt.map(e => buildPutAsync(e.toSnapshotEdge).head)
+        writeLock(lockEdgePut, oldPut).recoverWith { case ex: Exception =>
+          logger.error(s"AcquireLock RPC Failed.")
+          throw new PartialFailureException(edge, 0, "AcquireLock RPC Failed")
+        }.map { ret =>
+          if (ret) {
+            val log = Seq(
+              "\n",
+              "=" * 50,
+              s"[Success]: acquireLock",
+              s"[RequestEdge]: ${edge.toLogString}",
+              s"[LockEdge]: ${lockEdge.toLogString()}",
+              s"[PendingEdge]: ${lockEdge.pendingEdgeOpt.map(_.toLogString).getOrElse("")}",
+              "=" * 50, "\n").mkString("\n")
+
+            logger.debug(log)
+            //            debug(ret, "acquireLock", edge.toSnapshotEdge)
+          } else {
+            throw new PartialFailureException(edge, 0, "hbase fail.")
+          }
+          true
+        }
+      }
     }
   }
 
 
 
-  /**
-   * Private Methods which is specific to Asynchbase implementation.
-   */
+  private def releaseLock(predicate: Boolean,
+                            edge: Edge,
+                            lockEdge: SnapshotEdge,
+                            releaseLockEdge: SnapshotEdge,
+                            _edgeMutate: EdgeMutate,
+                            oldBytes: Array[Byte]): Future[Boolean] = {
+    if (!predicate) {
+      throw new PartialFailureException(edge, 3, "predicate failed.")
+    }
+    val p = Random.nextDouble()
+    if (p < FailProb) throw new PartialFailureException(edge, 3, s"$p")
+    else {
+      val releaseLockEdgePut = snapshotEdgeSerializer(releaseLockEdge).toKeyValues.head
+      val lockEdgePut = snapshotEdgeSerializer(lockEdge).toKeyValues.head
+      writeLock(releaseLockEdgePut, Option(lockEdgePut)).recoverWith {
+        case ex: Exception =>
+          logger.error(s"ReleaseLock RPC Failed.")
+          throw new PartialFailureException(edge, 3, "ReleaseLock RPC Failed")
+      }.map { ret =>
+        if (ret) {
+          debug(ret, "releaseLock", edge.toSnapshotEdge)
+        } else {
+          val msg = Seq("\nFATAL ERROR\n",
+            "=" * 50,
+            oldBytes.toList,
+            lockEdgePut,
+            releaseLockEdgePut,
+            //            lockEdgePut.value.toList,
+            //            releaseLockEdgePut.value().toList,
+            "=" * 50,
+            "\n"
+          )
+          logger.error(msg.mkString("\n"))
+          //          error(ret, "releaseLock", edge.toSnapshotEdge)
+          throw new PartialFailureException(edge, 3, "hbase fail.")
+        }
+        true
+      }
+    }
+    Future.successful(true)
+  }
 
+
+  private def mutate(predicate: Boolean,
+                       edge: Edge,
+                       statusCode: Byte,
+                       _edgeMutate: EdgeMutate): Future[Boolean] = {
+    if (!predicate) throw new PartialFailureException(edge, 1, "predicate failed.")
+
+    if (statusCode >= 2) {
+      logger.debug(s"skip mutate: [$statusCode]\n${edge.toLogString}")
+      Future.successful(true)
+    } else {
+      val p = Random.nextDouble()
+      if (p < FailProb) throw new PartialFailureException(edge, 1, s"$p")
+      else
+        writeAsyncSimple(edge.label.hbaseZkAddr, indexedEdgeMutations(_edgeMutate), withWait = true).map { ret =>
+          if (ret) {
+            debug(ret, "mutate", edge.toSnapshotEdge, _edgeMutate)
+          } else {
+            throw new PartialFailureException(edge, 1, "hbase fail.")
+          }
+          true
+        }
+    }
+  }
+
+  private def increment(predicate: Boolean,
+                          edge: Edge,
+                          statusCode: Byte, _edgeMutate: EdgeMutate): Future[Boolean] = {
+    if (!predicate) throw new PartialFailureException(edge, 2, "predicate failed.")
+    if (statusCode >= 3) {
+      logger.debug(s"skip increment: [$statusCode]\n${edge.toLogString}")
+      Future.successful(true)
+    } else {
+      val p = Random.nextDouble()
+      if (p < FailProb) throw new PartialFailureException(edge, 2, s"$p")
+      else
+        writeAsyncSimple(edge.label.hbaseZkAddr, increments(_edgeMutate), withWait = true).map { ret =>
+          if (ret) {
+            debug(ret, "increment", edge.toSnapshotEdge, _edgeMutate)
+          } else {
+            throw new PartialFailureException(edge, 2, "hbase fail.")
+          }
+          true
+        }
+    }
+  }
+
+
+  /** this may be overrided by specific storage implementation */
+  private def commitProcess(edge: Edge, statusCode: Byte)
+                             (snapshotEdgeOpt: Option[Edge], kvOpt: Option[SKeyValue])
+                             (lockEdge: SnapshotEdge, releaseLockEdge: SnapshotEdge, _edgeMutate: EdgeMutate): Future[Boolean] = {
+    val oldBytes = kvOpt.map(kv => kv.value).getOrElse(Array.empty[Byte])
+    for {
+      locked <- acquireLock(statusCode, edge, snapshotEdgeOpt, lockEdge, oldBytes)
+      mutated <- mutate(locked, edge, statusCode, _edgeMutate)
+      incremented <- increment(mutated, edge, statusCode, _edgeMutate)
+      released <- releaseLock(incremented, edge, lockEdge, releaseLockEdge, _edgeMutate, oldBytes)
+    } yield {
+      released
+    }
+  }
 
 
 
@@ -445,7 +696,7 @@ class AsynchbaseStorage(override val config: Config)(implicit ec: ExecutionConte
     }
   }
 
-  override def writeLock(rpc: SKeyValue, expectedOpt: Option[SKeyValue]): Future[Boolean] = {
+  private def writeLock(rpc: SKeyValue, expectedOpt: Option[SKeyValue]): Future[Boolean] = {
     val put = new PutRequest(rpc.table, rpc.row, rpc.cf, rpc.qualifier, rpc.value, rpc.timestamp)
     val expected = expectedOpt.map(_.value).getOrElse(Array.empty)
     client(withWait = true).compareAndSet(put, expected).withCallback(ret => ret.booleanValue()).toFuture
