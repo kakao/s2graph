@@ -2,9 +2,10 @@ package com.kakao.s2graph.core.storage.rocks
 
 import java.nio.{ByteOrder, ByteBuffer}
 import java.util.Base64
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
-import com.google.common.cache.Cache
+import com.google.common.cache.{CacheBuilder, Cache}
 import com.kakao.s2graph.core.mysqls.Label
 import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.storage.hbase._
@@ -43,6 +44,7 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
   import RocksDBHelper._
   import HSerializable._
 
+
   override val indexEdgeDeserializer = new IndexEdgeDeserializable(bytesToLong)
   val emptyBytes = Array.empty[Byte]
   val table = Array.empty[Byte]
@@ -70,7 +72,22 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
       logger.error(s"initialize rocks db storage failed.", e)
   }
 
-  val rowKeyLocks = new mutable.HashMap[Seq[Byte], AtomicBoolean]
+  val lockMap = CacheBuilder.newBuilder()
+    .concurrencyLevel(16)
+    .expireAfterAccess(1000 * 60, TimeUnit.MILLISECONDS)
+    .expireAfterWrite(1000 * 60, TimeUnit.MILLISECONDS)
+    .maximumSize(10000000)
+    .build[String, Integer]()
+
+  def withLock[A](key: Array[Byte])(op: => A): A = {
+    val lock = new Integer(-1)
+    val lockKey = Bytes.toString(key)
+
+    lockMap.asMap().putIfAbsent(lockKey, lock) match {
+      case null => lock.synchronized(op)
+      case obj => obj.synchronized(op)
+    }
+  }
 
   /** Mutation Logics */
   override def writeAsyncSimple(zkQuorum: String, elementRpcs: Seq[SKeyValue], withWait: Boolean): Future[Boolean] = {
@@ -79,12 +96,8 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
     } else {
       val ret =
         try {
-          import scala.collection.JavaConversions._
           elementRpcs.foreach { rpc =>
-            val lockKey = Bytes.toString(rpc.row)
-            val lock = lockMap.getOrElseUpdate(lockKey, new AtomicBoolean(true))
-
-            lock synchronized {
+            withLock(rpc.row) {
               rpc.operation match {
                 case SKeyValue.Put => db.put(rpc.row, rpc.value)
                 case SKeyValue.Delete => db.remove(rpc.row)
@@ -97,22 +110,17 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
           }
           true
         } catch {
-          case e: Exception =>
-            false
+          case e: Exception => false
         }
-
 
       Future.successful(ret)
     }
   }
 
   override def writeToStorage(rpc: SKeyValue, withWait: Boolean): Future[Boolean] = {
-    import scala.collection.JavaConversions._
-    val lockKey = Bytes.toString(rpc.row)
     val ret = try {
-      val lock = lockMap.getOrElseUpdate(lockKey, new AtomicBoolean(true))
       try {
-        lock synchronized {
+        withLock(rpc.row) {
           rpc.operation match {
             case SKeyValue.Put => db.put(writeOptions, rpc.row, rpc.value)
             case SKeyValue.Delete => db.remove(writeOptions, rpc.row)
@@ -122,8 +130,6 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
             case _ => throw new RuntimeException(s"not supported rpc operation. ${rpc.operation}")
           }
         }
-      } finally {
-        //        lockMap.remove(lockKey)
       }
       true
     } catch {
@@ -148,11 +154,6 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
   override def fetchKeyValues(startStopKeyRange: AnyRef): Future[Seq[SKeyValue]] = {
     startStopKeyRange match {
       case (startKey: Array[Byte], stopKey: Array[Byte]) =>
-
-        import scala.collection.JavaConversions._
-        val lockKey = Bytes.toString(startKey)
-        val lock = lockMap.getOrElseUpdate(lockKey, new AtomicBoolean(true))
-
         def op = {
           val iter = db.newIterator()
           var idx = 0
@@ -170,7 +171,7 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
         }
 
         // sync only snapshot update
-        if (Bytes.compareTo(startKey, stopKey) == 0) lock.synchronized(op)
+        if (Bytes.compareTo(startKey, stopKey) == 0) withLock(startKey)(op)
         else op
 
       case _ => Future.successful(Seq.empty)
@@ -237,37 +238,35 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
     Future.sequence(futures)
   }
 
-  val lockMap = new java.util.concurrent.ConcurrentHashMap[String, AtomicBoolean]()
-
   override def writeLock(rpc: SKeyValue, expectedOpt: Option[SKeyValue]): Future[Boolean] = {
-    import scala.collection.JavaConversions._
-    val lockKey = Bytes.toString(rpc.row)
-    val lock = lockMap.getOrElseUpdate(lockKey, new AtomicBoolean(false))
-
-    lock synchronized {
-      val fetchedValue = db.get(rpc.row)
-      val innerRet = expectedOpt match {
-        case None =>
-          if (fetchedValue == null) {
-            db.put(writeOptions, rpc.row, rpc.value)
-            true
-          } else {
-            false
-          }
-        case Some(kv) =>
-          if (fetchedValue == null) {
-            false
-          } else {
-            if (Bytes.compareTo(fetchedValue, kv.value) == 0) {
+    withLock(rpc.row) {
+      try {
+        val fetchedValue = db.get(rpc.row)
+        val innerRet = expectedOpt match {
+          case None =>
+            if (fetchedValue == null) {
               db.put(writeOptions, rpc.row, rpc.value)
               true
             } else {
               false
             }
-          }
-      }
+          case Some(kv) =>
+            if (fetchedValue == null) {
+              false
+            } else {
+              if (Bytes.compareTo(fetchedValue, kv.value) == 0) {
+                db.put(writeOptions, rpc.row, rpc.value)
+                true
+              } else {
+                false
+              }
+            }
+        }
 
-      Future.successful(innerRet)
+        Future.successful(innerRet)
+      } catch {
+        case e: Exception => Future.successful(false)
+      }
     }
   }
 
