@@ -4,8 +4,9 @@ import java.nio.{ByteOrder, ByteBuffer}
 import java.util.Base64
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.locks.ReadWriteLock
 
-import com.google.common.cache.{CacheBuilder, Cache}
+import com.google.common.cache.{CacheLoader, CacheBuilder, Cache}
 import com.kakao.s2graph.core.mysqls.Label
 import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.storage.hbase._
@@ -57,10 +58,9 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
     .setWriteBufferSize(1024 * 1024 * 512)
     .setMergeOperatorName("uint64add")
 
-
   var db: RocksDB = null
   val writeOptions = new WriteOptions()
-//    .setSync(true)
+  //    .setSync(true)
 
   try {
     // a factory method that returns a RocksDB instance
@@ -73,22 +73,24 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
       logger.error(s"initialize rocks db storage failed.", e)
   }
 
+  val cacheLoader = new CacheLoader[String, Object] {
+    override def load(key: String) = new Object()
+  }
+
   val lockMap = CacheBuilder.newBuilder()
-    .concurrencyLevel(16)
-    .expireAfterAccess(1000 * 60, TimeUnit.MILLISECONDS)
-    .expireAfterWrite(1000 * 60, TimeUnit.MILLISECONDS)
-    .maximumSize(10000000)
-    .build[String, Integer]()
+    .concurrencyLevel(64)
+    .expireAfterAccess(LockExpireDuration, TimeUnit.MILLISECONDS)
+    .expireAfterWrite(LockExpireDuration, TimeUnit.MILLISECONDS)
+    .maximumSize(1000 * 10 * 10 * 10 * 10)
+    .build[String, Object](cacheLoader)
 
   def withLock[A](key: Array[Byte])(op: => A): A = {
-    val lock = new Integer(-1)
     val lockKey = Bytes.toString(key)
+    val lock = lockMap.get(lockKey)
 
-    lockMap.asMap().putIfAbsent(lockKey, lock) match {
-      case null => lock.synchronized(op)
-      case obj => obj.synchronized(op)
-    }
+    lock.synchronized(op)
   }
+
   def buildWriteBatch(kvs: Seq[SKeyValue]): WriteBatch = {
     val writeBatch = new WriteBatch()
     kvs.foreach { kv =>
@@ -126,8 +128,8 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
   }
 
   /**
-   * originally storage should implement this since this will be called by writeAsyncSimple
-   */
+    * originally storage should implement this since this will be called by writeAsyncSimple
+    */
   override def writeToStorage(rpc: SKeyValue, withWait: Boolean): Future[Boolean] =
     Future.successful(true)
 
@@ -144,21 +146,27 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
     queryParamWithStartStopKeyRange match {
       case (queryParam: QueryParam, (startKey: Array[Byte], stopKey: Array[Byte])) =>
         def op = {
-          val v = db.get(startKey)
-          val kvs =
-            if (v == null) Seq.empty
-            else {
-              Seq(
-                SKeyValue(table, startKey, edgeCf, qualifier, v, System.currentTimeMillis())
-              )
-            }
-          Future.successful(kvs)
+          try {
+            val v = db.get(startKey)
+            val kvs =
+              if (v == null) Seq.empty
+              else Seq(SKeyValue(table, startKey, edgeCf, qualifier, v, System.currentTimeMillis()))
+
+            Future.successful(kvs)
+          } catch {
+            case e: Exception =>
+              logger.error(s"Error occurred", e)
+              Future.successful(Seq.empty)
+            //              throw e
+          }
         }
+
         withLock(startKey)(op)
 
       case _ => Future.successful(Seq.empty)
     }
   }
+
   override def fetchIndexEdgeKeyValues(queryParamWithStartStopKeyRange: AnyRef): Future[Seq[SKeyValue]] = {
     queryParamWithStartStopKeyRange match {
       case (queryParam: QueryParam, (startKey: Array[Byte], stopKey: Array[Byte])) =>
@@ -247,7 +255,7 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
   }
 
   override def writeLock(rpc: SKeyValue, expectedOpt: Option[SKeyValue]): Future[Boolean] = {
-    withLock(rpc.row) {
+    def op = {
       try {
         val fetchedValue = db.get(rpc.row)
         val innerRet = expectedOpt match {
@@ -273,9 +281,13 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
 
         Future.successful(innerRet)
       } catch {
-        case e: Exception => Future.successful(false)
+        case e: Exception =>
+          logger.error(s"Error occurred", e)
+          Future.successful(false)
       }
     }
+
+    withLock(rpc.row)(op)
   }
 
   /** Management Logic */

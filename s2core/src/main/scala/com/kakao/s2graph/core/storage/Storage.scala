@@ -33,36 +33,39 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
 
 
   /**
-   * create serializer that knows how to convert given snapshotEdge into kvs: Seq[SKeyValue]
-   * so we can store this kvs.
-   * @param snapshotEdge: snapshotEdge to serialize
-   * @return serializer implementation for StorageSerializable which has toKeyValues return Seq[SKeyValue]
-   */
+    * create serializer that knows how to convert given snapshotEdge into kvs: Seq[SKeyValue]
+    * so we can store this kvs.
+    *
+    * @param snapshotEdge : snapshotEdge to serialize
+    * @return serializer implementation for StorageSerializable which has toKeyValues return Seq[SKeyValue]
+    */
   def snapshotEdgeSerializer(snapshotEdge: SnapshotEdge) = new SnapshotEdgeSerializable(snapshotEdge)
 
   /**
-   * create serializer that knows how to convert given indexEdge into kvs: Seq[SKeyValue]
-   * @param indexedEdge: indexEdge to serialize
-   * @return serializer implementation
-   */
+    * create serializer that knows how to convert given indexEdge into kvs: Seq[SKeyValue]
+    *
+    * @param indexedEdge : indexEdge to serialize
+    * @return serializer implementation
+    */
   def indexEdgeSerializer(indexedEdge: IndexEdge) = new IndexEdgeSerializable(indexedEdge)
 
   /**
-   * create serializer that knows how to convert given vertex into kvs: Seq[SKeyValue]
-   * @param vertex: vertex to serialize
-   * @return serializer implementation
-   */
+    * create serializer that knows how to convert given vertex into kvs: Seq[SKeyValue]
+    *
+    * @param vertex : vertex to serialize
+    * @return serializer implementation
+    */
   def vertexSerializer(vertex: Vertex) = new VertexSerializable(vertex)
 
   /**
-   * create deserializer that can parse stored CanSKeyValue into snapshotEdge.
-   * note that each storage implementation should implement implicit type class
-   * to convert storage dependent dataType into common SKeyValue type by implementing CanSKeyValue
-   *
-   * ex) Asynchbase use it's KeyValue class and CanSKeyValue object has implicit type conversion method.
-   * if any storaage use different class to represent stored byte array,
-   * then that storage implementation is responsible to provide implicit type conversion method on CanSKeyValue.
-   * */
+    * create deserializer that can parse stored CanSKeyValue into snapshotEdge.
+    * note that each storage implementation should implement implicit type class
+    * to convert storage dependent dataType into common SKeyValue type by implementing CanSKeyValue
+    *
+    * ex) Asynchbase use it's KeyValue class and CanSKeyValue object has implicit type conversion method.
+    * if any storaage use different class to represent stored byte array,
+    * then that storage implementation is responsible to provide implicit type conversion method on CanSKeyValue.
+    **/
   val snapshotEdgeDeserializer = new SnapshotEdgeDeserializable
 
   /** create deserializer that can parse stored CanSKeyValue into indexEdge. */
@@ -72,96 +75,103 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
   val vertexDeserializer = new VertexDeserializable
 
   /**
-   * decide how to store given SKeyValue into storage using storage's client.
-   * we assumes that each storage implementation has client as member variable.
-   *
-   * ex) Asynchbase client provide PutRequest/DeleteRequest/AtomicIncrement/CompareAndSet operations
-   * to actually apply byte array into storage. in this case, AsynchbaseStorage use HBaseClient
-   * and build + fire rpc and return future that will return if this rpc has been succeed.
-   * @param kv: SKeyValue that need to be stored in storage.
-   * @param withWait: flag to control wait ack from storage.
-   *                  note that in AsynchbaseStorage(which support asynchronous operations), even with true,
-   *                  it never block thread, but rather submit work and notified by event loop when storage send ack back.
-   * @return ack message from storage.
-   */
+    * decide how to store given SKeyValue into storage using storage's client.
+    * we assumes that each storage implementation has client as member variable.
+    *
+    * ex) Asynchbase client provide PutRequest/DeleteRequest/AtomicIncrement/CompareAndSet operations
+    * to actually apply byte array into storage. in this case, AsynchbaseStorage use HBaseClient
+    * and build + fire rpc and return future that will return if this rpc has been succeed.
+    *
+    * @param kv       : SKeyValue that need to be stored in storage.
+    * @param withWait : flag to control wait ack from storage.
+    *                 note that in AsynchbaseStorage(which support asynchronous operations), even with true,
+    *                 it never block thread, but rather submit work and notified by event loop when storage send ack back.
+    * @return ack message from storage.
+    */
   def writeToStorage(kv: SKeyValue, withWait: Boolean): Future[Boolean]
 
 
   /**
-   * decide how to apply given edges(indexProps values + Map(_count -> countVal)) into storage.
-   * @param edges
-   * @param withWait
-   * @return
-   */
+    * decide how to apply given edges(indexProps values + Map(_count -> countVal)) into storage.
+    *
+    * @param edges
+    * @param withWait
+    * @return
+    */
   def incrementCounts(edges: Seq[Edge], withWait: Boolean): Future[Seq[(Boolean, Long)]]
 
 
   /**
-   * fetch SnapshotEdge for given request from storage.
-   * also storage datatype should be converted into SKeyValue.
-   * note that return type is Sequence rather than single SKeyValue for simplicity,
-   * even though there is assertions sequence.length == 1.
-   * @param request
-   * @return
-   */
+    * fetch SnapshotEdge for given request from storage.
+    * also storage datatype should be converted into SKeyValue.
+    * note that return type is Sequence rather than single SKeyValue for simplicity,
+    * even though there is assertions sequence.length == 1.
+    *
+    * @param request
+    * @return
+    */
   def fetchSnapshotEdgeKeyValues(request: AnyRef): Future[Seq[SKeyValue]]
 
   /**
-   * fetch IndexEdges for given request from storage.
-   * @param request
-   * @return
-   */
+    * fetch IndexEdges for given request from storage.
+    *
+    * @param request
+    * @return
+    */
   def fetchIndexEdgeKeyValues(request: AnyRef): Future[Seq[SKeyValue]]
 
   /**
-   * build proper request which is specific into storage to call fetchIndexEdgeKeyValues or fetchSnapshotEdgeKeyValues.
-   * for example, Asynchbase use GetRequest, Scanner so this method is responsible to build
-   * client request(GetRequest, Scanner) based on user provided query.
-   * @param queryRequest
-   * @return
-   */
+    * build proper request which is specific into storage to call fetchIndexEdgeKeyValues or fetchSnapshotEdgeKeyValues.
+    * for example, Asynchbase use GetRequest, Scanner so this method is responsible to build
+    * client request(GetRequest, Scanner) based on user provided query.
+    *
+    * @param queryRequest
+    * @return
+    */
   def buildRequest(queryRequest: QueryRequest): AnyRef
 
   /**
-   * write requestKeyValue into storage if the current value in storage that is stored matches.
-   * note that we only use SnapshotEdge as place for lock, so this method only change SnapshotEdge.
-   *
-   * Most important thing is this have to be 'atomic' operation.
-   * When this operation is mutating requestKeyValue's snapshotEdge, then other thread need to be
-   * either blocked or failed on write-write conflict case.
-   *
-   * Also while this method is still running, then fetchSnapshotEdgeKeyValues should be synchronized to
-   * prevent wrong data for read.
-   *
-   * Best is use storage's concurrency control(either pessimistic or optimistic) such as transaction,
-   * compareAndSet to synchronize.
-   *
-   * for example, AsynchbaseStorage use HBase's CheckAndSet atomic operation to guarantee 'atomicity'.
-   * for storage that does not support concurrency control, then storage implementation
-   * itself can maintain manual locks that synchronize read(fetchSnapshotEdgeKeyValues)
-   * and write(writeLock).
-   * @param requestKeyValue
-   * @param expectedOpt
-   * @return
-   */
+    * write requestKeyValue into storage if the current value in storage that is stored matches.
+    * note that we only use SnapshotEdge as place for lock, so this method only change SnapshotEdge.
+    *
+    * Most important thing is this have to be 'atomic' operation.
+    * When this operation is mutating requestKeyValue's snapshotEdge, then other thread need to be
+    * either blocked or failed on write-write conflict case.
+    *
+    * Also while this method is still running, then fetchSnapshotEdgeKeyValues should be synchronized to
+    * prevent wrong data for read.
+    *
+    * Best is use storage's concurrency control(either pessimistic or optimistic) such as transaction,
+    * compareAndSet to synchronize.
+    *
+    * for example, AsynchbaseStorage use HBase's CheckAndSet atomic operation to guarantee 'atomicity'.
+    * for storage that does not support concurrency control, then storage implementation
+    * itself can maintain manual locks that synchronize read(fetchSnapshotEdgeKeyValues)
+    * and write(writeLock).
+    *
+    * @param requestKeyValue
+    * @param expectedOpt
+    * @return
+    */
   def writeLock(requestKeyValue: SKeyValue, expectedOpt: Option[SKeyValue]): Future[Boolean]
 
   /**
-   * this method need to be called when client shutdown. this is responsible to cleanUp the resources
-   * such as client into storage.
-   */
+    * this method need to be called when client shutdown. this is responsible to cleanUp the resources
+    * such as client into storage.
+    */
   def flush(): Unit
 
   /**
-   * create table on storage.
-   * if storage implementation does not support namespace or table, then there is nothing to be done
-   * @param zkAddr
-   * @param tableName
-   * @param cfs
-   * @param regionMultiplier
-   * @param ttl
-   * @param compressionAlgorithm
-   */
+    * create table on storage.
+    * if storage implementation does not support namespace or table, then there is nothing to be done
+    *
+    * @param zkAddr
+    * @param tableName
+    * @param cfs
+    * @param regionMultiplier
+    * @param ttl
+    * @param compressionAlgorithm
+    */
   def createTable(zkAddr: String,
                   tableName: String,
                   cfs: List[String],
@@ -170,37 +180,38 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
                   compressionAlgorithm: String): Unit
 
   /**
-   * fetch IndexEdges for given queryParam in queryRequest.
-   * this expect previous step starting score to propagate score into next step.
-   * also parentEdges is necessary to return full bfs tree when query require it.
-   *
-   * note that return type is general type.
-   * for example, currently we wanted to use Asynchbase
-   * so single I/O return type should be Deferred[T].
-   *
-   * if we use native hbase client, then this return type can be Future[T] or just T.
-   * @param queryRequest
-   * @param prevStepScore
-   * @param isInnerCall
-   * @param parentEdges
-   * @return
-   */
+    * fetch IndexEdges for given queryParam in queryRequest.
+    * this expect previous step starting score to propagate score into next step.
+    * also parentEdges is necessary to return full bfs tree when query require it.
+    *
+    * note that return type is general type.
+    * for example, currently we wanted to use Asynchbase
+    * so single I/O return type should be Deferred[T].
+    *
+    * if we use native hbase client, then this return type can be Future[T] or just T.
+    *
+    * @param queryRequest
+    * @param prevStepScore
+    * @param isInnerCall
+    * @param parentEdges
+    * @return
+    */
   def fetch(queryRequest: QueryRequest,
             prevStepScore: Double,
             isInnerCall: Boolean,
             parentEdges: Seq[EdgeWithScore]): R
 
   /**
-   * responsible to fire parallel fetch call into storage and create future that will return merged result.
-   * @param queryRequestWithScoreLs
-   * @param prevStepEdges
-   * @return
-   */
+    * responsible to fire parallel fetch call into storage and create future that will return merged result.
+    *
+    * @param queryRequestWithScoreLs
+    * @param prevStepEdges
+    * @return
+    */
   def fetches(queryRequestWithScoreLs: Seq[(QueryRequest, Double)],
               prevStepEdges: Map[VertexId, Seq[EdgeWithScore]]): Future[Seq[QueryRequestWithResult]]
 
   /** End of Query */
-
 
 
   /** Public Interface */
@@ -434,19 +445,19 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
       edgeWithScore <- queryResult.edgeWithScoreLs
       (edge, score) = EdgeWithScore.unapply(edgeWithScore).get
     } yield {
-        /** reverted direction */
-        val reversedIndexedEdgesMutations = edge.duplicateEdge.edgesWithIndex.flatMap { indexEdge =>
-          indexEdgeSerializer(indexEdge).toKeyValues.map(_.copy(operation = SKeyValue.Delete)) ++
-            buildIncrementsAsync(indexEdge, -1L)
-        }
-        val reversedSnapshotEdgeMutations = snapshotEdgeSerializer(edge.toSnapshotEdge).toKeyValues.map(_.copy(operation = SKeyValue.Put))
-        val forwardIndexedEdgeMutations = edge.edgesWithIndex.flatMap { indexEdge =>
-          indexEdgeSerializer(indexEdge).toKeyValues.map(_.copy(operation = SKeyValue.Delete)) ++
-            buildIncrementsAsync(indexEdge, -1L)
-        }
-        val mutations = reversedIndexedEdgesMutations ++ reversedSnapshotEdgeMutations ++ forwardIndexedEdgeMutations
-        writeAsyncSimple(zkQuorum, mutations, withWait = true)
+      /** reverted direction */
+      val reversedIndexedEdgesMutations = edge.duplicateEdge.edgesWithIndex.flatMap { indexEdge =>
+        indexEdgeSerializer(indexEdge).toKeyValues.map(_.copy(operation = SKeyValue.Delete)) ++
+          buildIncrementsAsync(indexEdge, -1L)
       }
+      val reversedSnapshotEdgeMutations = snapshotEdgeSerializer(edge.toSnapshotEdge).toKeyValues.map(_.copy(operation = SKeyValue.Put))
+      val forwardIndexedEdgeMutations = edge.edgesWithIndex.flatMap { indexEdge =>
+        indexEdgeSerializer(indexEdge).toKeyValues.map(_.copy(operation = SKeyValue.Delete)) ++
+          buildIncrementsAsync(indexEdge, -1L)
+      }
+      val mutations = reversedIndexedEdgesMutations ++ reversedSnapshotEdgeMutations ++ forwardIndexedEdgeMutations
+      writeAsyncSimple(zkQuorum, mutations, withWait = true)
+    }
 
     Future.sequence(futures).map { rets => rets.forall(identity) }
   }
@@ -471,7 +482,7 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
         edgeWithScore.edge.copy(op = newOp, version = newVersion, propsWithTs = newPropsWithTs)
 
       val edgeToDelete = edgeWithScore.copy(edge = copiedEdge)
-//      logger.debug(s"delete edge from deleteAll: ${edgeToDelete.edge.toLogString}")
+      //      logger.debug(s"delete edge from deleteAll: ${edgeToDelete.edge.toLogString}")
       edgeToDelete
     }
 
@@ -489,27 +500,27 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
       deleteQueryResult = buildEdgesToDelete(queryRequestWithResult, requestTs)
       if deleteQueryResult.edgeWithScoreLs.nonEmpty
     } yield {
-        val label = queryRequest.queryParam.label
-        label.schemaVersion match {
-          case HBaseType.VERSION3 | HBaseType.VERSION4 =>
-            if (label.consistencyLevel == "strong") {
-              /**
-               * read: snapshotEdge on queryResult = O(N)
-               * write: N x (relatedEdges x indices(indexedEdge) + 1(snapshotEdge))
-               */
-              mutateEdges(deleteQueryResult.edgeWithScoreLs.map(_.edge), withWait = true).map(_.forall(identity))
-            } else {
-              deleteAllFetchedEdgesAsyncOld(queryRequest, deleteQueryResult, requestTs, MaxRetryNum)
-            }
-          case _ =>
-
+      val label = queryRequest.queryParam.label
+      label.schemaVersion match {
+        case HBaseType.VERSION3 | HBaseType.VERSION4 =>
+          if (label.consistencyLevel == "strong") {
             /**
-             * read: x
-             * write: N x ((1(snapshotEdge) + 2(1 for incr, 1 for delete) x indices)
-             */
+              * read: snapshotEdge on queryResult = O(N)
+              * write: N x (relatedEdges x indices(indexedEdge) + 1(snapshotEdge))
+              */
+            mutateEdges(deleteQueryResult.edgeWithScoreLs.map(_.edge), withWait = true).map(_.forall(identity))
+          } else {
             deleteAllFetchedEdgesAsyncOld(queryRequest, deleteQueryResult, requestTs, MaxRetryNum)
-        }
+          }
+        case _ =>
+
+          /**
+            * read: x
+            * write: N x ((1(snapshotEdge) + 2(1 for incr, 1 for delete) x indices)
+            */
+          deleteAllFetchedEdgesAsyncOld(queryRequest, deleteQueryResult, requestTs, MaxRetryNum)
       }
+    }
 
     if (futures.isEmpty) {
       // all deleted.
@@ -524,9 +535,9 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
       queryRequestWithResultLs <- getEdges(query)
       (allDeleted, ret) <- deleteAllFetchedEdgesLs(queryRequestWithResultLs, requestTs)
     } yield {
-//        logger.debug(s"fetchAndDeleteAll: ${allDeleted}, ${ret}")
-        (allDeleted, ret)
-      }
+      //        logger.debug(s"fetchAndDeleteAll: ${allDeleted}, ${ret}")
+      (allDeleted, ret)
+    }
 
     Extensions.retryOnFailure(MaxRetryNum) {
       future
@@ -548,11 +559,11 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
         id = vertice.innerId.toIdString()
         label <- labels
       } yield {
-          val tsv = Seq(ts, "deleteAll", "e", id, id, label.label, "{}", GraphUtil.fromOp(dir.toByte)).mkString("\t")
-          val topic = ExceptionHandler.failTopic
-          val kafkaMsg = KafkaMessage(new ProducerRecord[Key, Val](topic, null, tsv))
-          kafkaMsg
-        }
+        val tsv = Seq(ts, "deleteAll", "e", id, id, label.label, "{}", GraphUtil.fromOp(dir.toByte)).mkString("\t")
+        val topic = ExceptionHandler.failTopic
+        val kafkaMsg = KafkaMessage(new ProducerRecord[Key, Val](topic, null, tsv))
+        kafkaMsg
+      }
 
       ExceptionHandler.enqueues(kafkaMessages)
     }
@@ -561,9 +572,9 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
     val queryParams = for {
       label <- labels
     } yield {
-        val labelWithDir = LabelWithDirection(label.id.get, dir)
-        QueryParam(labelWithDir).limit(0, DeleteAllFetchSize).duplicatePolicy(Option(Query.DuplicatePolicy.Raw))
-      }
+      val labelWithDir = LabelWithDirection(label.id.get, dir)
+      QueryParam(labelWithDir).limit(0, DeleteAllFetchSize).duplicatePolicy(Option(Query.DuplicatePolicy.Raw))
+    }
 
     val step = Step(queryParams.toList)
     val q = Query(srcVertices, Vector(step))
@@ -587,15 +598,13 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
   /** End Of Delete All */
 
 
-
-
   /** Parsing Logic: parse from kv from Storage into Edge */
 
   def toEdge[K: CanSKeyValue](kv: K,
                               queryParam: QueryParam,
                               cacheElementOpt: Option[IndexEdge],
                               parentEdges: Seq[EdgeWithScore]): Option[Edge] = {
-//        logger.debug(s"toEdge: $kv")
+    //        logger.debug(s"toEdge: $kv")
     try {
       val indexEdge = indexEdgeDeserializer.fromKeyValues(queryParam, Seq(kv), queryParam.label.schemaVersion, cacheElementOpt)
 
@@ -612,7 +621,7 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
                                       cacheElementOpt: Option[SnapshotEdge] = None,
                                       isInnerCall: Boolean,
                                       parentEdges: Seq[EdgeWithScore]): Option[Edge] = {
-//        logger.debug(s"SnapshottoEdge: $kv")
+    //        logger.debug(s"SnapshottoEdge: $kv")
     val snapshotEdge = snapshotEdgeDeserializer.fromKeyValues(queryParam, Seq(kv), queryParam.label.schemaVersion, cacheElementOpt)
 
     if (isInnerCall) {
@@ -735,8 +744,8 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
       else {
         val lockEdgePut = snapshotEdgeSerializer(lockEdge).toKeyValues.head
         val oldPut = oldSnapshotEdgeOpt.map(e => snapshotEdgeSerializer(e.toSnapshotEdge).toKeyValues.head)
-//        val lockEdgePut = buildPutAsync(lockEdge).head
-//        val oldPut = oldSnapshotEdgeOpt.map(e => buildPutAsync(e.toSnapshotEdge).head)
+        //        val lockEdgePut = buildPutAsync(lockEdge).head
+        //        val oldPut = oldSnapshotEdgeOpt.map(e => buildPutAsync(e.toSnapshotEdge).head)
         writeLock(lockEdgePut, oldPut).recoverWith { case ex: Exception =>
           logger.error(s"AcquireLock RPC Failed.")
           throw new PartialFailureException(edge, 0, "AcquireLock RPC Failed")
@@ -761,7 +770,6 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
       }
     }
   }
-
 
 
   protected def releaseLock(predicate: Boolean,
@@ -878,7 +886,7 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
 
     val lockEdge = buildLockEdge(snapshotEdgeOpt, edge, kvOpt)
     val releaseLockEdge = buildReleaseLockEdge(snapshotEdgeOpt, lockEdge, edgeUpdate)
-    val _process = commitProcess(edge, statusCode)(snapshotEdgeOpt, kvOpt)_
+    val _process = commitProcess(edge, statusCode)(snapshotEdgeOpt, kvOpt) _
     snapshotEdgeOpt match {
       case None =>
         // no one ever did success on acquire lock.
@@ -962,7 +970,7 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
     val queryRequest = QueryRequest(q, 0, edge.srcVertex, _queryParam)
 
     fetchSnapshotEdgeKeyValues(buildRequest(queryRequest)).map { kvs =>
-//    fetchIndexEdgeKeyValues(buildRequest(queryRequest)).map { kvs =>
+      //    fetchIndexEdgeKeyValues(buildRequest(queryRequest)).map { kvs =>
       val (edgeOpt, kvOpt) =
         if (kvs.isEmpty) (None, None)
         else {
@@ -1045,14 +1053,14 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
         // current stepIdx = -1
         val startQueryResultLs = QueryResult.fromVertices(q)
         q.steps.foldLeft(Future.successful(startQueryResultLs)) { case (acc, step) =>
-            fetchStepFuture(q, acc)
-//          fetchStepFuture(q, acc).map { stepResults =>
-//            step.queryParams.zip(stepResults).foreach { case (qParam, queryRequestWithResult)  =>
-//              val cursor = Base64.getEncoder.encodeToString(queryRequestWithResult.queryResult.tailCursor)
-//              qParam.cursorOpt = Option(cursor)
-//            }
-//            stepResults
-//          }
+          fetchStepFuture(q, acc)
+          //          fetchStepFuture(q, acc).map { stepResults =>
+          //            step.queryParams.zip(stepResults).foreach { case (qParam, queryRequestWithResult)  =>
+          //              val cursor = Base64.getEncoder.encodeToString(queryRequestWithResult.queryResult.tailCursor)
+          //              qParam.cursorOpt = Option(cursor)
+          //            }
+          //            stepResults
+          //          }
         }
       }
     } recover {
@@ -1069,18 +1077,17 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
       propsWithTs = Map(LabelMeta.timeStampSeq -> InnerValLikeWithTs.withLong(ts, ts, queryParam.label.schemaVersion))
       edge = Edge(srcVertex, tgtVertex, queryParam.labelWithDir, propsWithTs = propsWithTs)
     } yield {
-        fetchSnapshotEdge(edge).map { case (queryParam, edgeOpt, kvOpt) =>
-          val _queryParam = queryParam.tgtVertexInnerIdOpt(Option(edge.tgtVertex.innerId))
-          val q = Query.toQuery(Seq(edge.srcVertex), _queryParam)
-          val queryRequest = QueryRequest(q, 0, edge.srcVertex, _queryParam)
-          val queryResult = QueryResult(edgeOpt.toSeq.map(e => EdgeWithScore(e, 1.0)))
-          QueryRequestWithResult(queryRequest, queryResult)
-        }
+      fetchSnapshotEdge(edge).map { case (queryParam, edgeOpt, kvOpt) =>
+        val _queryParam = queryParam.tgtVertexInnerIdOpt(Option(edge.tgtVertex.innerId))
+        val q = Query.toQuery(Seq(edge.srcVertex), _queryParam)
+        val queryRequest = QueryRequest(q, 0, edge.srcVertex, _queryParam)
+        val queryResult = QueryResult(edgeOpt.toSeq.map(e => EdgeWithScore(e, 1.0)))
+        QueryRequestWithResult(queryRequest, queryResult)
       }
+    }
 
     Future.sequence(futures)
   }
-
 
 
   @tailrec
@@ -1090,9 +1097,9 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
   }
 
   protected def sample(queryRequest: QueryRequest, edges: Seq[EdgeWithScore], n: Int): Seq[EdgeWithScore] = {
-    if (edges.size <= n){
+    if (edges.size <= n) {
       edges
-    }else{
+    } else {
       val plainEdges = if (queryRequest.queryParam.offset == 0) {
         edges.tail
       } else edges
@@ -1108,6 +1115,7 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
     }
 
   }
+
   /** end of query */
 
   /** Mutation Builder */
@@ -1160,6 +1168,7 @@ abstract class Storage[R](val config: Config)(implicit ec: ExecutionContext) {
     val _indexedEdge = indexedEdge.copy(props = newProps)
     indexEdgeSerializer(_indexedEdge).toKeyValues.map(_.copy(operation = SKeyValue.Increment))
   }
+
   def buildDeleteBelongsToId(vertex: Vertex): Seq[SKeyValue] = {
     val kvs = vertexSerializer(vertex).toKeyValues
     val kv = kvs.head
