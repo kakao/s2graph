@@ -4,7 +4,7 @@ import java.nio.{ByteOrder, ByteBuffer}
 import java.util.Base64
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.locks.ReadWriteLock
+import java.util.concurrent.locks.{ReentrantLock, ReadWriteLock}
 
 import com.google.common.cache.{CacheLoader, CacheBuilder, Cache}
 import com.kakao.s2graph.core.mysqls.Label
@@ -73,22 +73,27 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
       logger.error(s"initialize rocks db storage failed.", e)
   }
 
-  val cacheLoader = new CacheLoader[String, Object] {
-    override def load(key: String) = new Object()
+  val cacheLoader = new CacheLoader[String, ReentrantLock] {
+    override def load(key: String) = new ReentrantLock()
   }
 
   val lockMap = CacheBuilder.newBuilder()
-    .concurrencyLevel(64)
+    .concurrencyLevel(124)
     .expireAfterAccess(LockExpireDuration, TimeUnit.MILLISECONDS)
     .expireAfterWrite(LockExpireDuration, TimeUnit.MILLISECONDS)
     .maximumSize(1000 * 10 * 10 * 10 * 10)
-    .build[String, Object](cacheLoader)
+    .build[String, ReentrantLock](cacheLoader)
 
   def withLock[A](key: Array[Byte])(op: => A): A = {
     val lockKey = Bytes.toString(key)
     val lock = lockMap.get(lockKey)
 
-    lock.synchronized(op)
+    try {
+      lock.lock
+      op
+    } finally {
+      lock.unlock()
+    }
   }
 
   def buildWriteBatch(kvs: Seq[SKeyValue]): WriteBatch = {
@@ -154,10 +159,9 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
 
             Future.successful(kvs)
           } catch {
-            case e: Exception =>
-              logger.error(s"Error occurred", e)
-              Future.successful(Seq.empty)
-            //              throw e
+            case e: RocksDBException =>
+              logger.error("Fetch snapshotEdge failed", e)
+              Future.failed(new RuntimeException("Fetch snapshotEdge failed"))
           }
         }
 
@@ -281,8 +285,8 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
 
         Future.successful(innerRet)
       } catch {
-        case e: Exception =>
-          logger.error(s"Error occurred", e)
+        case e: RocksDBException =>
+          logger.error(s"Write lock failed", e)
           Future.successful(false)
       }
     }
