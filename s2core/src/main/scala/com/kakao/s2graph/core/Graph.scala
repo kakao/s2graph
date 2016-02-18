@@ -1,7 +1,7 @@
 package com.kakao.s2graph.core
 
 import java.util
-import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.{Executors, ConcurrentHashMap}
 
 import com.google.common.cache.CacheBuilder
 import com.kakao.s2graph.core.mysqls._
@@ -341,9 +341,11 @@ class Graph(_config: Config)(implicit val ec: ExecutionContext) {
   Model.apply(config)
   Model.loadCache()
 
+  implicit val storageThreadPool = ExecutionContext.fromExecutor(Executors.newCachedThreadPool())
+
   // TODO: Make storage client by config param
 //  val storage = new AsynchbaseStorage(config)(ec)
-  val storage = new RocksDBStorage(config)(ec)
+  val storage = new RocksDBStorage(config)(storageThreadPool)
 
   for {
     entry <- config.entrySet() if Graph.DefaultConfigs.contains(entry.getKey)
