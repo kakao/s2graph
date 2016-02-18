@@ -46,12 +46,12 @@ class WeakLabelDeleteTest extends IntegrateCommon with BeforeAndAfterEach {
      * This can be different on different storage system so I think
      * this test should be removed.
      */
-    val edgesToStore2 = parser.toEdges(Json.toJson(edges), "insert")
-    val rets2 = graph.mutateEdges(edgesToStore2, withWait = true)
-    Await.result(rets2, Duration(20, TimeUnit.MINUTES))
-
-    result = getEdgesSync(query(0))
-    (result \ "results").as[List[JsValue]].size should be(0)
+//    val edgesToStore2 = parser.toEdges(Json.toJson(edges), "insert")
+//    val rets2 = graph.mutateEdges(edgesToStore2, withWait = true)
+//    Await.result(rets2, Duration(20, TimeUnit.MINUTES))
+//
+//    result = getEdgesSync(query(0))
+//    (result \ "results").as[List[JsValue]].size should be(0)
   }
 
 
