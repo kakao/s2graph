@@ -57,6 +57,13 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
     .setCreateIfMissing(true)
     .setWriteBufferSize(1024 * 1024 * 512)
     .setMergeOperatorName("uint64add")
+    .setAllowOsBuffer(true)
+    .setArenaBlockSize(1024 * 32)
+    .createStatistics()
+    .setDbLogDir("./rocks.log")
+    .setMaxBackgroundCompactions(2)
+    .setMaxBackgroundFlushes(2)
+
 
   var db: RocksDB = null
   val writeOptions = new WriteOptions()
@@ -67,7 +74,6 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
     // only for testing now.
 
     db = RocksDB.open(options, "/tmp/rocks")
-
   } catch {
     case e: RocksDBException =>
       logger.error(s"initialize rocks db storage failed.", e)
@@ -171,7 +177,7 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
     }
   }
 
-  override def fetchIndexEdgeKeyValues(queryParamWithStartStopKeyRange: AnyRef): Future[Seq[SKeyValue]] = {
+  def fetchIndexEdgeKeyValues(queryParamWithStartStopKeyRange: AnyRef): Future[Seq[SKeyValue]] = {
     queryParamWithStartStopKeyRange match {
       case (queryParam: QueryParam, (startKey: Array[Byte], stopKey: Array[Byte])) =>
         def op = {
@@ -304,4 +310,10 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
     Future.successful(Seq.empty)
   }
 
+  /**
+   * fetch Vertex for given request from storage.
+   * @param request
+   * @return
+   */
+  override def fetchVertexKeyValues(request: AnyRef): Future[scala.Seq[SKeyValue]] = Future.successful(Seq.empty)
 }
