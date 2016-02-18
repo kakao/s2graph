@@ -1,19 +1,18 @@
 package subscriber
 
 import com.kakao.s2graph.EdgeTransform
-import com.kakao.s2graph.client.GraphRestClient
+import com.kakao.s2graph.client.RestClient
 import com.kakao.s2graph.core.mysqls.Model
 import com.kakao.s2graph.core.utils.Configuration._
 import com.kakao.s2graph.core.{Graph, GraphConfig, GraphUtil}
 import kafka.serializer.StringDecoder
 import org.apache.spark.streaming.Durations._
-import org.apache.spark.streaming.kafka.KafkaRDDFunctions.rddToKafkaRDDFunctions
+import org.apache.spark.streaming.kafka.HasOffsetRanges
 import s2.config.S2ConfigFactory
 import s2.spark.{HashMapParam, SparkApp}
 
 import scala.collection.mutable.{HashMap => MutableHashMap}
-import scala.concurrent.duration._
-import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.ExecutionContext
 import scala.util.Try
 
 /**
@@ -43,14 +42,12 @@ object EdgeTransformStreaming extends SparkApp {
     "zookeeper.connection.timeout.ms" -> "10000"
   )
 
-  lazy val builder = new com.ning.http.client.AsyncHttpClientConfig.Builder()
-  lazy val client = new play.api.libs.ws.ning.NingWSClient(builder.build)
-
   val graphUrl = config.getOrElse("s2graph.url", "http://localhost")
   val graphReadOnlyUrl = config.getOrElse("s2graph.read-only.url", graphUrl)
-  lazy val rest = new GraphRestClient(client, graphUrl)
-  lazy val readOnlyRest = new GraphRestClient(client, graphReadOnlyUrl)
+  lazy val rest = RestClient(graphUrl)
+  lazy val readOnlyRest = RestClient(graphReadOnlyUrl)
   lazy val transformer = new EdgeTransform(rest, readOnlyRest)
+
   lazy val streamHelper = getStreamHelper(kafkaParam)
 
   // should implement in derived class
@@ -71,38 +68,37 @@ object EdgeTransformStreaming extends SparkApp {
     val stream = streamHelper.createStream[String, String, StringDecoder, StringDecoder](ssc, inputTopics)
 
     stream.foreachRDD { (rdd, ts) =>
-      rdd.foreachPartitionWithOffsetRange { case (osr, part) =>
-        assert(initialize)
+      val nextRdd = {
+        rdd.foreachPartition { part =>
+          assert(initialize)
 
-        // convert to edge format
-        val orgEdges = for {
-          (k, v) <- part
-          line <- GraphUtil.parseString(v)
-          edge <- Try { Graph.toEdge(line) }.toOption.flatten
-        } yield edge
+          // convert to edge format
+          val orgEdges = for {
+            (k, v) <- part
+            line <- GraphUtil.parseString(v)
+            maybeEdge <- Try {
+              Graph.toEdge(line)
+            }.toOption
+            edge <- maybeEdge
+          } yield edge
 
-        // transform and send edges to graph
-        val future = Future.sequence {
+          // transform and send edges to graph
           for {
             orgEdgesGrouped <- orgEdges.grouped(10)
-          } yield {
+            transEdges = transformer.transformEdges(orgEdgesGrouped)
+            rets = transformer.loadEdges(transEdges, withWait = true)
+          } {
             acc += ("Input", orgEdgesGrouped.length)
-            for {
-              transEdges <- transformer.transformEdges(orgEdgesGrouped)
-              rets <- transformer.loadEdges(transEdges, withWait = true)
-            } yield {
-              acc += ("Transform", rets.count(x => x))
-              transEdges.zip(rets).filterNot(_._2).foreach { case (e, _) =>
-                logError(s"failed to loadEdge: ${e.toLogString}")
-              }
+            acc += ("Transform", rets.count(x => x))
+            transEdges.zip(rets).filterNot(_._2).foreach { case (e, _) =>
+              logError(s"failed to loadEdge: ${e.toLogString}")
             }
           }
         }
-
-        Await.ready(future, interval seconds)
-
-        streamHelper.commitConsumerOffset(osr)
+        rdd
       }
+
+      streamHelper.commitConsumerOffsets(nextRdd.asInstanceOf[HasOffsetRanges])
     }
 
     ssc.start()

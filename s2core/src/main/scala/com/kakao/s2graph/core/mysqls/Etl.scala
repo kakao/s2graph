@@ -67,7 +67,7 @@ object Etl extends Model[Etl] {
 
 object EtlParam {
   object EtlType extends Enumeration {
-    val QUERY, PROP, BUCKET = Value
+    val QUERY, PROP, BUCKET, EXPERIMENT = Value
 
     implicit val format = new Format[EtlType] {
       override def reads(json: JsValue): JsResult[EtlType] = {
