@@ -57,12 +57,8 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
     .setCreateIfMissing(true)
     .setWriteBufferSize(1024 * 1024 * 512)
     .setMergeOperatorName("uint64add")
-    .setAllowOsBuffer(true)
-    .setArenaBlockSize(1024 * 32)
     .createStatistics()
-    .setDbLogDir("./rocks.log")
-    .setMaxBackgroundCompactions(2)
-    .setMaxBackgroundFlushes(2)
+    .setDbLogDir("./")
 
 
   var db: RocksDB = null
