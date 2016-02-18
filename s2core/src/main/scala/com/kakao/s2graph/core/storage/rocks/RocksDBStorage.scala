@@ -66,6 +66,11 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
     .createStatistics()
     .setDbLogDir("./")
     .setTableCacheNumshardbits(5)
+    .setIncreaseParallelism(8)
+    .setAllowOsBuffer(true)
+    .setAllowMmapReads(true)
+    .setArenaBlockSize(1024 * 32)
+
 
 //    .setOptimizeFiltersForHits(true)
 
