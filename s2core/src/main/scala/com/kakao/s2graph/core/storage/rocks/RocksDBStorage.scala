@@ -40,7 +40,7 @@ object RocksDBHelper {
 }
 
 class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
-  extends Storage[Future[QueryRequestWithResult]](config) {
+  extends Storage[QueryRequestWithResult](config) {
 
   import RocksDBHelper._
   import HSerializable._
@@ -173,7 +173,7 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
     }
   }
 
-  def fetchIndexEdgeKeyValues(queryParamWithStartStopKeyRange: AnyRef): Future[Seq[SKeyValue]] = {
+  def fetchIndexEdgeKeyValues(queryParamWithStartStopKeyRange: AnyRef): Seq[SKeyValue] = {
     queryParamWithStartStopKeyRange match {
       case (queryParam: QueryParam, (startKey: Array[Byte], stopKey: Array[Byte])) =>
         def op = {
@@ -190,13 +190,15 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
               iter.next()
               idx += 1
             }
-            Future.successful(kvs.toSeq)
+            kvs.toSeq
+//            Future.successful(kvs.toSeq)
           } finally {
             iter.dispose()
           }
         }
         op
-      case _ => Future.successful(Seq.empty)
+      case _ => Seq.empty
+//        Future.successful(Seq.empty)
     }
   }
 
@@ -236,18 +238,26 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
   override def fetch(queryRequest: QueryRequest,
                      prevStepScore: Double,
                      isInnerCall: Boolean,
-                     parentEdges: Seq[EdgeWithScore]): Future[QueryRequestWithResult] = {
+                     parentEdges: Seq[EdgeWithScore]): QueryRequestWithResult = {
+    val kvs = fetchIndexEdgeKeyValues(buildRequest(queryRequest))
+    val queryParam = queryRequest.queryParam
+    val edgeWithScores = toEdges(kvs, queryParam, prevStepScore, isInnerCall, parentEdges)
 
-    fetchIndexEdgeKeyValues(buildRequest(queryRequest)) map { kvs =>
-      val queryParam = queryRequest.queryParam
-      val edgeWithScores = toEdges(kvs, queryParam, prevStepScore, isInnerCall, parentEdges)
+    val resultEdgesWithScores =
+      if (queryRequest.queryParam.sample >= 0) sample(queryRequest, edgeWithScores, queryRequest.queryParam.sample)
+      else edgeWithScores
 
-      val resultEdgesWithScores =
-        if (queryRequest.queryParam.sample >= 0) sample(queryRequest, edgeWithScores, queryRequest.queryParam.sample)
-        else edgeWithScores
-
-      QueryRequestWithResult(queryRequest, QueryResult(resultEdgesWithScores, tailCursor = kvs.lastOption.map(_.row).getOrElse(Array.empty)))
-    }
+    QueryRequestWithResult(queryRequest, QueryResult(resultEdgesWithScores, tailCursor = kvs.lastOption.map(_.row).getOrElse(Array.empty)))
+//    fetchIndexEdgeKeyValues(buildRequest(queryRequest)) map { kvs =>
+//      val queryParam = queryRequest.queryParam
+//      val edgeWithScores = toEdges(kvs, queryParam, prevStepScore, isInnerCall, parentEdges)
+//
+//      val resultEdgesWithScores =
+//        if (queryRequest.queryParam.sample >= 0) sample(queryRequest, edgeWithScores, queryRequest.queryParam.sample)
+//        else edgeWithScores
+//
+//      QueryRequestWithResult(queryRequest, QueryResult(resultEdgesWithScores, tailCursor = kvs.lastOption.map(_.row).getOrElse(Array.empty)))
+//    }
   }
 
   override def fetches(queryRequestWithScoreLs: Seq[(QueryRequest, Double)],
@@ -257,7 +267,8 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
       parentEdges <- prevStepEdges.get(queryRequest.vertex.id)
     } yield fetch(queryRequest, prevStepScore, isInnerCall = false, parentEdges)
 
-    Future.sequence(futures)
+//    Future.sequence(futures)
+    Future.successful(futures)
   }
 
   override def writeLock(rpc: SKeyValue, expectedOpt: Option[SKeyValue]): Future[Boolean] = {
