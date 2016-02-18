@@ -53,17 +53,25 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
 
   RocksDB.loadLibrary()
 
+//  val env = new RocksEnv()
+
+  val memEnv = new RocksMemEnv()
+  val writeOptions = new WriteOptions()
+  val readOptions = new ReadOptions().setFillCache(true).setVerifyChecksums(false)
+
   val options = new Options()
     .setCreateIfMissing(true)
     .setWriteBufferSize(1024 * 1024 * 512)
     .setMergeOperatorName("uint64add")
     .createStatistics()
     .setDbLogDir("./")
+    .setTableCacheNumshardbits(5)
+
+//    .setOptimizeFiltersForHits(true)
 
 
   var db: RocksDB = null
-  val writeOptions = new WriteOptions()
-  //    .setSync(true)
+
 
   try {
     // a factory method that returns a RocksDB instance
@@ -154,7 +162,7 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
       case (queryParam: QueryParam, (startKey: Array[Byte], stopKey: Array[Byte])) =>
         def op = {
           try {
-            val v = db.get(startKey)
+            val v = db.get(readOptions, startKey)
             val kvs =
               if (v == null) Seq.empty
               else Seq(SKeyValue(table, startKey, edgeCf, qualifier, v, System.currentTimeMillis()))
@@ -177,7 +185,7 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
     queryParamWithStartStopKeyRange match {
       case (queryParam: QueryParam, (startKey: Array[Byte], stopKey: Array[Byte])) =>
         def op = {
-          val iter = db.newIterator()
+          val iter = db.newIterator(readOptions)
           try {
             var idx = 0
             iter.seek(startKey)
