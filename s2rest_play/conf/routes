@@ -106,6 +106,7 @@ POST        /graphs/copyLabel/:oldLabelName/:newLabelName                 contro
 POST        /graphs/renameLabel/:oldLabelName/:newLabelName               controllers.AdminController.renameLabel(oldLabelName, newLabelName)
 POST        /graphs/updateHTable/:labelName/:newHTableName                controllers.AdminController.updateHTable(labelName, newHTableName)
 PUT         /graphs/loadCache                                             controllers.AdminController.loadCache()
+PUT         /graphs/invalidateCache/:labelName                            controllers.AdminController.invalidateCache(labelName)
 
 
 # Counter Admin API

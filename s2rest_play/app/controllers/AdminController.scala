@@ -115,6 +115,31 @@ object AdminController extends Controller {
   }
 
   /**
+    * Invalidate and reload label cache
+    * @param labelName
+    * @return
+    */
+  def invalidateCache(labelName: String) = Action { request =>
+    val startTs = System.currentTimeMillis()
+
+    Label.findByName(labelName) match {
+      case None => notFound(s"${labelName} not found")
+      case Some(label) =>
+        Label.expire(label)
+
+        LabelMeta.findAllByLabelId(label.id.get) foreach { meta =>
+          LabelMeta.expire(meta)
+        }
+
+        LabelIndex.findByLabelIdAll(label.id.get) foreach { index =>
+          LabelIndex.expire(index)
+        }
+
+        ok(s"${System.currentTimeMillis() - startTs}")
+    }
+  }
+
+  /**
    * read
    */
 

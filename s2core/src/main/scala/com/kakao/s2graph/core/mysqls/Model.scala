@@ -86,7 +86,6 @@ trait Model[V] extends SQLSyntaxSupport[V] {
   val withCaches = listCache.withCache _
 
   val expireCache = optionCache.invalidate _
-
   val expireCaches = listCache.invalidate _
 
   def putsToCache(kvs: List[(String, V)]) = kvs.foreach {

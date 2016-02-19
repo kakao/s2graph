@@ -90,7 +90,7 @@ object LabelMeta extends Model[LabelMeta] with JSONParser {
 
     if (seq < maxValue) {
       sql"""insert into label_metas(label_id, name, seq, default_value, data_type)
-    select ${labelId}, ${name}, ${seq}, ${defaultValue}, ${dataType}""".updateAndReturnGeneratedKey.apply()
+      select ${labelId}, ${name}, ${seq}, ${defaultValue}, ${dataType}""".updateAndReturnGeneratedKey.apply()
     } else {
       throw MaxPropSizeReachedException("max property size reached")
     }
@@ -104,12 +104,10 @@ object LabelMeta extends Model[LabelMeta] with JSONParser {
     findByName(labelId, name) match {
       case Some(c) => c
       case None =>
-        insert(labelId, name, defaultValue, dataType)
-        val cacheKey = "labelId=" + labelId + ":name=" + name
-        val cacheKeys = "labelId=" + labelId
-        expireCache(cacheKey)
-        expireCaches(cacheKeys)
-        findByName(labelId, name, useCache = false).get
+        val id = insert(labelId, name, defaultValue, dataType)
+        val meta = findById(id.toInt)
+        expire(meta)
+        findById(id.toInt)
     }
   }
 
@@ -117,11 +115,8 @@ object LabelMeta extends Model[LabelMeta] with JSONParser {
     val labelMeta = findById(id)
     val (labelId, name) = (labelMeta.labelId, labelMeta.name)
     sql"""delete from label_metas where id = ${id}""".execute.apply()
-    val cacheKeys = List(s"id=$id", s"labelId=$labelId", s"labelId=$labelId:name=$name")
-    cacheKeys.foreach { key =>
-      expireCache(key)
-      expireCaches(key)
-    }
+
+    expire(labelMeta)
   }
 
   def findAll()(implicit session: DBSession = AutoSession) = {
@@ -144,6 +139,22 @@ object LabelMeta extends Model[LabelMeta] with JSONParser {
       cacheKey -> ls
     }.toList)
   }
+
+  def cacheKeys(meta: LabelMeta) = Seq(
+    s"id=${meta.id}",
+    s"labelId=${meta.labelId}",
+    s"labelId=${meta.labelId}:seq=${meta.seq}",
+    s"labelId=${meta.labelId}:name=${meta.name}"
+  )
+
+  def expire(meta: LabelMeta): Unit = {
+    cacheKeys(meta).foreach { key =>
+      expireCache(key)
+      expireCaches(key)
+    }
+  }
+
+
 }
 
 case class LabelMeta(id: Option[Int], labelId: Int, name: String, seq: Byte, defaultValue: String, dataType: String) extends JSONParser {
