@@ -126,12 +126,12 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
     writeBatch
   }
 
-  override def writeAsyncSimple(zkQuorum: String, elementRpcs: Seq[SKeyValue], withWait: Boolean): Future[Boolean] = {
-    if (elementRpcs.isEmpty) {
+  override def writeToStorage(cluster: String, kvs: Seq[SKeyValue], withWait: Boolean): Future[Boolean] = {
+    if (kvs.isEmpty) {
       Future.successful(true)
     } else {
       val ret = {
-        val writeBatch = buildWriteBatch(elementRpcs)
+        val writeBatch = buildWriteBatch(kvs)
         try {
           db.write(writeOptions, writeBatch)
           true
@@ -147,11 +147,6 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
     }
   }
 
-  /**
-    * originally storage should implement this since this will be called by writeAsyncSimple
-    */
-  override def writeToStorage(rpc: SKeyValue, withWait: Boolean): Future[Boolean] =
-    Future.successful(true)
 
   override def createTable(zkAddr: String,
                            tableName: String,
