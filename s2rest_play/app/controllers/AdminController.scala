@@ -14,6 +14,7 @@ import scala.util.{Failure, Success, Try}
 object AdminController extends Controller {
 
   import ApplicationController._
+  private val s2graph: Graph = com.kakao.s2graph.rest.Global.s2graph
   private val management: Management = com.kakao.s2graph.rest.Global.storageManagement
   private val requestParser: RequestParser = com.kakao.s2graph.rest.Global.s2parser
 
@@ -120,23 +121,7 @@ object AdminController extends Controller {
     * @return
     */
   def invalidateCache(labelName: String) = Action { request =>
-    val startTs = System.currentTimeMillis()
-
-    Label.findByName(labelName) match {
-      case None => notFound(s"${labelName} not found")
-      case Some(label) =>
-        Label.expire(label)
-
-        LabelMeta.findAllByLabelId(label.id.get) foreach { meta =>
-          LabelMeta.expire(meta)
-        }
-
-        LabelIndex.findByLabelIdAll(label.id.get) foreach { index =>
-          LabelIndex.expire(index)
-        }
-
-        ok(s"${System.currentTimeMillis() - startTs}")
-    }
+    ok(s2graph.invalidateCache(labelName))
   }
 
   /**

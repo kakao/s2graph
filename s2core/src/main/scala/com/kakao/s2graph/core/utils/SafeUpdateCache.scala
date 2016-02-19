@@ -27,7 +27,10 @@ class SafeUpdateCache[T](prefix: String, maxSize: Int, ttl: Int)(implicit execut
 
   def put(key: String, value: T) = cache.put(key.toCacheKey, (value, toTs, new AtomicBoolean(false)))
 
-  def invalidate(key: String) = cache.invalidate(key.toCacheKey)
+  def invalidate(key: String) = {
+    logger.info(s"Expire Cache: ${key} with ${prefix}")
+    cache.invalidate(key.toCacheKey)
+  }
 
   def withCache(key: String)(op: => T): T = {
     val cacheKey = key.toCacheKey

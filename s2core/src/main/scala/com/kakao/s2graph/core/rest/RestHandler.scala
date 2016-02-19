@@ -9,11 +9,13 @@ import com.kakao.s2graph.core.utils.logger
 import play.api.libs.json._
 
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.Try
+import scala.util.{Success, Failure, Try}
 
 
 object RestHandler {
+
   case class HandlerResult(body: Future[JsValue], headers: (String, String)*)
+
 }
 
 /**
@@ -42,6 +44,9 @@ class RestHandler(graph: Graph)(implicit ec: ExecutionContext) {
         case "/graphs/getEdgesGroupedExcluded" => HandlerResult(getEdgesExcludedAsync(jsQuery)(PostProcess.summarizeWithListExclude))
         case "/graphs/getEdgesGroupedExcludedFormatted" => HandlerResult(getEdgesExcludedAsync(jsQuery)(PostProcess.summarizeWithListExcludeFormatted))
         case "/graphs/getVertices" => HandlerResult(getVertices(jsQuery))
+        case uri if uri.startsWith("/graphs/invalidateCache") =>
+          val Array(labelName) = uri.split("/").takeRight(1)
+          HandlerResult(Future.successful(Json.obj( "message" ->graph.invalidateCache(labelName))))
         case uri if uri.startsWith("/graphs/experiment") =>
           val Array(accessToken, experimentName, uuid) = uri.split("/").takeRight(3)
           experiment(jsQuery, accessToken, experimentName, uuid, impKeyOpt)
@@ -130,7 +135,7 @@ class RestHandler(graph: Graph)(implicit ec: ExecutionContext) {
   }
 
   def getEdgesAsync(jsonQuery: JsValue)
-                           (post: (Seq[QueryRequestWithResult], Seq[QueryRequestWithResult]) => JsValue): Future[JsValue] = {
+                   (post: (Seq[QueryRequestWithResult], Seq[QueryRequestWithResult]) => JsValue): Future[JsValue] = {
 
     val fetch = eachQuery(post) _
     jsonQuery match {
@@ -173,11 +178,11 @@ class RestHandler(graph: Graph)(implicit ec: ExecutionContext) {
               resultWithExcludeLs <- Future.sequence(futures)
             } yield {
               PostProcess.toSimpleVertexArrJsonMulti(multiQuery.queryOption, resultWithExcludeLs, filterOut)
-//              val initial = (ListBuffer.empty[QueryRequestWithResult], ListBuffer.empty[QueryRequestWithResult])
-//              val (results, excludes) = resultWithExcludeLs.foldLeft(initial) { case ((prevResults, prevExcludes), (results, excludes)) =>
-//                (prevResults ++= results, prevExcludes ++= excludes)
-//              }
-//              PostProcess.toSimpleVertexArrJson(multiQuery.queryOption, results, excludes ++ filterOut)
+              //              val initial = (ListBuffer.empty[QueryRequestWithResult], ListBuffer.empty[QueryRequestWithResult])
+              //              val (results, excludes) = resultWithExcludeLs.foldLeft(initial) { case ((prevResults, prevExcludes), (results, excludes)) =>
+              //                (prevResults ++= results, prevExcludes ++= excludes)
+              //              }
+              //              PostProcess.toSimpleVertexArrJson(multiQuery.queryOption, results, excludes ++ filterOut)
             }
         }
       case _ => throw BadQueryException("Cannot support")

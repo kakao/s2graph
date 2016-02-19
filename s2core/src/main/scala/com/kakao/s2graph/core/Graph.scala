@@ -16,7 +16,7 @@ import scala.collection.JavaConversions._
 import scala.collection._
 import scala.collection.mutable.ListBuffer
 import scala.concurrent._
-import scala.util.Try
+import scala.util.{Success, Failure, Try}
 
 object Graph {
   val DefaultScore = 1.0
@@ -370,6 +370,26 @@ class Graph(_config: Config)(implicit val ec: ExecutionContext) {
   def mutateVertices(vertices: Seq[Vertex], withWait: Boolean = false): Future[Seq[Boolean]] = storage.mutateVertices(vertices, withWait)
 
   def incrementCounts(edges: Seq[Edge], withWait: Boolean): Future[Seq[(Boolean, Long)]] = storage.incrementCounts(edges, withWait)
+
+  def invalidateCache(labelName: String): String = {
+    val startTs = System.currentTimeMillis()
+
+    Label.findByName(labelName) match {
+      case None => "Label not found"
+      case Some(label) =>
+        Label.expire(label)
+
+        LabelMeta.findAllByLabelId(label.id.get) foreach { meta =>
+          LabelMeta.expire(meta)
+        }
+
+        LabelIndex.findByLabelIdAll(label.id.get) foreach { index =>
+          LabelIndex.expire(index)
+        }
+
+        s"Cache expired: ${labelName} ${System.currentTimeMillis() - startTs}"
+    }
+  }
 
   def shutdown(): Unit = {
     storage.flush()

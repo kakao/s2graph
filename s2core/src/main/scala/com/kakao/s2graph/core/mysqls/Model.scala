@@ -11,7 +11,7 @@ import scala.language.{higherKinds, implicitConversions}
 import scala.util.{Failure, Try}
 
 object Model {
-  var maxSize = 10000
+  var maxSize = 100000
   var ttl = 60
   val numOfThread = Runtime.getRuntime.availableProcessors()
   val threadPool = Executors.newFixedThreadPool(numOfThread)
@@ -86,6 +86,7 @@ trait Model[V] extends SQLSyntaxSupport[V] {
   val withCaches = listCache.withCache _
 
   val expireCache = optionCache.invalidate _
+
   val expireCaches = listCache.invalidate _
 
   def putsToCache(kvs: List[(String, V)]) = kvs.foreach {
