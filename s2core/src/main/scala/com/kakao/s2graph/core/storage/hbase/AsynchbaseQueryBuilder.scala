@@ -146,8 +146,8 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
         edgeWithScore.copy(score = edgeWithScore.score / sum)
       }
     }
-    def fetchInner(request: GetRequest) = {
-      storage.client.get(request) withCallback { kvs =>
+    def fetchInner(queryParam: QueryParam, request: GetRequest) = {
+      storage.client(queryParam.label.hbaseZkAddr).get(request) withCallback { kvs =>
         val edgeWithScores = storage.toEdges(kvs.toSeq, queryRequest.queryParam, prevStepScore, isInnerCall, parentEdges)
 
         val normalized =
@@ -164,7 +164,8 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
         QueryRequestWithResult(queryRequest, QueryResult(isFailure = true))
       }
     }
-    def checkAndExpire(request: GetRequest,
+    def checkAndExpire(queryParam: QueryParam,
+                       request: GetRequest,
                        cacheKey: Long,
                        cacheTTL: Long,
                        cachedAt: Long,
@@ -177,7 +178,7 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
           case null =>
             // only one thread succeed to come here concurrently
             // initiate fetch to storage then add callback on complete to finish promise.
-            fetchInner(request) withCallback { queryRequestWithResult =>
+            fetchInner(queryParam, request) withCallback { queryRequestWithResult =>
               newPromise.callback(queryRequestWithResult)
               queryRequestWithResult
             }
@@ -194,7 +195,7 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
     val cacheTTL = queryParam.cacheTTLInMillis
     val request = buildRequest(queryRequest)
     val defer =
-      if (cacheTTL <= 0) fetchInner(request)
+      if (cacheTTL <= 0) fetchInner(queryParam, request)
       else {
         val cacheKeyBytes = Bytes.add(queryRequest.query.cacheKeyBytes, toCacheKeyBytes(request))
         val cacheKey = queryParam.toCacheKey(cacheKeyBytes)
@@ -207,16 +208,16 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
             val now = System.currentTimeMillis()
             val (cachedAt, defer) = futureCache.asMap().putIfAbsent(cacheKey, (now, promise)) match {
               case null =>
-                fetchInner(request) withCallback { queryRequestWithResult =>
+                fetchInner(queryParam, request) withCallback { queryRequestWithResult =>
                   promise.callback(queryRequestWithResult)
                   queryRequestWithResult
                 }
                 (now, promise)
               case oldVal => oldVal
             }
-            checkAndExpire(request, cacheKey, cacheTTL, cachedAt, defer)
+            checkAndExpire(queryParam, request, cacheKey, cacheTTL, cachedAt, defer)
           case (cachedAt, defer) =>
-            checkAndExpire(request, cacheKey, cacheTTL, cachedAt, defer)
+            checkAndExpire(queryParam, request, cacheKey, cacheTTL, cachedAt, defer)
         }
       }
 
