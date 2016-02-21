@@ -160,22 +160,18 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
   override def fetchSnapshotEdgeKeyValues(queryParamWithStartStopKeyRange: AnyRef): Future[Seq[SKeyValue]] = {
     queryParamWithStartStopKeyRange match {
       case (queryParam: QueryParam, (startKey: Array[Byte], stopKey: Array[Byte])) =>
-        def op = {
-          try {
-            val v = db.get(readOptions, startKey)
-            val kvs =
-              if (v == null) Seq.empty
-              else Seq(SKeyValue(table, startKey, edgeCf, qualifier, v, System.currentTimeMillis()))
+        try {
+          val v = db.get(readOptions, startKey)
+          val kvs =
+            if (v == null) Seq.empty
+            else Seq(SKeyValue(table, startKey, edgeCf, qualifier, v, System.currentTimeMillis()))
 
-            Future.successful(kvs)
-          } catch {
-            case e: RocksDBException =>
-              logger.error("Fetch snapshotEdge failed", e)
-              Future.failed(new RuntimeException("Fetch snapshotEdge failed"))
-          }
+          Future.successful(kvs)
+        } catch {
+          case e: RocksDBException =>
+            logger.error("Fetch snapshotEdge failed", e)
+            Future.failed(new RuntimeException("Fetch snapshotEdge failed"))
         }
-
-        withLock(startKey)(op)
 
       case _ => Future.successful(Seq.empty)
     }
