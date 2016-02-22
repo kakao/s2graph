@@ -140,14 +140,12 @@ class RequestParser(config: Config) extends JSONParser {
     ret.map(_.toMap).getOrElse(Map.empty[Byte, InnerValLike])
   }
 
-
   val parserCache = CacheBuilder.newBuilder()
     .expireAfterAccess(10000, TimeUnit.MILLISECONDS)
     .expireAfterWrite(10000, TimeUnit.MILLISECONDS)
     .maximumSize(10000)
     .initialCapacity(1000)
     .build[String, Try[Where]]
-
 
   def extractWhere(label: Label, whereClauseOpt: Option[String]): Try[Where] = {
     whereClauseOpt match {

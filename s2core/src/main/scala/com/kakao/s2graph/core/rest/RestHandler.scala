@@ -1,7 +1,9 @@
 package com.kakao.s2graph.core.rest
 
 import java.net.URL
+import java.util.concurrent.{Callable, TimeUnit}
 
+import com.google.common.cache.CacheBuilder
 import com.kakao.s2graph.core.GraphExceptions.BadQueryException
 import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.mysqls.{Bucket, Experiment, Service}
@@ -25,13 +27,21 @@ class RestHandler(graph: Graph)(implicit ec: ExecutionContext) {
   import RestHandler._
   val requestParser = new RequestParser(graph.config)
 
+  val requestCache = CacheBuilder.newBuilder()
+    .expireAfterAccess(1000, TimeUnit.MILLISECONDS)
+    .expireAfterWrite(1000, TimeUnit.MILLISECONDS)
+    .maximumSize(10000)
+    .initialCapacity(1000)
+    .build[String, JsValue]
+
   /**
     * Public APIS
     */
   def doPost(uri: String, body: String, impKeyOpt: => Option[String] = None): HandlerResult = {
     try {
-      val replacedBody = TemplateHelper.replaceVariable(System.currentTimeMillis(), body)
-      val jsQuery = Json.parse(replacedBody)
+      val jsQuery = requestCache.get(body, new Callable[JsValue] {
+        override def call() = Json.parse(TemplateHelper.replaceVariable(System.currentTimeMillis(), body))
+      })
 
       uri match {
         case "/graphs/getEdges" => HandlerResult(getEdgesAsync(jsQuery)(PostProcess.toSimpleVertexArrJson))
