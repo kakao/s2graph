@@ -79,20 +79,24 @@ class AsynchbaseStorage(override val config: Config, vertexCache: Cache[Integer,
   val FailProb = config.getDouble("hbase.fail.prob")
   val LockExpireDuration = config.getInt("lock.expire.time")
 
+  private def toClientKey(zkQuorum: String, flushInterval: Int): String = s"${zkQuorum}_${flushInterval}"
+
+  private def newClient(zkQuorum: String, flushInterval: Int): HBaseClient =
+    AsynchbaseStorage.makeClient(config,
+      "hbase.zookeeper.quorum" -> zkQuorum,
+      "hbase.rpcs.buffered_flush_interval" -> flushInterval.toString)
+
   private def initClients(flushInterval: Int): Map[String, HBaseClient] = {
     Service.findAllConn().distinct.map { zkQuorum =>
-      zkQuorum -> AsynchbaseStorage.makeClient(config,
-        "hbase.zookeeper.quorum" -> zkQuorum,"hbase.rpcs.buffered_flush_interval" -> flushInterval.toString)
+      toClientKey(zkQuorum, flushInterval) -> newClient(zkQuorum, flushInterval)
     } toMap
   }
-  val clientsWithInterval = initClients(clientFlushInterval)
-  val clientsWithZeroInterval = initClients(0.toShort)
+
+  val clients = scala.collection.mutable.HashMap.empty ++ initClients(clientFlushInterval) ++ initClients(0)
 
   def client(zkQuorum: String, withWait: Boolean = false): HBaseClient = {
-    val pool = if (withWait) clientsWithZeroInterval else clientsWithInterval
-    pool.get(zkQuorum).getOrElse(
-      throw new RuntimeException(s"HBaseClient for ${zkQuorum}, ${withWait} is not initialized.")
-    )
+    val interval = if (withWait) 0 else clientFlushInterval
+    clients.getOrElseUpdate(toClientKey(zkQuorum, interval), newClient(zkQuorum, interval))
   }
 
   /**
@@ -809,7 +813,7 @@ class AsynchbaseStorage(override val config: Config, vertexCache: Cache[Integer,
     retryFuture
   }
 
-  def flush(): Unit = (clientsWithInterval.toSeq ++ clientsWithZeroInterval.toSeq).foreach { case (zkQuorum, client) =>
+  def flush(): Unit = clients.foreach { case (zkQuorum, client) =>
     val timeout = Duration((clientFlushInterval + 10) * 20, duration.MILLISECONDS)
     Await.result(client.flush().toFuture, timeout)
   }
