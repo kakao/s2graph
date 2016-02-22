@@ -28,8 +28,8 @@ class RestHandler(graph: Graph)(implicit ec: ExecutionContext) {
   val requestParser = new RequestParser(graph.config)
 
   val requestCache = CacheBuilder.newBuilder()
-    .expireAfterAccess(1000, TimeUnit.MILLISECONDS)
-    .expireAfterWrite(1000, TimeUnit.MILLISECONDS)
+    .expireAfterAccess(10000, TimeUnit.MILLISECONDS)
+    .expireAfterWrite(10000, TimeUnit.MILLISECONDS)
     .maximumSize(10000)
     .initialCapacity(1000)
     .build[String, JsValue]
