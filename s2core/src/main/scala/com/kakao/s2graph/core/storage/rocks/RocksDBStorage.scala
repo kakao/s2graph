@@ -3,21 +3,17 @@ package com.kakao.s2graph.core.storage.rocks
 import java.nio.{ByteOrder, ByteBuffer}
 import java.util.Base64
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.locks.{ReentrantLock, ReadWriteLock}
+import java.util.concurrent.locks.ReentrantLock
 
-import com.google.common.cache.{CacheLoader, CacheBuilder, Cache}
-import com.kakao.s2graph.core.mysqls.Label
+import com.google.common.cache.{CacheBuilder, CacheLoader}
 import com.kakao.s2graph.core._
-import com.kakao.s2graph.core.storage.hbase._
-import com.kakao.s2graph.core.storage.{SKeyValue, StorageDeserializable, StorageSerializable, Storage}
+import com.kakao.s2graph.core.storage._
 import com.kakao.s2graph.core.types.VertexId
 import com.kakao.s2graph.core.utils.logger
 import com.typesafe.config.Config
 import org.apache.hadoop.hbase.util.Bytes
 import org.rocksdb._
-
-import scala.collection.{Seq, mutable}
+import scala.collection.Seq
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.{Future, ExecutionContext}
 
@@ -43,7 +39,7 @@ class RocksDBStorage(override val config: Config)(implicit ec: ExecutionContext)
   extends Storage[QueryRequestWithResult](config) {
 
   import RocksDBHelper._
-  import HSerializable._
+  import Serializable._
 
 
   override val indexEdgeDeserializer = new IndexEdgeDeserializable(bytesToLong)
