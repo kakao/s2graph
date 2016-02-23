@@ -1,15 +1,11 @@
 package com.kakao.s2graph.core.storage.hbase
 
-import java.util
-import java.util.Base64
-import java.util.concurrent.TimeUnit
 
-import com.google.common.cache.{CacheBuilder}
 import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.mysqls._
 import com.kakao.s2graph.core.storage._
 import com.kakao.s2graph.core.types._
-import com.kakao.s2graph.core.utils.{Extensions, logger}
+import com.kakao.s2graph.core.utils.{FutureCache, DeferCache, Extensions, logger}
 import com.stumbleupon.async.Deferred
 import com.typesafe.config.{ConfigFactory, Config}
 import org.apache.hadoop.hbase.client.{ConnectionFactory, Durability}
@@ -23,13 +19,14 @@ import scala.collection.JavaConversions._
 import scala.collection.{Map, Seq}
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future, duration}
-import scala.util.Random
 import scala.util.hashing.MurmurHash3
+import java.util
+import java.util.Base64
 
 
 object AsynchbaseStorage {
-  val vertexCf = HSerializable.vertexCf
-  val edgeCf = HSerializable.edgeCf
+  val vertexCf = Serializable.vertexCf
+  val edgeCf = Serializable.edgeCf
   val emptyKVs = new util.ArrayList[KeyValue]()
 
 
@@ -70,20 +67,10 @@ class AsynchbaseStorage(override val config: Config)(implicit ec: ExecutionConte
   private def client(withWait: Boolean): HBaseClient = if (withWait) clientWithFlush else client
 
   /** Future Cache to squash request */
-  private val futureCache = CacheBuilder.newBuilder()
-  .initialCapacity(maxSize)
-  .concurrencyLevel(Runtime.getRuntime.availableProcessors())
-  .expireAfterWrite(expireAfterWrite, TimeUnit.MILLISECONDS)
-  .expireAfterAccess(expireAfterAccess, TimeUnit.MILLISECONDS)
-  .maximumSize(maxSize).build[java.lang.Long, (Long, Deferred[QueryRequestWithResult])]()
+  private val futureCache = new DeferCache[QueryResult](config)(ec)
 
   /** Simple Vertex Cache */
-  private val vertexCache = CacheBuilder.newBuilder()
-  .initialCapacity(maxSize)
-  .concurrencyLevel(Runtime.getRuntime.availableProcessors())
-  .expireAfterWrite(expireAfterWrite, TimeUnit.MILLISECONDS)
-  .expireAfterAccess(expireAfterAccess, TimeUnit.MILLISECONDS)
-  .maximumSize(maxSize).build[java.lang.Integer, Option[Vertex]]()
+  private val vertexCache = new FutureCache[Seq[SKeyValue]](config)(ec)
 
 
   /**
@@ -157,7 +144,7 @@ class AsynchbaseStorage(override val config: Config)(implicit ec: ExecutionConte
    * @return Scanner or GetRequest with proper setup with StartKey, EndKey, RangeFilter.
    */
   override def buildRequest(queryRequest: QueryRequest): AnyRef = {
-    import HSerializable._
+    import Serializable._
     val queryParam = queryRequest.queryParam
     val label = queryParam.label
     val edge = toRequestEdge(queryRequest)
@@ -258,42 +245,20 @@ class AsynchbaseStorage(override val config: Config)(implicit ec: ExecutionConte
                      prevStepScore: Double,
                      isInnerCall: Boolean,
                      parentEdges: Seq[EdgeWithScore]): Deferred[QueryRequestWithResult] = {
-    def fetchInner(hbaseRpc: AnyRef) = {
+
+    def fetchInner(hbaseRpc: AnyRef): Deferred[QueryResult] = {
       fetchKeyValuesInner(hbaseRpc).withCallback { kvs =>
         val edgeWithScores = toEdges(kvs, queryRequest.queryParam, prevStepScore, isInnerCall, parentEdges)
         val resultEdgesWithScores = if (queryRequest.queryParam.sample >= 0) {
           sample(queryRequest, edgeWithScores, queryRequest.queryParam.sample)
         } else edgeWithScores
-        QueryRequestWithResult(queryRequest, QueryResult(resultEdgesWithScores, tailCursor = kvs.lastOption.map(_.key).getOrElse(Array.empty)))
+        QueryResult(resultEdgesWithScores, tailCursor = kvs.lastOption.map(_.key).getOrElse(Array.empty[Byte]))
+//        QueryRequestWithResult(queryRequest, QueryResult(resultEdgesWithScores, tailCursor = kvs.lastOption.map(_.key).getOrElse(Array.empty)))
 
       } recoverWith { ex =>
         logger.error(s"fetchInner failed. fallback return. $hbaseRpc}", ex)
-        QueryRequestWithResult(queryRequest, QueryResult(isFailure = true))
-      }
-    }
-    def checkAndExpire(hbaseRpc: AnyRef,
-                       cacheKey: Long,
-                       cacheTTL: Long,
-                       cachedAt: Long,
-                       defer: Deferred[QueryRequestWithResult]): Deferred[QueryRequestWithResult] = {
-      if (System.currentTimeMillis() >= cachedAt + cacheTTL) {
-        // future is too old. so need to expire and fetch new data from storage.
-        futureCache.asMap().remove(cacheKey)
-        val newPromise = new Deferred[QueryRequestWithResult]()
-        futureCache.asMap().putIfAbsent(cacheKey, (System.currentTimeMillis(), newPromise)) match {
-          case null =>
-            // only one thread succeed to come here concurrently
-            // initiate fetch to storage then add callback on complete to finish promise.
-            fetchInner(hbaseRpc) withCallback { queryRequestWithResult =>
-              newPromise.callback(queryRequestWithResult)
-              queryRequestWithResult
-            }
-            newPromise
-          case (cachedAt, oldDefer) => oldDefer
-        }
-      } else {
-        // future is not to old so reuse it.
-        defer
+        QueryResult(isFailure = true)
+//        QueryRequestWithResult(queryRequest, QueryResult(isFailure = true))
       }
     }
 
@@ -301,31 +266,14 @@ class AsynchbaseStorage(override val config: Config)(implicit ec: ExecutionConte
     val cacheTTL = queryParam.cacheTTLInMillis
     val request = buildRequest(queryRequest)
 
-    if (cacheTTL <= 0) fetchInner(request)
-    else {
-      val cacheKeyBytes = Bytes.add(queryRequest.query.cacheKeyBytes, toCacheKeyBytes(request))
-      val cacheKey = queryParam.toCacheKey(cacheKeyBytes)
-
-      val cacheVal = futureCache.getIfPresent(cacheKey)
-      cacheVal match {
-        case null =>
-          // here there is no promise set up for this cacheKey so we need to set promise on future cache.
-          val promise = new Deferred[QueryRequestWithResult]()
-          val now = System.currentTimeMillis()
-          val (cachedAt, defer) = futureCache.asMap().putIfAbsent(cacheKey, (now, promise)) match {
-            case null =>
-              fetchInner(request) withCallback { queryRequestWithResult =>
-                promise.callback(queryRequestWithResult)
-                queryRequestWithResult
-              }
-              (now, promise)
-            case oldVal => oldVal
-          }
-          checkAndExpire(request, cacheKey, cacheTTL, cachedAt, defer)
-        case (cachedAt, defer) =>
-          checkAndExpire(request, cacheKey, cacheTTL, cachedAt, defer)
-      }
+    val defer =
+      if (cacheTTL <= 0) fetchInner(request)
+      else {
+        val cacheKeyBytes = Bytes.add(queryRequest.query.cacheKeyBytes, toCacheKeyBytes(request))
+        val cacheKey = queryParam.toCacheKey(cacheKeyBytes)
+        futureCache.getOrElseUpdate(cacheKey, cacheTTL)(fetchInner(request))
     }
+    defer withCallback { queryResult => QueryRequestWithResult(queryRequest, queryResult)}
   }
 
 
@@ -436,21 +384,15 @@ class AsynchbaseStorage(override val config: Config)(implicit ec: ExecutionConte
 
     val futures = vertices.map { vertex =>
       val kvs = vertexSerializer(vertex).toKeyValues
-      val get = new GetRequest(vertex.hbaseTableName.getBytes, kvs.head.row, HSerializable.vertexCf)
+      val get = new GetRequest(vertex.hbaseTableName.getBytes, kvs.head.row, Serializable.vertexCf)
       //      get.setTimeout(this.singleGetTimeout.toShort)
       get.setFailfast(true)
       get.maxVersions(1)
 
       val cacheKey = MurmurHash3.stringHash(get.toString)
-      val cacheVal = vertexCache.getIfPresent(cacheKey)
-      if (cacheVal == null)
-        fetchVertexKeyValues(get).map { kvs =>
-          fromResult(QueryParam.Empty, kvs, vertex.serviceColumn.schemaVersion)
-        } recoverWith { case ex: Throwable =>
-          Future.successful(None)
-        }
-
-      else Future.successful(cacheVal)
+      vertexCache.getOrElseUpdate(cacheKey, cacheTTL = 10000)(fetchVertexKeyValues(get)).map { kvs =>
+        fromResult(QueryParam.Empty, kvs, vertex.serviceColumn.schemaVersion)
+      }
     }
 
     Future.sequence(futures).map { result => result.toList.flatten }
