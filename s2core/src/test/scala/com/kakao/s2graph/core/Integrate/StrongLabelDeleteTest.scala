@@ -69,7 +69,8 @@ class StrongLabelDeleteTest extends IntegrateCommon {
     val ret = for {
       i <- 0 until testNum
     } yield {
-      val src = System.currentTimeMillis()
+        val src = (i + 1) * 10000
+//      val src = System.currentTimeMillis()
 
       val (ret, last) = testInner(i, src)
       ret should be(true)
@@ -199,7 +200,7 @@ class StrongLabelDeleteTest extends IntegrateCommon {
     val labelName = testLabelName2
     val maxTgtId = 10
     val batchSize = 10
-    val testNum = 3
+    val testNum = 100
     val numOfBatch = 10
 
     def testInner(startTs: Long, src: Long) = {
@@ -217,7 +218,7 @@ class StrongLabelDeleteTest extends IntegrateCommon {
         val op = if (Random.nextDouble() < 0.5) "delete" else "update"
 
         lastOps(tgt) = op
-        Seq(currentTs, op, "e", src, src + tgt, labelName, "{}").mkString("\t")
+        Seq(currentTs, op, "e", src, tgt, labelName, "{}").mkString("\t")
       }
 
       allRequests.foreach(println(_))

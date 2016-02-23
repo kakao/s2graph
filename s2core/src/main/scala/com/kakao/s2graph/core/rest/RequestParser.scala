@@ -62,12 +62,19 @@ class RequestParser(config: Config) extends JSONParser {
 
   val hardLimit = 100000
   val defaultLimit = 100
+  val maxLimit = Int.MaxValue - 1
   val DefaultRpcTimeout = config.getInt("hbase.rpc.timeout")
   val DefaultMaxAttempt = config.getInt("hbase.client.retries.number")
   val DefaultCluster = config.getString("hbase.zookeeper.quorum")
   val DefaultCompressionAlgorithm = config.getString("hbase.table.compression.algorithm")
   val DefaultPhase = config.getString("phase")
 
+  val parserCache = CacheBuilder.newBuilder()
+    .expireAfterAccess(10000, TimeUnit.MILLISECONDS)
+    .expireAfterWrite(10000, TimeUnit.MILLISECONDS)
+    .maximumSize(10000)
+    .initialCapacity(1000)
+    .build[String, Try[Where]]
 
   private def extractScoring(labelId: Int, value: JsValue) = {
     val ret = for {
@@ -147,13 +154,6 @@ class RequestParser(config: Config) extends JSONParser {
   }
 
 
-  val parserCache = CacheBuilder.newBuilder()
-    .expireAfterAccess(10000, TimeUnit.MILLISECONDS)
-    .expireAfterWrite(10000, TimeUnit.MILLISECONDS)
-    .maximumSize(10000)
-    .initialCapacity(1000)
-    .build[String, Try[Where]]
-
 
   def extractWhere(label: Label, whereClauseOpt: Option[String]): Try[Where] = {
     whereClauseOpt match {
@@ -196,7 +196,8 @@ class RequestParser(config: Config) extends JSONParser {
       toQuery(queryJson, isEdgeQuery)
     }
     val weights = (jsValue \ "weights").asOpt[Seq[Double]].getOrElse(queries.map(_ => 1.0))
-    MultiQuery(queries = queries, weights = weights, queryOption = toQueryOption(jsValue))
+    MultiQuery(queries = queries, weights = weights,
+      queryOption = toQueryOption(jsValue), jsonQuery = jsValue)
   }
 
   def toQueryOption(jsValue: JsValue): QueryOption = {
@@ -333,7 +334,7 @@ class RequestParser(config: Config) extends JSONParser {
 
         }
 
-      val ret = Query(vertices, querySteps, queryOption)
+      val ret = Query(vertices, querySteps, queryOption, jsValue)
       //      logger.debug(ret.toString)
       ret
     } catch {
@@ -355,7 +356,7 @@ class RequestParser(config: Config) extends JSONParser {
       val limit = {
         parse[Option[Int]](labelGroup, "limit") match {
           case None => defaultLimit
-          case Some(l) if l < 0 => Int.MaxValue
+          case Some(l) if l < 0 => maxLimit
           case Some(l) if l >= 0 =>
             val default = hardLimit
             Math.min(l, default)
@@ -402,7 +403,7 @@ class RequestParser(config: Config) extends JSONParser {
       val scorePropagateShrinkage = (labelGroup \ "scorePropagateShrinkage").asOpt[Long].getOrElse(500l)
       val sample = (labelGroup \ "sample").asOpt[Int].getOrElse(-1)
       val shouldNormalize = (labelGroup \ "normalize").asOpt[Boolean].getOrElse(false)
-
+      val cursorOpt = (labelGroup \ "cursor").asOpt[String]
       // FIXME: Order of command matter
       QueryParam(labelWithDir)
         .sample(sample)
@@ -427,6 +428,7 @@ class RequestParser(config: Config) extends JSONParser {
         .scorePropagateOp(scorePropagateOp)
         .scorePropagateShrinkage(scorePropagateShrinkage)
         .shouldNormalize(shouldNormalize)
+        .cursorOpt(cursorOpt)
     }
   }
 

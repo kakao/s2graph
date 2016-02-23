@@ -9,11 +9,11 @@ import com.kakao.s2graph.core.utils.logger
 import play.api.libs.json._
 
 import scala.concurrent.{ExecutionContext, Future}
+import scala.util.Try
+
 
 object RestHandler {
-
   case class HandlerResult(body: Future[JsValue], headers: (String, String)*)
-
 }
 
 /**
