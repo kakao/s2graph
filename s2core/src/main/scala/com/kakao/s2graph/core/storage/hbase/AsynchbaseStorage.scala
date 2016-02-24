@@ -6,7 +6,7 @@ import com.google.common.cache.Cache
 import com.kakao.s2graph.core.ExceptionHandler.{KafkaMessage, Key, Val}
 import com.kakao.s2graph.core.GraphExceptions.FetchTimeoutException
 import com.kakao.s2graph.core._
-import com.kakao.s2graph.core.mysqls.{Label, LabelMeta}
+import com.kakao.s2graph.core.mysqls.{Service, Label, LabelMeta}
 import com.kakao.s2graph.core.storage.Storage
 import com.kakao.s2graph.core.types._
 import com.kakao.s2graph.core.utils.{Extensions, logger}
@@ -61,7 +61,7 @@ class AsynchbaseStorage(override val config: Config, vertexCache: Cache[Integer,
 
   import Extensions.DeferOps
 
-  val client = AsynchbaseStorage.makeClient(config)
+//  val client = AsynchbaseStorage.makeClient(config)
   val queryBuilder = new AsynchbaseQueryBuilder(this)(ec)
   val mutationBuilder = new AsynchbaseMutationBuilder(this)(ec)
 
@@ -70,7 +70,7 @@ class AsynchbaseStorage(override val config: Config, vertexCache: Cache[Integer,
   val vertexCacheOpt = Option(vertexCache)
 
   private val clientWithFlush = AsynchbaseStorage.makeClient(config, "hbase.rpcs.buffered_flush_interval" -> "0")
-  private val clients = Seq(client, clientWithFlush)
+//  private val clients = Seq(client, clientWithFlush)
 
   private val clientFlushInterval = config.getInt("hbase.rpcs.buffered_flush_interval").toString().toShort
   val MaxRetryNum = config.getInt("max.retry.number")
@@ -78,6 +78,26 @@ class AsynchbaseStorage(override val config: Config, vertexCache: Cache[Integer,
   val DeleteAllFetchSize = config.getInt("delete.all.fetch.size")
   val FailProb = config.getDouble("hbase.fail.prob")
   val LockExpireDuration = config.getInt("lock.expire.time")
+
+  private def toClientKey(zkQuorum: String, flushInterval: Int): String = s"${zkQuorum}_${flushInterval}"
+
+  private def newClient(zkQuorum: String, flushInterval: Int): HBaseClient =
+    AsynchbaseStorage.makeClient(config,
+      "hbase.zookeeper.quorum" -> zkQuorum,
+      "hbase.rpcs.buffered_flush_interval" -> flushInterval.toString)
+
+  private def initClients(flushInterval: Int): Map[String, HBaseClient] = {
+    Service.findAllConn().distinct.map { zkQuorum =>
+      toClientKey(zkQuorum, flushInterval) -> newClient(zkQuorum, flushInterval)
+    } toMap
+  }
+
+  val clients = scala.collection.mutable.HashMap.empty ++ initClients(clientFlushInterval) ++ initClients(0)
+
+  def client(zkQuorum: String, withWait: Boolean = false): HBaseClient = {
+    val interval = if (withWait) 0 else clientFlushInterval
+    clients.getOrElseUpdate(toClientKey(zkQuorum, interval), newClient(zkQuorum, interval))
+  }
 
   /**
     * Serializer/Deserializer
@@ -124,7 +144,7 @@ class AsynchbaseStorage(override val config: Config, vertexCache: Cache[Integer,
       val cacheKey = MurmurHash3.stringHash(get.toString)
       val cacheVal = vertexCache.getIfPresent(cacheKey)
       if (cacheVal == null)
-        client.get(get).toFutureWith(emptyKVs).map { kvs =>
+        client(vertex.hbaseZkAddr).get(get).toFutureWith(emptyKVs).map { kvs =>
           fromResult(QueryParam.Empty, kvs, vertex.serviceColumn.schemaVersion)
         }
 
@@ -211,7 +231,7 @@ class AsynchbaseStorage(override val config: Config, vertexCache: Cache[Integer,
   }
 
   def incrementCounts(edges: Seq[Edge], withWait: Boolean): Future[Seq[(Boolean, Long)]] = {
-    val _client = if (withWait) clientWithFlush else client
+//    val _client = if (withWait) clientWithFlush else client
     val defers: Seq[Deferred[(Boolean, Long)]] = for {
       edge <- edges
     } yield {
@@ -220,6 +240,7 @@ class AsynchbaseStorage(override val config: Config, vertexCache: Cache[Integer,
       val countVal = countWithTs.innerVal.toString().toLong
       val incr = mutationBuilder.buildIncrementsCountAsync(edgeWithIndex, countVal).head
       val request = incr.asInstanceOf[AtomicIncrementRequest]
+      val _client = client(edge.label.hbaseTableName, withWait)
       val defer = _client.bufferAtomicIncrement(request) withCallback { resultCount: java.lang.Long =>
         (true, resultCount.longValue())
       } recoverWith { ex =>
@@ -261,11 +282,10 @@ class AsynchbaseStorage(override val config: Config, vertexCache: Cache[Integer,
   }
 
   private def writeAsyncSimple(zkQuorum: String, elementRpcs: Seq[HBaseRpc], withWait: Boolean): Future[Boolean] = {
-    val _client = if (withWait) clientWithFlush else client
     if (elementRpcs.isEmpty) {
       Future.successful(true)
     } else {
-      val defers = elementRpcs.map { rpc => writeToStorage(_client, rpc) }
+      val defers = elementRpcs.map { rpc => writeToStorage(client(zkQuorum, withWait), rpc) }
       if (withWait)
         Deferred.group(defers).toFuture map { arr => arr.forall(identity) }
       else
@@ -274,12 +294,11 @@ class AsynchbaseStorage(override val config: Config, vertexCache: Cache[Integer,
   }
 
   private def writeAsync(zkQuorum: String, elementRpcs: Seq[Seq[HBaseRpc]], withWait: Boolean): Future[Seq[Boolean]] = {
-    val _client = if (withWait) clientWithFlush else client
     if (elementRpcs.isEmpty) {
       Future.successful(Seq.empty[Boolean])
     } else {
       val futures = elementRpcs.map { rpcs =>
-        val defers = rpcs.map { rpc => writeToStorage(_client, rpc) }
+        val defers = rpcs.map { rpc => writeToStorage(client(zkQuorum, withWait), rpc) }
         if (withWait)
           Deferred.group(defers).toFuture map { arr => arr.forall(identity) }
         else
@@ -299,7 +318,9 @@ class AsynchbaseStorage(override val config: Config, vertexCache: Cache[Integer,
     val q = Query.toQuery(Seq(edge.srcVertex), _queryParam)
     val queryRequest = QueryRequest(q, 0, edge.srcVertex, _queryParam)
 
-    client.get(queryBuilder.buildRequest(queryRequest)) withCallback { kvs =>
+    val cluster = queryParam.label.service.cluster
+
+    client(cluster).get(queryBuilder.buildRequest(queryRequest)) withCallback { kvs =>
       val (edgeOpt, kvOpt) =
         if (kvs.isEmpty()) (None, None)
         else {
@@ -421,7 +442,8 @@ class AsynchbaseStorage(override val config: Config, vertexCache: Cache[Integer,
       if (p < FailProb) throw new PartialFailureException(edge, 0, s"$p")
       else {
         val lockEdgePut = toPutRequest(lockEdge)
-        client.compareAndSet(lockEdgePut, oldBytes).toFuture.recoverWith {
+
+        client(edge.label.hbaseZkAddr).compareAndSet(lockEdgePut, oldBytes).toFuture.recoverWith {
           case ex: Exception =>
             logger.error(s"AcquireLock RPC Failed.")
             throw new PartialFailureException(edge, 0, "AcquireLock RPC Failed")
@@ -461,7 +483,7 @@ class AsynchbaseStorage(override val config: Config, vertexCache: Cache[Integer,
       val releaseLockEdgePut = toPutRequest(releaseLockEdge)
       val lockEdgePut = toPutRequest(lockEdge)
 
-      client.compareAndSet(releaseLockEdgePut, lockEdgePut.value()).toFuture.recoverWith {
+      client(edge.label.hbaseZkAddr).compareAndSet(releaseLockEdgePut, lockEdgePut.value()).toFuture.recoverWith {
         case ex: Exception =>
           logger.error(s"ReleaseLock RPC Failed.")
           throw new PartialFailureException(edge, 3, "ReleaseLock RPC Failed")
@@ -791,7 +813,7 @@ class AsynchbaseStorage(override val config: Config, vertexCache: Cache[Integer,
     retryFuture
   }
 
-  def flush(): Unit = clients.foreach { client =>
+  def flush(): Unit = clients.foreach { case (zkQuorum, client) =>
     val timeout = Duration((clientFlushInterval + 10) * 20, duration.MILLISECONDS)
     Await.result(client.flush().toFuture, timeout)
   }
