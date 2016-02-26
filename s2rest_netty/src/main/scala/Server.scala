@@ -93,7 +93,7 @@ class S2RestHandler(s2rest: RestHandler)(implicit ec: ExecutionContext) extends 
           val buf: ByteBuf = Unpooled.copiedBuffer(PostProcess.badRequestResults(e).toString, CharsetUtil.UTF_8)
           simpleResponse(ctx, Ok, byteBufOpt = Option(buf), channelFutureListenerOpt = CloseOpt, headers = headers.result())
         case e: Exception =>
-          logger.error(s"${requestBody}, ${e.getMessage}", e)
+          logger.error(s"[InternalServerError]: ${requestBody}, ${e.getMessage}", e)
           val buf: ByteBuf = Unpooled.copiedBuffer(PostProcess.emptyResults.toString, CharsetUtil.UTF_8)
           simpleResponse(ctx, InternalServerError, byteBufOpt = Option(buf), channelFutureListenerOpt = CloseOpt, headers = headers.result())
       }
@@ -145,8 +145,8 @@ class S2RestHandler(s2rest: RestHandler)(implicit ec: ExecutionContext) extends 
 
   override def exceptionCaught(ctx: ChannelHandlerContext, cause: Throwable) {
     cause.printStackTrace()
-    logger.error(s"exception on query.", cause)
-    simpleResponse(ctx, BadRequest, byteBufOpt = None, channelFutureListenerOpt = CloseOpt)
+    logger.error(s"[InternalServerError]", cause)
+    simpleResponse(ctx, InternalServerError, byteBufOpt = None, channelFutureListenerOpt = CloseOpt)
   }
 }
 
