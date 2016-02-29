@@ -74,7 +74,7 @@ class AsynchbaseStorage(override val config: Config, vertexCache: Cache[Integer,
 
   import Extensions.DeferOps
 
-//  val client = AsynchbaseStorage.makeClient(config)
+  val _client = AsynchbaseStorage.makeClient(config)
   val queryBuilder = new AsynchbaseQueryBuilder(this)(ec)
   val mutationBuilder = new AsynchbaseMutationBuilder(this)(ec)
 
@@ -83,7 +83,6 @@ class AsynchbaseStorage(override val config: Config, vertexCache: Cache[Integer,
   val vertexCacheOpt = Option(vertexCache)
 
   private val clientWithFlush = AsynchbaseStorage.makeClient(config, "hbase.rpcs.buffered_flush_interval" -> "0")
-//  private val clients = Seq(client, clientWithFlush)
 
   private val clientFlushInterval = config.getInt("hbase.rpcs.buffered_flush_interval").toString().toShort
   val MaxRetryNum = config.getInt("max.retry.number")
@@ -99,18 +98,7 @@ class AsynchbaseStorage(override val config: Config, vertexCache: Cache[Integer,
       "hbase.zookeeper.quorum" -> zkQuorum,
       "hbase.rpcs.buffered_flush_interval" -> flushInterval.toString)
 
-  private def initClients(flushInterval: Int): Map[String, HBaseClient] = {
-    Service.findAllConn().distinct.map { zkQuorum =>
-      toClientKey(zkQuorum, flushInterval) -> newClient(zkQuorum, flushInterval)
-    } toMap
-  }
-
-  val clients = scala.collection.mutable.HashMap.empty ++ initClients(clientFlushInterval) ++ initClients(0)
-
-  def client(zkQuorum: String, withWait: Boolean = false): HBaseClient = {
-    val interval = if (withWait) 0 else clientFlushInterval
-    clients.getOrElseUpdate(toClientKey(zkQuorum, interval), newClient(zkQuorum, interval))
-  }
+  def client(zkQuorum: String, withWait: Boolean = false): HBaseClient = if (withWait) clientWithFlush else _client
 
   /**
     * Serializer/Deserializer
@@ -826,11 +814,11 @@ class AsynchbaseStorage(override val config: Config, vertexCache: Cache[Integer,
     retryFuture
   }
 
-  def flush(): Unit = clients.foreach { case (zkQuorum, client) =>
+  def flush(): Unit =  {
     val timeout = Duration((clientFlushInterval + 10) * 20, duration.MILLISECONDS)
-    Await.result(client.flush().toFuture, timeout)
+    Await.result(clientWithFlush.flush().toFuture, timeout)
+    Await.result(_client.flush().toFuture, timeout)
   }
-
 
   def createTable(zkAddr: String,
                   tableName: String,
