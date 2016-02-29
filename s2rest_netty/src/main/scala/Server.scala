@@ -63,7 +63,7 @@ class S2RestHandler(s2rest: RestHandler)(implicit ec: ExecutionContext) extends 
     }
   }
 
-  def toResponse(ctx: ChannelHandlerContext, req: FullHttpRequest, requestBody: JsValue, result: HandlerResult, startedAt: Long) = {
+  def toResponse(ctx: ChannelHandlerContext, req: FullHttpRequest, requestBody: String, result: HandlerResult, startedAt: Long) = {
     var closeOpt = CloseOpt
     var headers = mutable.ArrayBuilder.make[(String, String)]
 
@@ -120,7 +120,7 @@ class S2RestHandler(s2rest: RestHandler)(implicit ec: ExecutionContext) extends 
             val Array(srcId, tgtId, labelName, direction) = s.split("/").takeRight(4)
             val params = Json.arr(Json.obj("label" -> labelName, "direction" -> direction, "from" -> srcId, "to" -> tgtId))
             val result = s2rest.checkEdges(params)
-            toResponse(ctx, req, params, result, startedAt)
+            toResponse(ctx, req, s, result, startedAt)
           case _ => badRoute(ctx)
         }
 
@@ -136,7 +136,7 @@ class S2RestHandler(s2rest: RestHandler)(implicit ec: ExecutionContext) extends 
         val body = req.content.toString(CharsetUtil.UTF_8)
 
         val result = s2rest.doPost(uri, body, Option(req.headers().get(Experiment.impressionKey)))
-        toResponse(ctx, req, Json.parse(body), result, startedAt)
+        toResponse(ctx, req, body, result, startedAt)
 
       case _ =>
         simpleResponse(ctx, BadRequest, byteBufOpt = None, channelFutureListenerOpt = CloseOpt)
@@ -176,7 +176,7 @@ object NettyServer extends App {
 
   try {
     val b: ServerBootstrap = new ServerBootstrap()
-    b.option(ChannelOption.SO_BACKLOG, Int.box(2048))
+      b.option(ChannelOption.SO_BACKLOG, Int.box(2048))
 
     b.group(bossGroup, workerGroup).channel(classOf[NioServerSocketChannel])
       .handler(new LoggingHandler(LogLevel.INFO))
