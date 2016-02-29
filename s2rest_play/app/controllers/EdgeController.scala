@@ -195,7 +195,7 @@ object EdgeController extends Controller {
     }
 
     def deleteEach(labels: Seq[Label], direction: String, ids: Seq[JsValue], ts: Long, vertices: Seq[Vertex]) = {
-      enqueueLogMessage(ids, labels, ts, direction, None)
+
       val future = s2.deleteAllAdjacentEdges(vertices.toList, labels, GraphUtil.directions(direction), ts)
       if (withWait) {
         future
@@ -205,7 +205,11 @@ object EdgeController extends Controller {
     }
 
     val deleteFutures = jsValue.as[Seq[JsValue]].map { json =>
-      val (labels, direction, ids, ts, vertices) = requestParser.toDeleteParam(json)
+      val (_labels, direction, ids, ts, vertices) = requestParser.toDeleteParam(json)
+
+      enqueueLogMessage(ids, _labels, ts, direction, None)
+      val labels = _labels.filterNot(_.isAsync)
+
       if (labels.isEmpty || ids.isEmpty) Future.successful(true)
       else deleteEach(labels, direction, ids, ts, vertices)
     }
