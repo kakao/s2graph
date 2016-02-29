@@ -2,16 +2,13 @@ package com.kakao.s2graph.core
 
 import java.util
 import java.util.concurrent.ConcurrentHashMap
-
-import com.google.common.cache.CacheBuilder
 import com.kakao.s2graph.core.mysqls._
 import com.kakao.s2graph.core.parsers.WhereParser
-import com.kakao.s2graph.core.storage.Storage
 import com.kakao.s2graph.core.storage.hbase._
+import com.kakao.s2graph.core.storage.rocks.RocksDBStorage
 import com.kakao.s2graph.core.types._
 import com.kakao.s2graph.core.utils.logger
 import com.typesafe.config.{Config, ConfigFactory}
-
 import scala.collection.JavaConversions._
 import scala.collection._
 import scala.collection.mutable.ListBuffer
@@ -334,6 +331,7 @@ object Graph {
   def initStorage(config: Config)(ec: ExecutionContext) = {
     config.getString("s2graph.storage.backend") match {
       case "hbase" => new AsynchbaseStorage(config)(ec)
+      case "rocks" => new RocksDBStorage(config)(ec)
       case _ => throw new RuntimeException("not supported storage.")
     }
   }
@@ -346,7 +344,8 @@ class Graph(_config: Config)(implicit val ec: ExecutionContext) {
   Model.loadCache()
 
   // TODO: Make storage client by config param
-  val storage = Graph.initStorage(config)(ec)
+  val storage = new RocksDBStorage(config)(ec)
+//    Graph.initStorage(config)(ec)
 
 
   for {

@@ -16,6 +16,7 @@ class QueryTest extends IntegrateCommon with BeforeAndAfterEach {
   val weight = "weight"
   val is_hidden = "is_hidden"
 
+
   test("interval") {
     def queryWithInterval(id: Int, index: String, prop: String, fromVal: Int, toVal: Int) = Json.parse(
       s"""
@@ -220,7 +221,6 @@ class QueryTest extends IntegrateCommon with BeforeAndAfterEach {
   //    }
 
 
-
   test("duration") {
     def queryDuration(ids: Seq[Int], from: Int, to: Int) = {
       val $from = Json.arr(
@@ -267,6 +267,10 @@ class QueryTest extends IntegrateCommon with BeforeAndAfterEach {
     result = getEdgesSync(queryDuration(Seq(0, 2), from = 1000, to = 2000))
     (result \ "results").as[List[JsValue]].size should be(1)
 
+    def a: JsValue = getEdgesSync(queryDuration(Seq(0, 2), from = 3000, to = 2000))
+    Try(a).recover {
+      case e: BadQueryException => JsNull
+    } should be(Success(JsNull))
   }
 
 
@@ -360,7 +364,6 @@ class QueryTest extends IntegrateCommon with BeforeAndAfterEach {
 //    edges = (result \ "results").as[List[JsValue]]
 //    edges.size should be(1)
 //  }
-
   test("order by") {
     def queryScore(id: Int, scoring: Map[String, Int]): JsValue = Json.obj(
       "srcVertices" -> Json.arr(
@@ -421,7 +424,6 @@ class QueryTest extends IntegrateCommon with BeforeAndAfterEach {
     ascOrderByTo should be(Seq(JsNumber(1), JsNumber(2)))
     edgesTo.reverse should be(ascOrderByTo)
   }
-
 
   test("query with sampling") {
     def queryWithSampling(id: Int, sample: Int) = Json.parse(
@@ -842,6 +844,7 @@ class QueryTest extends IntegrateCommon with BeforeAndAfterEach {
     results = (rs \ "results").as[List[JsValue]]
     results.size should be(4)
   }
+
 
   def querySingle(id: Int, offset: Int = 0, limit: Int = 100) = Json.parse(
     s"""
