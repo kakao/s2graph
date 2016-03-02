@@ -234,6 +234,7 @@ class RankingStorageGraph(config: Config) extends RankingStorage {
          |                    "direction": "out",
          |                    "offset": 0,
          |                    "limit": -1,
+         |                    "cacheTTL": 5000,
          |                    "interval": {
          |                      "from": {"time_unit": "${key.eq.tq.q.toString}", "time_value": ${key.eq.tq.ts}},
          |                      "to": {"time_unit": "${key.eq.tq.q.toString}", "time_value": ${key.eq.tq.ts}}
