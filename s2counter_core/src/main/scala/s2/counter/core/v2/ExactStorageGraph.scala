@@ -115,7 +115,6 @@ case class ExactStorageGraph(config: Config) extends ExactStorage {
                   (implicit ex: ExecutionContext): Future[Seq[FetchedCountsGrouped]] = {
     val labelName = policy.action + labelPostfix
     val label = Label.findByName(labelName).get
-//    val label = labelModel.findByName(labelName).get
 
     val ids = Json.toJson(items)
 
@@ -186,9 +185,7 @@ case class ExactStorageGraph(config: Config) extends ExactStorage {
       resp.status match {
         case HttpStatus.SC_OK =>
           val respJs = resp.json
-//          println(respJs)
           val keyWithValues = (respJs \ "results").as[Seq[JsValue]].map { result =>
-//            println(s"result: $result")
             resultToExactKeyValues(policy, result)
           }.groupBy(_._1).mapValues(seq => seq.map(_._2).toMap.groupBy { case (eq, v) => (eq.tq.q, eq.dimKeyValues) })
           for {
@@ -198,7 +195,6 @@ case class ExactStorageGraph(config: Config) extends ExactStorage {
           }
         case n: Int =>
           log.warn(s"getEdges status($n): $reqJsStr")
-//          println(s"getEdges status($n): $reqJsStr")
           Nil
       }
     }
@@ -240,7 +236,6 @@ case class ExactStorageGraph(config: Config) extends ExactStorage {
           Json.obj("step" -> stepLs)
         }
         val query = Json.obj("srcVertices" -> Json.arr(src), "steps" -> Json.arr(step))
-        //    println(s"query: ${query.toString()}")
 
         wsClient.url(s"$s2graphReadOnlyUrl/graphs/getEdges").post(query).map { resp =>
           resp.status match {
@@ -270,7 +265,6 @@ case class ExactStorageGraph(config: Config) extends ExactStorage {
       for {
         (key, eqs) <- queries
       } yield {
-//        println(s"$key $eqs")
         getInner(policy, key, eqs)
       }
     }
