@@ -26,40 +26,7 @@ class RankingCounterSpec extends Specification with BeforeAfterAll {
 
   val s2config = new S2CounterConfig(config)
 
-//  val rankingCounterV1 = new RankingCounter(config, new RankingStorageV1(config))
-//  val rankingCounterV2 = new RankingCounter(config, new RankingStorageV2(config))
   val rankingCounterV2 = new RankingCounter(config, new RankingStorageGraph(config))
-
-//  "RankingCounterV1" >> {
-//    val policy = counterModel.findByServiceAction("test", "test_action", useCache = false).get
-//    val rankingKey = RankingKey(policy.id, policy.version, ExactQualifier(TimedQualifier(IntervalUnit.TOTAL, 0L), Map.empty[String, String]))
-//    "get top k" >> {
-//      val result = rankingCounterV1.getTopK(rankingKey, 100)
-//
-//      println(result)
-//
-//      result must not be empty
-//    }
-//
-//    "get and increment" >> {
-//      val result = rankingCounterV1.getTopK(rankingKey, 100).get
-//
-//      val value = 2d
-//      val contents = {
-//        for {
-//          (item, score) <- result.values
-//        } yield {
-//          item -> RankingValue(score + value, value)
-//        }
-//      }.toMap
-//      rankingCounterV1.update(rankingKey, contents, 100)
-//
-//      val result2 = rankingCounterV1.getTopK(rankingKey, 100).get
-//
-//      result2.totalScore must_== result.totalScore + contents.values.map(_.increment).sum
-//      result2.values must containTheSameElementsAs(result.values.map { case (k, v) => (k, v + value) })
-//    }
-//  }
 
   val service = "test"
   val action = "test_case"
@@ -116,7 +83,7 @@ class RankingCounterSpec extends Specification with BeforeAfterAll {
 
   "RankingCounterV2" >> {
     "get top k" >> {
-      val policy = counterModel.findByServiceAction(service, action, useCache = true).get
+      val policy = counterModel.findByServiceAction(service, action, useCache = false).get
 
       val rankingKey = RankingKey(policy.id, policy.version, ExactQualifier(TimedQualifier(IntervalUnit.TOTAL, 0L), Map.empty[String, String]))
 
