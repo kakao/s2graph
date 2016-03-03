@@ -3,6 +3,7 @@ package com.kakao.s2graph.core.parsers
 import com.kakao.s2graph.core.GraphExceptions.WhereParserException
 import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.mysqls._
+import com.kakao.s2graph.core.rest.TemplateHelper
 import com.kakao.s2graph.core.types.InnerValLike
 
 import scala.annotation.tailrec
@@ -30,7 +31,8 @@ trait ExtractValue extends JSONParser {
     }
   }
 
-  def valueToCompare(edge: Edge, key: String, value: String) = {
+  def valueToCompare(edge: Edge, key: String, _value: String) = {
+    val value = TemplateHelper.replaceVariable(System.currentTimeMillis(), _value)
     val label = edge.label
     if (value.startsWith(parent) || label.metaPropsInvMap.contains(value)) propToInnerVal(edge, value)
     else {

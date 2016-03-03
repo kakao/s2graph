@@ -9,6 +9,7 @@ import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.mysqls._
 import com.kakao.s2graph.core.parsers.{Where, WhereParser}
 import com.kakao.s2graph.core.types._
+import com.kakao.s2graph.core.utils.logger
 import com.typesafe.config.Config
 import play.api.libs.json._
 
@@ -87,9 +88,9 @@ class RequestParser(config: Config) extends JSONParser {
     ret
   }
 
-  def extractInterval(label: Label, _jsValue: JsValue) = {
-    val replaced = TemplateHelper.replaceVariable(System.currentTimeMillis(), _jsValue.toString())
-    val jsValue = Json.parse(replaced)
+  def extractInterval(label: Label, jsValue: JsValue) = {
+//    val replaced = TemplateHelper.replaceVariable(System.currentTimeMillis(), _jsValue.toString())
+//    val jsValue = Json.parse(replaced)
 
     def extractKv(js: JsValue) = js match {
       case JsObject(obj) => obj
@@ -113,9 +114,9 @@ class RequestParser(config: Config) extends JSONParser {
     ret
   }
 
-  def extractDuration(label: Label, _jsValue: JsValue) = {
-    val replaced = TemplateHelper.replaceVariable(System.currentTimeMillis(), _jsValue.toString())
-    val jsValue = Json.parse(replaced)
+  def extractDuration(label: Label, jsValue: JsValue) = {
+//    val replaced = TemplateHelper.replaceVariable(System.currentTimeMillis(), _jsValue.toString())
+//    val jsValue = Json.parse(replaced)
 
     for {
       js <- parse[Option[JsObject]](jsValue, "duration")
@@ -146,7 +147,6 @@ class RequestParser(config: Config) extends JSONParser {
     ret.map(_.toMap).getOrElse(Map.empty[Byte, InnerValLike])
   }
 
-
   val parserCache = CacheBuilder.newBuilder()
     .expireAfterAccess(10000, TimeUnit.MILLISECONDS)
     .expireAfterWrite(10000, TimeUnit.MILLISECONDS)
@@ -154,12 +154,11 @@ class RequestParser(config: Config) extends JSONParser {
     .initialCapacity(1000)
     .build[String, Try[Where]]
 
-
   def extractWhere(label: Label, whereClauseOpt: Option[String]): Try[Where] = {
     whereClauseOpt match {
       case None => Success(WhereParser.success)
-      case Some(_where) =>
-        val where = TemplateHelper.replaceVariable(System.currentTimeMillis(), _where)
+      case Some(where) =>
+//        val where = TemplateHelper.replaceVariable(System.currentTimeMillis(), _where)
 
         val whereParserKey = s"${label.label}_${where}"
         parserCache.get(whereParserKey, new Callable[Try[Where]] {
@@ -259,6 +258,9 @@ class RequestParser(config: Config) extends JSONParser {
           serviceName = parse[String](value, "serviceName")
           column = parse[String](value, "columnName")
         } yield {
+          logger.error(value.toString)
+          logger.error(serviceName.toString)
+          logger.error(column.toString)
           val service = Service.findByName(serviceName).getOrElse(throw BadQueryException("service not found"))
           val col = ServiceColumn.find(service.id.get, column).getOrElse(throw BadQueryException("bad column name"))
           val (idOpt, idsOpt) = ((value \ "id").asOpt[JsValue], (value \ "ids").asOpt[List[JsValue]])
@@ -268,6 +270,7 @@ class RequestParser(config: Config) extends JSONParser {
             /** bug, need to use labels schemaVersion  */
             innerVal <- jsValueToInnerVal(idVal, col.columnType, col.schemaVersion)
           } yield {
+            logger.error("==========")
             Vertex(SourceVertexId(col.id.get, innerVal), System.currentTimeMillis())
           }
         }).flatten
