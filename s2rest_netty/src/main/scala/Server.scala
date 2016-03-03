@@ -176,7 +176,9 @@ object NettyServer extends App {
 
   try {
     val b: ServerBootstrap = new ServerBootstrap()
-      b.option(ChannelOption.SO_BACKLOG, Int.box(2048))
+      .option(ChannelOption.SO_BACKLOG, Int.box(2048))
+      .option(ChannelOption.TCP_NODELAY, Boolean.box(true))
+      .option(ChannelOption.SO_KEEPALIVE, Boolean.box(true))
 
     b.group(bossGroup, workerGroup).channel(classOf[NioServerSocketChannel])
       .handler(new LoggingHandler(LogLevel.INFO))
