@@ -1,5 +1,6 @@
 package com.kakao.s2graph.core
 
+import com.kakao.s2graph.core.rest.TemplateHelper
 import com.kakao.s2graph.core.types.{InnerVal, InnerValLike}
 import com.kakao.s2graph.core.utils.logger
 import play.api.libs.json._
@@ -105,13 +106,14 @@ trait JSONParser {
               Some(InnerVal.withNumber(n.value, version))
             case _ => None
           }
-        case s: JsString =>
+        case _s: JsString =>
+          val s = TemplateHelper.replaceVariable(System.currentTimeMillis(), _s.value)
           dType match {
-            case InnerVal.STRING => Some(InnerVal.withStr(s.value, version))
-            case InnerVal.BOOLEAN => Some(InnerVal.withBoolean(s.as[String].toBoolean, version))
+            case InnerVal.STRING => Some(InnerVal.withStr(s, version))
+            case InnerVal.BOOLEAN => Some(InnerVal.withBoolean(s.toBoolean, version))
             //            case t if InnerVal.NUMERICS.contains(t) =>
             case InnerVal.BYTE | InnerVal.SHORT | InnerVal.INT | InnerVal.LONG | InnerVal.FLOAT | InnerVal.DOUBLE =>
-              Some(InnerVal.withNumber(BigDecimal(s.value), version))
+              Some(InnerVal.withNumber(BigDecimal(s), version))
             case _ => None
           }
         case b: JsBoolean =>

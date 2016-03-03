@@ -3,6 +3,7 @@ package com.kakao.s2graph.core.parsers
 import com.kakao.s2graph.core.GraphExceptions.WhereParserException
 import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.mysqls._
+import com.kakao.s2graph.core.rest.TemplateHelper
 import com.kakao.s2graph.core.types.InnerValLike
 
 import scala.annotation.tailrec
@@ -32,6 +33,7 @@ trait ExtractValue extends JSONParser {
 
   def valueToCompare(edge: Edge, key: String, value: String) = {
     val label = edge.label
+
     if (value.startsWith(parent) || label.metaPropsInvMap.contains(value)) propToInnerVal(edge, value)
     else {
       val (propKey, _) = findParentEdge(edge, key)
@@ -150,7 +152,6 @@ object WhereParser {
 }
 
 case class WhereParser(label: Label) extends JavaTokenParsers with JSONParser {
-
   val anyStr = "[^\\s(),]+".r
 
   val and = "and|AND".r

@@ -9,6 +9,7 @@ import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.mysqls._
 import com.kakao.s2graph.core.parsers.{Where, WhereParser}
 import com.kakao.s2graph.core.types._
+import com.kakao.s2graph.core.utils.logger
 import com.typesafe.config.Config
 import play.api.libs.json._
 
@@ -84,13 +85,11 @@ class RequestParser(config: Config) extends JSONParser {
         (labelOrderType.seq, value)
       }
     }
+
     ret
   }
 
-  def extractInterval(label: Label, _jsValue: JsValue) = {
-    val replaced = TemplateHelper.replaceVariable(System.currentTimeMillis(), _jsValue.toString())
-    val jsValue = Json.parse(replaced)
-
+  def extractInterval(label: Label, jsValue: JsValue) = {
     def extractKv(js: JsValue) = js match {
       case JsObject(obj) => obj
       case JsArray(arr) => arr.flatMap {
@@ -113,15 +112,21 @@ class RequestParser(config: Config) extends JSONParser {
     ret
   }
 
-  def extractDuration(label: Label, _jsValue: JsValue) = {
-    val replaced = TemplateHelper.replaceVariable(System.currentTimeMillis(), _jsValue.toString())
-    val jsValue = Json.parse(replaced)
-
+  def extractDuration(label: Label, jsValue: JsValue) = {
     for {
       js <- parse[Option[JsObject]](jsValue, "duration")
     } yield {
-      val minTs = parse[Option[Long]](js, "from").getOrElse(Long.MaxValue)
-      val maxTs = parse[Option[Long]](js, "to").getOrElse(Long.MinValue)
+      val minTs = (js \ "from") match {
+        case JsString(s) => TemplateHelper.replaceVariable(System.currentTimeMillis(), s).toLong
+        case JsNumber(n) => n.toLong
+        case _ => Long.MinValue
+      }
+
+      val maxTs = (js \ "to") match {
+        case JsString(s) => TemplateHelper.replaceVariable(System.currentTimeMillis(), s).toLong
+        case JsNumber(n) => n.toLong
+        case _ => Long.MaxValue
+      }
 
       if (minTs > maxTs) {
         throw new RuntimeException("Duration error. Timestamp of From cannot be larger than To.")
@@ -146,7 +151,6 @@ class RequestParser(config: Config) extends JSONParser {
     ret.map(_.toMap).getOrElse(Map.empty[Byte, InnerValLike])
   }
 
-
   val parserCache = CacheBuilder.newBuilder()
     .expireAfterAccess(10000, TimeUnit.MILLISECONDS)
     .expireAfterWrite(10000, TimeUnit.MILLISECONDS)
@@ -154,26 +158,23 @@ class RequestParser(config: Config) extends JSONParser {
     .initialCapacity(1000)
     .build[String, Try[Where]]
 
-
   def extractWhere(label: Label, whereClauseOpt: Option[String]): Try[Where] = {
     whereClauseOpt match {
       case None => Success(WhereParser.success)
-      case Some(_where) =>
-        val where = TemplateHelper.replaceVariable(System.currentTimeMillis(), _where)
-
+      case Some(where) =>
         val whereParserKey = s"${label.label}_${where}"
+
         parserCache.get(whereParserKey, new Callable[Try[Where]] {
           override def call(): Try[Where] = {
-            WhereParser(label).parse(where) match {
+            val _where = TemplateHelper.replaceVariable(System.currentTimeMillis(), where)
+
+            WhereParser(label).parse(_where) match {
               case s@Success(_) => s
               case Failure(ex) => throw BadQueryException(ex.getMessage, ex)
             }
           }
         })
-//        WhereParser(label).parse(where) match {
-//          case s@Success(_) => s
-//          case Failure(ex) => throw BadQueryException(ex.getMessage, ex)
-//        }
+
     }
   }
 
@@ -251,6 +252,7 @@ class RequestParser(config: Config) extends JSONParser {
       returnDegree = returnDegree
     )
   }
+
   def toQuery(jsValue: JsValue, isEdgeQuery: Boolean = true): Query = {
     try {
       val vertices =
