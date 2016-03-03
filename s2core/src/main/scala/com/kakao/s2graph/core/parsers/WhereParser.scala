@@ -31,9 +31,9 @@ trait ExtractValue extends JSONParser {
     }
   }
 
-  def valueToCompare(edge: Edge, key: String, _value: String) = {
-    val value = TemplateHelper.replaceVariable(System.currentTimeMillis(), _value)
+  def valueToCompare(edge: Edge, key: String, value: String) = {
     val label = edge.label
+
     if (value.startsWith(parent) || label.metaPropsInvMap.contains(value)) propToInnerVal(edge, value)
     else {
       val (propKey, _) = findParentEdge(edge, key)
@@ -152,7 +152,6 @@ object WhereParser {
 }
 
 case class WhereParser(label: Label) extends JavaTokenParsers with JSONParser {
-
   val anyStr = "[^\\s(),]+".r
 
   val and = "and|AND".r

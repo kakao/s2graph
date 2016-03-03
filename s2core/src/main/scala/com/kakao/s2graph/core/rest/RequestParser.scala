@@ -85,13 +85,11 @@ class RequestParser(config: Config) extends JSONParser {
         (labelOrderType.seq, value)
       }
     }
+
     ret
   }
 
   def extractInterval(label: Label, jsValue: JsValue) = {
-//    val replaced = TemplateHelper.replaceVariable(System.currentTimeMillis(), _jsValue.toString())
-//    val jsValue = Json.parse(replaced)
-
     def extractKv(js: JsValue) = js match {
       case JsObject(obj) => obj
       case JsArray(arr) => arr.flatMap {
@@ -115,14 +113,20 @@ class RequestParser(config: Config) extends JSONParser {
   }
 
   def extractDuration(label: Label, jsValue: JsValue) = {
-//    val replaced = TemplateHelper.replaceVariable(System.currentTimeMillis(), _jsValue.toString())
-//    val jsValue = Json.parse(replaced)
-
     for {
       js <- parse[Option[JsObject]](jsValue, "duration")
     } yield {
-      val minTs = parse[Option[Long]](js, "from").getOrElse(Long.MaxValue)
-      val maxTs = parse[Option[Long]](js, "to").getOrElse(Long.MinValue)
+      val minTs = (js \ "from") match {
+        case JsString(s) => TemplateHelper.replaceVariable(System.currentTimeMillis(), s).toLong
+        case JsNumber(n) => n.toLong
+        case _ => Long.MinValue
+      }
+
+      val maxTs = (js \ "to") match {
+        case JsString(s) => TemplateHelper.replaceVariable(System.currentTimeMillis(), s).toLong
+        case JsNumber(n) => n.toLong
+        case _ => Long.MaxValue
+      }
 
       if (minTs > maxTs) {
         throw new RuntimeException("Duration error. Timestamp of From cannot be larger than To.")
@@ -158,21 +162,19 @@ class RequestParser(config: Config) extends JSONParser {
     whereClauseOpt match {
       case None => Success(WhereParser.success)
       case Some(where) =>
-//        val where = TemplateHelper.replaceVariable(System.currentTimeMillis(), _where)
-
         val whereParserKey = s"${label.label}_${where}"
+
         parserCache.get(whereParserKey, new Callable[Try[Where]] {
           override def call(): Try[Where] = {
-            WhereParser(label).parse(where) match {
+            val _where = TemplateHelper.replaceVariable(System.currentTimeMillis(), where)
+
+            WhereParser(label).parse(_where) match {
               case s@Success(_) => s
               case Failure(ex) => throw BadQueryException(ex.getMessage, ex)
             }
           }
         })
-//        WhereParser(label).parse(where) match {
-//          case s@Success(_) => s
-//          case Failure(ex) => throw BadQueryException(ex.getMessage, ex)
-//        }
+
     }
   }
 
@@ -250,6 +252,7 @@ class RequestParser(config: Config) extends JSONParser {
       returnDegree = returnDegree
     )
   }
+
   def toQuery(jsValue: JsValue, isEdgeQuery: Boolean = true): Query = {
     try {
       val vertices =
@@ -258,9 +261,6 @@ class RequestParser(config: Config) extends JSONParser {
           serviceName = parse[String](value, "serviceName")
           column = parse[String](value, "columnName")
         } yield {
-          logger.error(value.toString)
-          logger.error(serviceName.toString)
-          logger.error(column.toString)
           val service = Service.findByName(serviceName).getOrElse(throw BadQueryException("service not found"))
           val col = ServiceColumn.find(service.id.get, column).getOrElse(throw BadQueryException("bad column name"))
           val (idOpt, idsOpt) = ((value \ "id").asOpt[JsValue], (value \ "ids").asOpt[List[JsValue]])
@@ -270,7 +270,6 @@ class RequestParser(config: Config) extends JSONParser {
             /** bug, need to use labels schemaVersion  */
             innerVal <- jsValueToInnerVal(idVal, col.columnType, col.schemaVersion)
           } yield {
-            logger.error("==========")
             Vertex(SourceVertexId(col.id.get, innerVal), System.currentTimeMillis())
           }
         }).flatten
