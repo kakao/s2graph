@@ -170,18 +170,30 @@ object NettyServer extends App {
   var isHealthy = config.getBooleanWithFallback("app.health.on", true)
 
   logger.info(s"starts with num of thread: $numOfThread, ${threadPool.getClass.getSimpleName}")
+  import scala.collection.JavaConversions._
+
+  val environmentVars = System.getenv
+  for ((k,v) <- environmentVars) logger.info(s"$k: $v")
+
+  val properties = System.getProperties
+  for ((k,v) <- properties) logger.info(s"$k: $v")
 
   // Configure the server.
-  val bossGroup: EventLoopGroup = new EpollEventLoopGroup(1)
-  val workerGroup: EventLoopGroup = new EpollEventLoopGroup()
+  val (bossGroup, workerGroup, channelClass) =
+    if (System.getProperty("os.name").toLowerCase.contains("linux")) {
+      logger.info("with linux native epoll")
+      (new EpollEventLoopGroup(1), new EpollEventLoopGroup(), classOf[EpollServerSocketChannel])
+    } else {
+      logger.info("with nio epoll")
+      (new NioEventLoopGroup(1), new NioEventLoopGroup(), classOf[NioServerSocketChannel])
+    }
 
   try {
     val b: ServerBootstrap = new ServerBootstrap()
       .option(ChannelOption.SO_BACKLOG, Int.box(2048))
-//      .option(ChannelOption.SO_KEEPALIVE, Boolean.box(true))
-//      .option(ChannelOption.TCP_NODELAY, Boolean.box(true))
+      .option(ChannelOption.SO_KEEPALIVE, Boolean.box(true))
 
-    b.group(bossGroup, workerGroup).channel(classOf[EpollServerSocketChannel])
+    b.group(bossGroup, workerGroup).channel(channelClass)
       .handler(new LoggingHandler(LogLevel.INFO))
       .childHandler(new ChannelInitializer[SocketChannel] {
         override def initChannel(ch: SocketChannel) {
