@@ -53,6 +53,7 @@ trait SparkApp extends Logging {
     }
   }
 
+  @deprecated("use StreamHelper directly", "0.12.1")
   def getStreamHelper(kafkaParam: Map[String, String]): StreamHelper = {
     if (streamHelper == null) {
       this.synchronized {

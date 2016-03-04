@@ -1,11 +1,10 @@
 package s2.counter.stream
 
-import com.kakao.s2graph.core.{Graph, GraphUtil}
+import com.kakao.s2graph.core.GraphUtil
 import kafka.producer.KeyedMessage
 import kafka.serializer.StringDecoder
 import org.apache.spark.streaming.Durations._
-import org.apache.spark.streaming.kafka.KafkaRDDFunctions.rddToKafkaRDDFunctions
-import org.apache.spark.streaming.kafka.StreamHelper
+import org.apache.spark.streaming.kafka.{HasOffsetRanges, StreamHelper}
 import s2.config.{S2ConfigFactory, S2CounterConfig, StreamingConfig}
 import s2.counter.core.{CounterEtlFunctions, CounterEtlItem, DimensionProps}
 import s2.models.{CounterModel, DBModel}
@@ -13,7 +12,6 @@ import s2.spark.{HashMapParam, SparkApp, WithKafka}
 
 import scala.collection.mutable
 import scala.collection.mutable.{HashMap => MutableHashMap}
-import scala.concurrent.ExecutionContext
 
 /**
   * Created by hsleep(honeysleep@gmail.com) on 15. 10. 6..
@@ -25,11 +23,8 @@ object EtlStreaming extends SparkApp with WithKafka {
   lazy val className = getClass.getName.stripSuffix("$")
   lazy val producer = getProducer[String, String](StreamingConfig.KAFKA_BROKERS)
 
-  implicit val graphEx = ExecutionContext.Implicits.global
-
   val initialize = {
-    println("streaming initialize")
-//    Graph(config)
+    logInfo("Initialize streaming")
     DBModel.initialize(config)
     true
   }
@@ -62,48 +57,50 @@ object EtlStreaming extends SparkApp with WithKafka {
 
     // etl logic
     stream.foreachRDD { (rdd, ts) =>
-      rdd.foreachPartitionWithOffsetRange { case (osr, part) =>
-        assert(initialize)
+      val nextRdd = {
+        rdd.foreachPartition { part =>
+          assert(initialize)
 
-        // convert to edge format
-        val items = {
-          for {
-            (k, v) <- part
-            line <- GraphUtil.parseString(v)
-            item <- CounterEtlFunctions.parseEdgeFormat(line)
-          } yield {
-            acc += ("Edges", 1)
-            item
+          // convert to edge format
+          val items = {
+            for {
+              (k, v) <- part
+              line <- GraphUtil.parseString(v)
+              item <- CounterEtlFunctions.parseEdgeFormat(line)
+            } yield {
+              acc += ("Edges", 1)
+              item
+            }
+          }
+
+          // join user profile
+          val joinItems = items.toList.groupBy { e =>
+            (e.service, e.action)
+          }.flatMap { case ((service, action), v) =>
+            CounterEtlFunctions.checkPolicyAndMergeDimension(service, action, v)
+          }
+
+          // group by kafka partition key and send to kafka
+          val m = MutableHashMap.empty[Int, mutable.MutableList[CounterEtlItem]]
+          joinItems.foreach { item =>
+            if (item.useProfile) {
+              acc += ("ETL", 1)
+            }
+            val k = getPartKey(item.item, 20)
+            val values: mutable.MutableList[CounterEtlItem] = m.getOrElse(k, mutable.MutableList.empty[CounterEtlItem])
+            values += item
+            m.update(k, values)
+          }
+          m.foreach { case (k, v) =>
+            v.map(_.toKafkaMessage).grouped(1000).foreach { grouped =>
+              acc += ("Produce", grouped.size)
+              producer.send(new KeyedMessage[String, String](StreamingConfig.KAFKA_TOPIC_COUNTER, null, k, grouped.mkString("\n")))
+            }
           }
         }
-
-        // join user profile
-        val joinItems = items.toList.groupBy { e =>
-          (e.service, e.action)
-        }.flatMap { case ((service, action), v) =>
-          CounterEtlFunctions.checkPolicyAndMergeDimension(service, action, v)
-        }
-
-        // group by kafka partition key and send to kafka
-        val m = MutableHashMap.empty[Int, mutable.MutableList[CounterEtlItem]]
-        joinItems.foreach { item =>
-          if (item.useProfile) {
-            acc += ("ETL", 1)
-          }
-          val k = getPartKey(item.item, 20)
-          val values: mutable.MutableList[CounterEtlItem] = m.getOrElse(k, mutable.MutableList.empty[CounterEtlItem])
-          values += item
-          m.update(k, values)
-        }
-        m.foreach { case (k, v) =>
-          v.map(_.toKafkaMessage).grouped(1000).foreach { grouped =>
-            acc += ("Produce", grouped.size)
-            producer.send(new KeyedMessage[String, String](StreamingConfig.KAFKA_TOPIC_COUNTER, null, k, grouped.mkString("\n")))
-          }
-        }
-
-        streamHelper.commitConsumerOffset(osr)
+        rdd
       }
+      streamHelper.commitConsumerOffsets(nextRdd.asInstanceOf[HasOffsetRanges])
 
       if (ts.milliseconds / 1000 % 60 == 0) {
         log.warn(DimensionProps.getCacheStatsString)
