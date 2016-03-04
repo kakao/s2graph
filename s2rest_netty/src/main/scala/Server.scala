@@ -15,6 +15,7 @@ import com.typesafe.config.ConfigFactory
 import io.netty.bootstrap.ServerBootstrap
 import io.netty.buffer.{ByteBuf, Unpooled}
 import io.netty.channel._
+import io.netty.channel.epoll.{EpollServerSocketChannel, EpollEventLoopGroup}
 import io.netty.channel.nio.NioEventLoopGroup
 import io.netty.channel.socket.SocketChannel
 import io.netty.channel.socket.nio.NioServerSocketChannel
@@ -171,8 +172,8 @@ object NettyServer extends App {
   logger.info(s"starts with num of thread: $numOfThread, ${threadPool.getClass.getSimpleName}")
 
   // Configure the server.
-  val bossGroup: EventLoopGroup = new NioEventLoopGroup(1)
-  val workerGroup: EventLoopGroup = new NioEventLoopGroup()
+  val bossGroup: EventLoopGroup = new EpollEventLoopGroup(1)
+  val workerGroup: EventLoopGroup = new EpollEventLoopGroup()
 
   try {
     val b: ServerBootstrap = new ServerBootstrap()
@@ -180,7 +181,7 @@ object NettyServer extends App {
       .option(ChannelOption.TCP_NODELAY, Boolean.box(true))
       .option(ChannelOption.SO_KEEPALIVE, Boolean.box(true))
 
-    b.group(bossGroup, workerGroup).channel(classOf[NioServerSocketChannel])
+    b.group(bossGroup, workerGroup).channel(classOf[EpollServerSocketChannel])
       .handler(new LoggingHandler(LogLevel.INFO))
       .childHandler(new ChannelInitializer[SocketChannel] {
         override def initChannel(ch: SocketChannel) {
