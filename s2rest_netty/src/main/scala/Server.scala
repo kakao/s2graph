@@ -180,7 +180,7 @@ object NettyServer extends App {
 
   // Configure the server.
   val (bossGroup, workerGroup, channelClass) =
-    if (System.getProperty("os.name").toLowerCase.contains("linux")) {
+    if (System.getProperty("os.name").toLowerCase.contains("nux")) {
       logger.info("with linux native epoll")
       (new EpollEventLoopGroup(1), new EpollEventLoopGroup(), classOf[EpollServerSocketChannel])
     } else {
