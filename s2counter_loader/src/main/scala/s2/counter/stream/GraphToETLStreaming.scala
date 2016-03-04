@@ -48,7 +48,7 @@ object GraphToETLStreaming extends SparkApp with WithKafka {
     val stream = streamHelper.createStream[String, String, StringDecoder, StringDecoder](ssc, topic.split(',').toSet)
     stream.foreachRDD { rdd =>
       val nextRdd = {
-        rdd.foreachPartition { part =>
+        rdd.repartition(sc.defaultParallelism).foreachPartition { part =>
           val m = MutableHashMap.empty[Int, mutable.MutableList[String]]
           for {
             (k, v) <- part

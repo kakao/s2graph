@@ -58,7 +58,7 @@ object EtlStreaming extends SparkApp with WithKafka {
     // etl logic
     stream.foreachRDD { (rdd, ts) =>
       val nextRdd = {
-        rdd.foreachPartition { part =>
+        rdd.repartition(sc.defaultParallelism).foreachPartition { part =>
           assert(initialize)
 
           // convert to edge format

@@ -97,7 +97,7 @@ object DimensionProps {
 
     cache.withCacheAsync(cacheKey) {
       val retryFuture = RetryAsync(retryCnt, withSleep = false) {
-        val url = s"${StreamingConfig.GRAPH_URL}/graphs/experiment/${service.accessToken}/${experiment.name}/0"
+        val url = s"${StreamingConfig.GRAPH_READONLY_URL}/graphs/experiment/${service.accessToken}/${experiment.name}/0"
         val future = client.url(url).post(Json.toJson(keyValues))
 
         future.map { resp =>
