@@ -33,12 +33,8 @@ object ExactCounterStreaming extends SparkApp with WithKafka {
   val streamHelper = StreamHelper(kafkaParam)
 
   override def run() = {
-    validateArgument("interval", "clear")
-    val (intervalInSec, clear) = (seconds(args(0).toLong), args(1).toBoolean)
-
-    if (clear) {
-      streamHelper.kafkaHelper.consumerGroupCleanup()
-    }
+    validateArgument("interval")
+    val intervalInSec = seconds(args(0).toLong)
 
     val conf = sparkConf(s"$strInputTopics: $className")
     val ssc = streamingContext(conf, intervalInSec)
