@@ -13,7 +13,6 @@ import scala.collection.mutable.{HashMap => MutableHashMap}
  */
 object CounterEtlFunctions extends Logging {
   lazy val filterOps = Seq("insert", "insertBulk", "update", "increment").map(op => GraphUtil.operations(op))
-  lazy val preFetchSize = StreamingConfig.PROFILE_PREFETCH_SIZE
   lazy val config = S2ConfigFactory.config
   lazy val counterModel = new CounterModel(config)
 

@@ -14,10 +14,10 @@ object StreamingConfig extends ConfigFunctions(S2ConfigFactory.config) {
   val KAFKA_TOPIC_COUNTER_TRX = getOrElse("kafka.topic.counter-trx", "s2counter-trx-alpha")
   val KAFKA_TOPIC_COUNTER_FAIL = getOrElse("kafka.topic.counter-fail", "s2counter-fail-alpha")
 
-  // profile cache
-  val PROFILE_CACHE_TTL_SECONDS = getOrElse("profile.cache.ttl.seconds", 60 * 60 * 24)    // default 1 day
-  val PROFILE_CACHE_MAX_SIZE = getOrElse("profile.cache.max.size", 10000)
-  val PROFILE_PREFETCH_SIZE = getOrElse("profile.prefetch.size", 10)
+  // dimension
+  val DIM_CACHE_TTL_SECONDS = getOrElse("dim.cache.ttl.seconds", 60 * 60 * 24)    // default 1 day
+  val DIM_CACHE_MAX_SIZE = getOrElse("dim.cache.max.size", 10000)
+  val DIM_REQ_BATCH_SIZE = getOrElse("dim.req.batch.size", 100)
 
   // graph url
   val GRAPH_URL = getOrElse("s2graph.url", "")

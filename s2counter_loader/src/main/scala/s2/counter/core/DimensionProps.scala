@@ -25,8 +25,8 @@ object DimensionProps {
 
   private val retryCnt = 3
 
-  val cacheConfig = CollectionCacheConfig(StreamingConfig.PROFILE_CACHE_MAX_SIZE,
-    StreamingConfig.PROFILE_CACHE_TTL_SECONDS,
+  val cacheConfig = CollectionCacheConfig(StreamingConfig.DIM_CACHE_MAX_SIZE,
+    StreamingConfig.DIM_CACHE_TTL_SECONDS,
     negativeCache = true,
     3600 // negative ttl 1 hour
   )
@@ -132,10 +132,8 @@ object DimensionProps {
       experiment <- Experiment.findById(bucket.experimentId)
       service <- Try { Service.findById(experiment.serviceId) }.toOption
     } yield {
-      val futures = {
-        for {
-          item <- items
-        } yield {
+      items.grouped(StreamingConfig.DIM_REQ_BATCH_SIZE).flatMap { grouped =>
+        val futures = grouped.map { item =>
           query(service, experiment, item).map {
             case Some(jsValue) =>
               val newDimension = item.dimension.as[JsObject] ++ jsValue.as[JsObject]
@@ -143,8 +141,8 @@ object DimensionProps {
             case None => item
           }
         }
-      }
-      Await.result(Future.sequence(futures), 10 seconds)
+        Await.result(Future.sequence(futures), 10 seconds)
+      }.toList
     }
   }.getOrElse(items)
 
