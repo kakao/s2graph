@@ -29,9 +29,8 @@ object EtlStreaming extends SparkApp with WithKafka {
     true
   }
 
-  val inputTopics = Set(StreamingConfig.KAFKA_TOPIC_ETL)
-  val strInputTopics = inputTopics.mkString(",")
-  val groupId = buildKafkaGroupId(strInputTopics, "etl_to_counter")
+  val inputTopics = Set(StreamingConfig.KAFKA_TOPIC_GRAPH, StreamingConfig.KAFKA_TOPIC_GRAPH_ASYNC)
+  val groupId = buildKafkaGroupId(StreamingConfig.KAFKA_TOPIC_GRAPH, "graph_to_counter")
   val kafkaParam = Map(
     "group.id" -> groupId,
     "metadata.broker.list" -> StreamingConfig.KAFKA_BROKERS,
@@ -44,7 +43,7 @@ object EtlStreaming extends SparkApp with WithKafka {
     validateArgument("interval")
     val (intervalInSec) = seconds(args(0).toLong)
 
-    val conf = sparkConf(s"$strInputTopics: $className")
+    val conf = sparkConf(s"${inputTopics.mkString(",")}: $className")
     val ssc = streamingContext(conf, intervalInSec)
     val sc = ssc.sparkContext
 

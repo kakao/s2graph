@@ -15,6 +15,7 @@ import scala.collection.mutable.{HashMap => MutableHashMap}
  * can be @deprecated
  * Created by hsleep(honeysleep@gmail.com) on 15. 3. 16..
  */
+@deprecated("Do not use", "0.12.1")
 object GraphToETLStreaming extends SparkApp with WithKafka {
   lazy val config = S2ConfigFactory.config
   lazy val s2Config = new S2CounterConfig(config)
