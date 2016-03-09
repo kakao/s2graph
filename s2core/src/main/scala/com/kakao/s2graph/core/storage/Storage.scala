@@ -90,7 +90,8 @@ abstract class Storage(val config: Config)(implicit ec: ExecutionContext) {
                   cfs: List[String],
                   regionMultiplier: Int,
                   ttl: Option[Int],
-                  compressionAlgorithm: String): Unit
+                  compressionAlgorithm: String,
+                  replicationScopeOpt: Option[Int] = None): Unit
 
   def toEdge[K: CanSKeyValue](kv: K,
                               queryParam: QueryParam,

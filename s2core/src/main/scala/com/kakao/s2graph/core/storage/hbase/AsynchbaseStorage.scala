@@ -83,6 +83,13 @@ class AsynchbaseStorage(override val config: Config, vertexCache: Cache[Integer,
   val vertexCacheOpt = Option(vertexCache)
 
   private val clientWithFlush = AsynchbaseStorage.makeClient(config, "hbase.rpcs.buffered_flush_interval" -> "0")
+  lazy val configWithMasterCluster: String = config.getString("hbase.zookeeper.quorum")
+  lazy val configWithSlaveClusterOpt: Option[String] =
+    if (config.hasPath("hbase.slave.zookeeper.quorum")) {
+      val quorum = config.getString("hbase.slave.zookeeper.quorum")
+      Some(quorum)
+    } else None
+
 
   private val clientFlushInterval = config.getInt("hbase.rpcs.buffered_flush_interval").toString().toShort
   val MaxRetryNum = config.getInt("max.retry.number")
@@ -825,7 +832,8 @@ class AsynchbaseStorage(override val config: Config, vertexCache: Cache[Integer,
                   cfs: List[String],
                   regionMultiplier: Int,
                   ttl: Option[Int],
-                  compressionAlgorithm: String): Unit = {
+                  compressionAlgorithm: String,
+                  replicationScopeOpt: Option[Int] = None): Unit = {
     logger.info(s"create table: $tableName on $zkAddr, $cfs, $regionMultiplier, $compressionAlgorithm")
     val admin = getAdmin(zkAddr)
     val regionCount = admin.getClusterStatus.getServersSize * regionMultiplier
@@ -844,6 +852,7 @@ class AsynchbaseStorage(override val config: Config, vertexCache: Cache[Integer,
             .setBlocksize(32768)
             .setBlockCacheEnabled(true)
           if (ttl.isDefined) columnDesc.setTimeToLive(ttl.get)
+          if (replicationScopeOpt.isDefined) columnDesc.setScope(replicationScopeOpt.get)
           desc.addFamily(columnDesc)
         }
 
