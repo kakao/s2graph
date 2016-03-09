@@ -6,6 +6,7 @@ import com.kakao.s2graph.core.Management.JsonModel.{Index, Prop}
 import com.kakao.s2graph.core.mysqls._
 import com.kakao.s2graph.core.types.HBaseType._
 import com.kakao.s2graph.core.types._
+import com.kakao.s2graph.core.utils.logger
 import play.api.libs.json.Reads._
 import play.api.libs.json._
 import scala.util.Try
@@ -273,13 +274,46 @@ class Management(graph: Graph) {
   import Management._
   val storage = graph.storage
 
+  lazy val configWithMasterCluster: String = storage.config.getString("hbase.zookeeper.quorum")
+  lazy val configWithSlaveClusterOpt: Option[String] =
+    if (storage.config.hasPath("hbase.slave.zookeeper.quorum")) {
+      val quorum = storage.config.getString("hbase.slave.zookeeper.quorum")
+      Some(quorum)
+    } else None
+
+
   def createTable(zkAddr: String,
                   tableName: String,
                   cfs: List[String],
                   regionMultiplier: Int,
                   ttl: Option[Int],
-                  compressionAlgorithm: String = DefaultCompressionAlgorithm): Unit =
-    storage.createTable(zkAddr, tableName, cfs, regionMultiplier, ttl, compressionAlgorithm)
+                  compressionAlgorithm: String = DefaultCompressionAlgorithm,
+                  replicationScopeOpt: Option[Int] = None): Unit =
+    storage.createTable(zkAddr, tableName, cfs, regionMultiplier, ttl, compressionAlgorithm, replicationScopeOpt = replicationScopeOpt)
+
+  /**
+    * Create table on both master and slave cluster
+    *  - Master and slave cluster's cluster information is from config file(e.g. application.conf or reference.conf)
+    *
+    * @param tableName Table name to create
+    * @param cfs ColumnFamily name list( "e", "v" )
+    * @param regionMultiplier Number of regions on each regionserver
+    * @param ttl HTable ttl
+    * @param compressionAlgorithm compression algorithm
+    */
+  def createMasterSlaveTable(tableName: String,
+                             cfs: List[String],
+                             regionMultiplier: Int,
+                             ttl: Option[Int],
+                             compressionAlgorithm: String = DefaultCompressionAlgorithm): Unit = {
+
+    logger.debug(s">> Master cluster(${configWithMasterCluster}), Slave cluster(${configWithSlaveClusterOpt.get})")
+    /** create hbase master table for service(columnfamily's repliacation_scope -> 1) */
+    createTable(configWithMasterCluster, tableName, cfs, regionMultiplier, ttl, compressionAlgorithm, Some(1))
+
+    /** create hbase slave table for service */
+    createTable(configWithSlaveClusterOpt.get, tableName, cfs, regionMultiplier, ttl, compressionAlgorithm)
+  }
 
   /** HBase specific code */
   def createService(serviceName: String,
@@ -289,8 +323,18 @@ class Management(graph: Graph) {
 
     Model withTx { implicit session =>
       val service = Service.findOrInsert(serviceName, cluster, hTableName, preSplitSize, hTableTTL, compressionAlgorithm)
-      /** create hbase table for service */
-      storage.createTable(cluster, hTableName, List("e", "v"), preSplitSize, hTableTTL, compressionAlgorithm)
+      if (configWithSlaveClusterOpt.isDefined) {
+        logger.debug(s">> Master/Slave configured service")
+        createMasterSlaveTable(
+          hTableName,
+          List("e", "v"),
+          preSplitSize,
+          hTableTTL,
+          compressionAlgorithm)
+      } else {
+        /** create hbase table for service */
+        storage.createTable(cluster, hTableName, List("e", "v"), preSplitSize, hTableTTL, compressionAlgorithm)
+      }
       service
     }
   }
@@ -335,9 +379,30 @@ class Management(graph: Graph) {
             case (None, Some(hbaseTableTTL)) => throw new RuntimeException("if want to specify ttl, give hbaseTableName also")
             case (Some(hbaseTableName), None) =>
               // create own hbase table with default ttl on service level.
-              storage.createTable(service.cluster, hbaseTableName, List("e", "v"), service.preSplitSize, service.hTableTTL, compressionAlgorithm)
+              if (configWithSlaveClusterOpt.isDefined) {
+                logger.debug(s">> Master/Slave configured service")
+                createMasterSlaveTable(
+                  hbaseTableName,
+                  List("e", "v"),
+                  service.preSplitSize,
+                  service.hTableTTL,
+                  compressionAlgorithm)
+              } else {
+                storage.createTable(service.cluster, hbaseTableName, List("e", "v"), service.preSplitSize, service.hTableTTL, compressionAlgorithm)
+              }
             case (Some(hbaseTableName), Some(hbaseTableTTL)) =>
               // create own hbase table with own ttl.
+              if (configWithSlaveClusterOpt.isDefined) {
+                logger.debug(s">> Master/Slave configured service")
+                createMasterSlaveTable(
+                  hbaseTableName,
+                  List("e", "v"),
+                  service.preSplitSize,
+                  hTableTTL,
+                  compressionAlgorithm)
+              } else {
+                storage.createTable(service.cluster, hbaseTableName, List("e", "v"), service.preSplitSize, hTableTTL, compressionAlgorithm)
+              }
               storage.createTable(service.cluster, hbaseTableName, List("e", "v"), service.preSplitSize, hTableTTL, compressionAlgorithm)
           }
           newLabel
