@@ -19,6 +19,10 @@ object StreamingConfig extends ConfigFunctions(S2ConfigFactory.config) {
   val DIM_CACHE_MAX_SIZE = getOrElse("dim.cache.max.size", 10000)
   val DIM_REQ_BATCH_SIZE = getOrElse("dim.req.batch.size", 100)
 
+  // counter update throttling
+  val UPDATE_EXACT_BATCH_SIZE = getOrElse("exact.update.batch.size", 10)
+  val UPDATE_RANK_BATCH_SIZE = getOrElse("rank.update.batch.size", 10)
+
   // graph url
   val GRAPH_URL = getOrElse("s2graph.url", "")
   val GRAPH_READONLY_URL = getOrElse("s2graph.read-only.url", GRAPH_URL)

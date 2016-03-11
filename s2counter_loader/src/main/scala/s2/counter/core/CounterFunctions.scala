@@ -4,7 +4,7 @@ import com.kakao.s2graph.core.GraphUtil
 import kafka.producer.KeyedMessage
 import org.apache.spark.rdd.RDD
 import org.apache.spark.{Accumulable, Logging}
-import play.api.libs.json.{JsString, JsNumber, JsValue, Json}
+import play.api.libs.json.{JsNumber, JsString, JsValue, Json}
 import s2.config.{S2ConfigFactory, StreamingConfig}
 import s2.counter.TrxLog
 import s2.counter.core.ExactCounter.ExactValueMap
@@ -392,7 +392,7 @@ object CounterFunctions extends Logging with WithKafka {
 
     for {
       (policy, allCounts) <- countsByPolicy
-      counts <- allCounts.grouped(10)
+      counts <- allCounts.grouped(StreamingConfig.UPDATE_EXACT_BATCH_SIZE)
       trxLog <- exactCounter.updateCount(policy, counts)
     } yield {
       trxLog.success match {
@@ -428,7 +428,7 @@ object CounterFunctions extends Logging with WithKafka {
 
     for {
       (policy, allValues) <- valuesByPolicy
-      groupedValues <- allValues.grouped(10)
+      groupedValues <- allValues.grouped(StreamingConfig.UPDATE_RANK_BATCH_SIZE)
     } {
       rankingCounter.update(groupedValues, K_MAX)
       acc += (s"RankingV${policy.version}", groupedValues.length)
