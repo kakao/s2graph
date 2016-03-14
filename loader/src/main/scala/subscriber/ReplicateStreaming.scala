@@ -9,8 +9,8 @@ import play.api.libs.json.{JsObject, Json}
 import s2.spark.{HashMapParam, SparkApp}
 
 import scala.collection.mutable.{HashMap => MutableHashMap}
-import scala.concurrent.Await
 import scala.concurrent.duration._
+import scala.concurrent.{Await, TimeoutException}
 
 object ReplicateStreaming extends SparkApp {
   lazy val className = getClass.getName.stripSuffix("$")
@@ -44,8 +44,13 @@ object ReplicateStreaming extends SparkApp {
       case None =>
         // replicate
         val newProps = jsProps.as[JsObject] ++ Json.obj("_rep_" -> true)
-        sp(6) = newProps.toString()
-        Option(sp.mkString("\t"))
+        val newSp = if (sp.length > 6) {
+          sp(6) = newProps.toString()
+          sp
+        } else {
+          sp ++ Array(newProps.toString())
+        }
+        Option(newSp.mkString("\t"))
     }
   }
 
@@ -58,7 +63,12 @@ object ReplicateStreaming extends SparkApp {
   def sendToGraph(lines: Seq[String]): Unit = {
     val startTs = System.currentTimeMillis()
     val future = client.url(apiPath).post(lines.mkString("\n"))
-    Await.result(future, 1 minute)
+    try {
+      Await.ready(future, 1 minute)
+    } catch {
+      case e: TimeoutException =>
+        logError(s"$e")
+    }
     val elapsedTime = System.currentTimeMillis() - startTs
 
     if (elapsedTime > 300) {

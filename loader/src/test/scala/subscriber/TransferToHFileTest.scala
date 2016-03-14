@@ -46,13 +46,13 @@ class TransferToHFileTest  extends FlatSpec with BeforeAndAfterAll with Matchers
     // 1. create service
     if(Management.findService("loader-test").isEmpty) {
       println(">>> create service...")
-      Management.createService("loader-test", "localhost", "loader-test-dev", 1, None, "gz")
+      GraphSubscriberHelper.management.createService("loader-test", "localhost", "loader-test-dev", 1, None, "gz")
     }
 
     // 2. create label
     if(Management.findLabel("friends_rel").isEmpty) {
       println(">>> create label...")
-      Management.createLabel(
+      GraphSubscriberHelper.management.createLabel(
         "friends_rel",
         "loader-test", "user_id", "string",
         "loader-test", "user_id", "string",
@@ -64,7 +64,7 @@ class TransferToHFileTest  extends FlatSpec with BeforeAndAfterAll with Matchers
         None, None,
         HBaseType.DEFAULT_VERSION,
         false,
-        Management.defaultCompressionAlgorithm
+        Management.DefaultCompressionAlgorithm
       )
     }
 
