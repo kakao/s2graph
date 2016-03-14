@@ -16,8 +16,8 @@ object ReplicateStreaming extends SparkApp {
   lazy val className = getClass.getName.stripSuffix("$")
   val config = ConfigFactory.load()
 
-  val inputTopics = Set(config.getString("TOPIC"))
-  val strInputTopics = inputTopics.mkString(",")
+  val strInputTopics = config.getString("TOPIC")
+  val inputTopics = strInputTopics.split(',').toSet
   val groupId = buildKafkaGroupId(strInputTopics, "etl_to_counter")
   val kafkaParam = Map(
     "group.id" -> groupId,
