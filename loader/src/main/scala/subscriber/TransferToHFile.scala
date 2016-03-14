@@ -137,7 +137,7 @@ object TransferToHFile extends SparkApp with JSONParser {
 
     val sc = new SparkContext(conf)
 
-    Management.createTable(zkQuorum, tableName, List("e", "v"), maxHFilePerResionServer, None, compressionAlgorithm)
+    GraphSubscriberHelper.management.createTable(zkQuorum, tableName, List("e", "v"), maxHFilePerResionServer, None, compressionAlgorithm)
 
     /** set up hbase init */
     val hbaseConf = HBaseConfiguration.create()

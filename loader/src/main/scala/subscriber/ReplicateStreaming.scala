@@ -18,7 +18,7 @@ object ReplicateStreaming extends SparkApp {
 
   val inputTopics = Set(config.getString("kafka.topic.graph"), config.getString("kafka.topic.graph-async"))
   val strInputTopics = inputTopics.mkString(",")
-  val groupId = buildKafkaGroupId(strInputTopics, "etl_to_counter")
+  val groupId = buildKafkaGroupId(strInputTopics, "replicate")
   val kafkaParam = Map(
     "group.id" -> groupId,
     "metadata.broker.list" -> config.getString("kafka.metadata.broker.list"),

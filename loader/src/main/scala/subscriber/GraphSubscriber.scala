@@ -48,6 +48,7 @@ object GraphSubscriberHelper extends WithKafka {
   private val writeBufferSize = 1024 * 1024 * 8
   private val sleepPeriod = 10000
   private val maxTryNum = 10
+  var management: Management = null
 
   var g: Graph = null
   val conns = new scala.collection.mutable.HashMap[String, Connection]()
@@ -64,6 +65,7 @@ object GraphSubscriberHelper extends WithKafka {
 
     if (g == null) {
       g = new Graph(config)(ExecutionContext.Implicits.global)
+      management = new Management(g)
     }
   }
 
