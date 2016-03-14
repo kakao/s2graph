@@ -16,8 +16,8 @@ object ReplicateStreaming extends SparkApp {
   lazy val className = getClass.getName.stripSuffix("$")
   val config = ConfigFactory.load()
 
-  val strInputTopics = config.getString("TOPIC")
-  val inputTopics = strInputTopics.split(',').toSet
+  val inputTopics = Set(config.getString("kafka.topic.graph"), config.getString("kafka.topic.graph-async"))
+  val strInputTopics = inputTopics.mkString(",")
   val groupId = buildKafkaGroupId(strInputTopics, "etl_to_counter")
   val kafkaParam = Map(
     "group.id" -> groupId,
@@ -52,8 +52,8 @@ object ReplicateStreaming extends SparkApp {
   private val builder = new com.ning.http.client.AsyncHttpClientConfig.Builder()
   private val client = new play.api.libs.ws.ning.NingWSClient(builder.build)
 
-  val apiPath = config.getString("s2graph.apiPath")
-  val batchSize = config.getInt("s2graph.batchSize")
+  val apiPath = config.getString("s2graph.api-path")
+  val batchSize = config.getInt("s2graph.batch-size")
 
   def sendToGraph(lines: Seq[String]): Unit = {
     val startTs = System.currentTimeMillis()
