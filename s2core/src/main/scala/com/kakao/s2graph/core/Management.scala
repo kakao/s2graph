@@ -356,7 +356,8 @@ class Management(graph: Graph) {
                   hTableTTL: Option[Int],
                   schemaVersion: String = DEFAULT_VERSION,
                   isAsync: Boolean,
-                  compressionAlgorithm: String = "gz"): Try[Label] = {
+                  compressionAlgorithm: String = "gz",
+                  options: Option[String]): Try[Label] = {
 
     val labelOpt = Label.findByName(label, useCache = false)
 
@@ -370,7 +371,7 @@ class Management(graph: Graph) {
             srcServiceName, srcColumnName, srcColumnType,
             tgtServiceName, tgtColumnName, tgtColumnType,
             isDirected, serviceName, indices, props, consistencyLevel,
-            hTableName, hTableTTL, schemaVersion, isAsync, compressionAlgorithm)
+            hTableName, hTableTTL, schemaVersion, isAsync, compressionAlgorithm, options)
 
           /** create hbase table */
           val service = newLabel.service
@@ -428,6 +429,6 @@ class Management(graph: Graph) {
       old.tgtService.serviceName, old.tgtColumnName, old.tgtColumnType,
       old.isDirected, old.serviceName,
       allIndices, allProps,
-      old.consistencyLevel, hTableName, old.hTableTTL, old.schemaVersion, old.isAsync, old.compressionAlgorithm)
+      old.consistencyLevel, hTableName, old.hTableTTL, old.schemaVersion, old.isAsync, old.compressionAlgorithm, old.options)
   }
 }
