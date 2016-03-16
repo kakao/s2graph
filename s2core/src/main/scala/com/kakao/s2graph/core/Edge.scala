@@ -135,8 +135,10 @@ case class Edge(srcVertex: Vertex,
   def props = propsWithTs.mapValues(_.innerVal)
 
   def relatedEdges = {
-    if (labelWithDir.isDirected) List(this, duplicateEdge)
-    else {
+    if (labelWithDir.isDirected) {
+      val skipReverse = label.extraOptions.get("skipReverse").map(_.as[Boolean]).getOrElse(false)
+      if (skipReverse) List(this) else List(this, duplicateEdge)
+    } else {
       val outDir = labelWithDir.copy(dir = GraphUtil.directions("out"))
       val base = copy(labelWithDir = outDir)
       List(base, base.reverseSrcTgtEdge)

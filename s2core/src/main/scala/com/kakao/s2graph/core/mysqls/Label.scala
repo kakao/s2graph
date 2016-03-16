@@ -4,7 +4,7 @@ import com.kakao.s2graph.core.GraphExceptions.ModelNotFoundException
 import com.kakao.s2graph.core.Management.JsonModel.{Index, Prop}
 import com.kakao.s2graph.core.utils.logger
 import com.kakao.s2graph.core.{GraphUtil, JSONParser, Management}
-import play.api.libs.json.Json
+import play.api.libs.json.{JsObject, JsValue, Json}
 import scalikejdbc._
 
 object Label extends Model[Label] {
@@ -16,7 +16,8 @@ object Label extends Model[Label] {
       rs.int("src_service_id"), rs.string("src_column_name"), rs.string("src_column_type"),
       rs.int("tgt_service_id"), rs.string("tgt_column_name"), rs.string("tgt_column_type"),
       rs.boolean("is_directed"), rs.string("service_name"), rs.int("service_id"), rs.string("consistency_level"),
-      rs.string("hbase_table_name"), rs.intOpt("hbase_table_ttl"), rs.string("schema_version"), rs.boolean("is_async"), rs.string("compressionAlgorithm"))
+      rs.string("hbase_table_name"), rs.intOpt("hbase_table_ttl"), rs.string("schema_version"), rs.boolean("is_async"),
+      rs.string("compressionAlgorithm"), rs.stringOpt("options"))
   }
 
   def deleteAll(label: Label)(implicit session: DBSession) = {
@@ -53,17 +54,19 @@ object Label extends Model[Label] {
              hTableTTL: Option[Int],
              schemaVersion: String,
              isAsync: Boolean,
-             compressionAlgorithm: String)(implicit session: DBSession = AutoSession) = {
+             compressionAlgorithm: String,
+             options: Option[String])(implicit session: DBSession = AutoSession) = {
     sql"""
     	insert into labels(label,
     src_service_id, src_column_name, src_column_type,
     tgt_service_id, tgt_column_name, tgt_column_type,
-    is_directed, service_name, service_id, consistency_level, hbase_table_name, hbase_table_ttl, schema_version, is_async, compressionAlgorithm)
+    is_directed, service_name, service_id, consistency_level, hbase_table_name, hbase_table_ttl, schema_version, is_async,
+    compressionAlgorithm, options)
     	values (${label},
     ${srcServiceId}, ${srcColumnName}, ${srcColumnType},
     ${tgtServiceId}, ${tgtColumnName}, ${tgtColumnType},
     ${isDirected}, ${serviceName}, ${serviceId}, ${consistencyLevel}, ${hTableName}, ${hTableTTL},
-    ${schemaVersion}, ${isAsync}, ${compressionAlgorithm})
+    ${schemaVersion}, ${isAsync}, ${compressionAlgorithm}, ${options})
     """
       .updateAndReturnGeneratedKey.apply()
   }
@@ -137,7 +140,8 @@ object Label extends Model[Label] {
                 hTableTTL: Option[Int],
                 schemaVersion: String,
                 isAsync: Boolean,
-                compressionAlgorithm: String)(implicit session: DBSession = AutoSession): Label = {
+                compressionAlgorithm: String,
+                options: Option[String])(implicit session: DBSession = AutoSession): Label = {
 
     val srcServiceOpt = Service.findByName(srcServiceName, useCache = false)
     val tgtServiceOpt = Service.findByName(tgtServiceName, useCache = false)
@@ -167,7 +171,8 @@ object Label extends Model[Label] {
 
           val createdId = insert(labelName, srcServiceId, srcColumnName, srcColumnType,
             tgtServiceId, tgtColumnName, tgtColumnType, isDirected, serviceName, serviceId, consistencyLevel,
-            hTableName.getOrElse(service.hTableName), hTableTTL.orElse(service.hTableTTL), schemaVersion, isAsync, compressionAlgorithm).toInt
+            hTableName.getOrElse(service.hTableName), hTableTTL.orElse(service.hTableTTL), schemaVersion, isAsync,
+            compressionAlgorithm, options).toInt
 
           val labelMetaMap = metaProps.map { case Prop(propName, defaultValue, dataType) =>
             val labelMeta = LabelMeta.findOrInsert(createdId, propName, defaultValue, dataType)
@@ -243,7 +248,8 @@ case class Label(id: Option[Int], label: String,
                  isDirected: Boolean = true, serviceName: String, serviceId: Int, consistencyLevel: String = "strong",
                  hTableName: String, hTableTTL: Option[Int],
                  schemaVersion: String, isAsync: Boolean = false,
-                 compressionAlgorithm: String) extends JSONParser {
+                 compressionAlgorithm: String,
+                 options: Option[String]) extends JSONParser {
   def metas = LabelMeta.findAllByLabelId(id.get)
 
   def metaSeqsToNames = metas.map(x => (x.seq, x.name)) toMap
@@ -304,6 +310,11 @@ case class Label(id: Option[Int], label: String,
     jsValue <- innerValToJsValue(toInnerVal(prop.defaultValue, prop.dataType, schemaVersion), prop.dataType)
   } yield prop.name -> jsValue).toMap
 
+  lazy val extraOptions: Map[String, JsValue] = options match {
+    case None => Map.empty
+    case Some(v) => Json.parse(v).asOpt[JsObject].map { obj => obj.fields.toMap }.getOrElse(Map.empty)
+  }
+
   def srcColumnWithDir(dir: Int) = {
     if (dir == GraphUtil.directions("out")) srcColumn else tgtColumn
   }
@@ -334,26 +345,11 @@ case class Label(id: Option[Int], label: String,
     metaProps
   }
 
-  //  def srcColumnInnerVal(jsValue: JsValue) = {
-  //    jsValueToInnerVal(jsValue, srcColumnType, version)
-  //  }
-  //  def tgtColumnInnerVal(jsValue: JsValue) = {
-  //    jsValueToInnerVal(jsValue, tgtColumnType, version)
-  //  }
-
   override def toString(): String = {
     val orderByKeys = LabelMeta.findAllByLabelId(id.get)
     super.toString() + orderByKeys.toString()
   }
 
-  //  def findLabelIndexSeq(scoring: List[(Byte, Double)]): Byte = {
-  //    if (scoring.isEmpty) LabelIndex.defaultSeq
-  //    else {
-  //      LabelIndex.findByLabelIdAndSeqs(id.get, scoring.map(_._1).sorted).map(_.seq).getOrElse(LabelIndex.defaultSeq)
-  //
-  ////      LabelIndex.findByLabelIdAndSeqs(id.get, scoring.map(_._1).sorted).map(_.seq).getOrElse(LabelIndex.defaultSeq)
-  //    }
-  //  }
   lazy val toJson = Json.obj("labelName" -> label,
     "from" -> srcColumn.toJson, "to" -> tgtColumn.toJson,
     "isDirected" -> isDirected,
