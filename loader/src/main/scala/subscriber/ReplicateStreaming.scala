@@ -5,7 +5,6 @@ import com.typesafe.config.ConfigFactory
 import kafka.serializer.StringDecoder
 import org.apache.spark.streaming.Durations._
 import org.apache.spark.streaming.kafka.{HasOffsetRanges, StreamHelper}
-import play.api.libs.json.{JsObject, Json}
 import s2.spark.{HashMapParam, SparkApp}
 
 import scala.collection.mutable.{HashMap => MutableHashMap}
@@ -26,33 +25,6 @@ object ReplicateStreaming extends SparkApp {
     "zookeeper.connection.timeout.ms" -> "10000"
   )
   val streamHelper = StreamHelper(kafkaParam)
-
-  def parseReplicationLog(line: String): Option[String] = {
-    val sp = GraphUtil.split(line)
-    val prop = if (sp.length > 6) sp(6) else "{}"
-    val jsProps = Json.parse(prop)
-    (jsProps \ "_rep_").asOpt[Boolean] match {
-      case Some(b) =>
-        if (b) {
-          // drop
-          None
-        } else {
-          // replicate
-          logError(s"Invalid replication flag.")
-          None
-        }
-      case None =>
-        // replicate
-        val newProps = jsProps.as[JsObject] ++ Json.obj("_rep_" -> true)
-        val newSp = if (sp.length > 6) {
-          sp(6) = newProps.toString()
-          sp
-        } else {
-          sp ++ Array(newProps.toString())
-        }
-        Option(newSp.mkString("\t"))
-    }
-  }
 
   private val builder = new com.ning.http.client.AsyncHttpClientConfig.Builder()
   private val client = new play.api.libs.ws.ning.NingWSClient(builder.build)
@@ -96,13 +68,10 @@ object ReplicateStreaming extends SparkApp {
       val nextRdd = {
         rdd.repartition(sc.defaultParallelism).foreachPartition { part =>
           // convert to element
-          /*
-          1457927050825	insert	e	kshp1wKyK25A_160209155438392	96	toros_1boon_article_personal	{"score":0.0,"meta_key":"56c2e02ca2b8815f0863903d"}
-           */
           val items = for {
             (k, v) <- part
             line <- GraphUtil.parseString(v)
-            replLog <- parseReplicationLog(line)
+            replLog <- ReplicateFunctions.parseReplicationLog(line)
           } yield replLog
 
           // send to graph
