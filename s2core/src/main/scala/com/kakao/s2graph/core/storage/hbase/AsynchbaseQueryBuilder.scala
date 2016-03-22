@@ -7,7 +7,7 @@ import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.mysqls.LabelMeta
 import com.kakao.s2graph.core.storage.QueryBuilder
 import com.kakao.s2graph.core.types._
-import com.kakao.s2graph.core.utils.{Extensions, logger}
+import com.kakao.s2graph.core.utils.{DeferCache, Extensions, logger}
 import com.stumbleupon.async.Deferred
 import org.apache.hadoop.hbase.util.Bytes
 import org.hbase.async.GetRequest
@@ -26,14 +26,15 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
   val expreAfterWrite = storage.config.getInt("future.cache.expire.after.write")
   val expreAfterAccess = storage.config.getInt("future.cache.expire.after.access")
 
-  val futureCache = CacheBuilder.newBuilder()
-//  .recordStats()
-  .initialCapacity(maxSize)
-  .concurrencyLevel(Runtime.getRuntime.availableProcessors())
-  .expireAfterWrite(expreAfterWrite, TimeUnit.MILLISECONDS)
-  .expireAfterAccess(expreAfterAccess, TimeUnit.MILLISECONDS)
-//  .weakKeys()
-  .maximumSize(maxSize).build[java.lang.Long, (Long, Deferred[QueryRequestWithResult])]()
+  val futureCache = new DeferCache[QueryResult](storage.config)(ec)
+//  val futureCache = CacheBuilder.newBuilder()
+////  .recordStats()
+//  .initialCapacity(maxSize)
+//  .concurrencyLevel(Runtime.getRuntime.availableProcessors())
+//  .expireAfterWrite(expreAfterWrite, TimeUnit.MILLISECONDS)
+//  .expireAfterAccess(expreAfterAccess, TimeUnit.MILLISECONDS)
+////  .weakKeys()
+//  .maximumSize(maxSize).build[java.lang.Long, (Long, Deferred[QueryRequestWithResult])]()
 
   //  val scheduleTime = 60L * 60
 //  val scheduleTime = 60
@@ -115,38 +116,7 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
                      prevStepScore: Double,
                      isInnerCall: Boolean,
                      parentEdges: Seq[EdgeWithScore]): Deferred[QueryRequestWithResult] = {
-    @tailrec
-    def randomInt(sampleNumber: Int, range: Int, set: Set[Int] = Set.empty[Int]): Set[Int] = {
-      if (range < sampleNumber || set.size == sampleNumber) set
-      else randomInt(sampleNumber, range, set + Random.nextInt(range))
-    }
-
-    def sample(edges: Seq[EdgeWithScore], n: Int): Seq[EdgeWithScore] = {
-      if (edges.size <= n){
-        edges
-      }else{
-        val plainEdges = if (queryRequest.queryParam.offset == 0) {
-          edges.tail
-        } else edges
-
-        val randoms = randomInt(n, plainEdges.size)
-        var samples = List.empty[EdgeWithScore]
-        var idx = 0
-        plainEdges.foreach { e =>
-          if (randoms.contains(idx)) samples = e :: samples
-          idx += 1
-        }
-        samples
-      }
-
-    }
-    def normalize(edgeWithScores: Seq[EdgeWithScore]): Seq[EdgeWithScore] = {
-      val sum = edgeWithScores.foldLeft(0.0) { case (acc, cur) => acc + cur.score }
-      edgeWithScores.map { edgeWithScore =>
-        edgeWithScore.copy(score = edgeWithScore.score / sum)
-      }
-    }
-    def fetchInner(queryParam: QueryParam, request: GetRequest) = {
+    def fetchInner(queryParam: QueryParam, request: GetRequest): Deferred[QueryResult] = {
       storage.client(queryParam.label.hbaseZkAddr).get(request) withCallback { kvs =>
         val edgeWithScores = storage.toEdges(kvs.toSeq, queryRequest.queryParam, prevStepScore, isInnerCall, parentEdges)
 
@@ -155,75 +125,27 @@ class AsynchbaseQueryBuilder(storage: AsynchbaseStorage)(implicit ec: ExecutionC
           else edgeWithScores
 
         val resultEdgesWithScores =
-          if (queryRequest.queryParam.sample >= 0 ) sample(normalized, queryRequest.queryParam.sample)
+          if (queryRequest.queryParam.sample >= 0 ) sample(queryRequest, normalized, queryRequest.queryParam.sample)
           else normalized
 
-        QueryRequestWithResult(queryRequest, QueryResult(resultEdgesWithScores))
+        QueryResult(resultEdgesWithScores)
       } recoverWith { ex =>
         logger.error(s"fetchQueryParam failed. fallback return.", ex)
-        QueryRequestWithResult(queryRequest, QueryResult(isFailure = true))
+        QueryResult(isFailure = true)
       }
     }
-    def checkAndExpire(queryParam: QueryParam,
-                       request: GetRequest,
-                       cacheKey: Long,
-                       cacheTTL: Long,
-                       cachedAt: Long,
-                       defer: Deferred[QueryRequestWithResult]): Deferred[QueryRequestWithResult] = {
-      if (System.currentTimeMillis() >= cachedAt + cacheTTL) {
-        // future is too old. so need to expire and fetch new data from storage.
-        futureCache.asMap().remove(cacheKey)
-        val newPromise = new Deferred[QueryRequestWithResult]()
-        futureCache.asMap().putIfAbsent(cacheKey, (System.currentTimeMillis(), newPromise)) match {
-          case null =>
-            // only one thread succeed to come here concurrently
-            // initiate fetch to storage then add callback on complete to finish promise.
-            fetchInner(queryParam, request) withCallback { queryRequestWithResult =>
-              newPromise.callback(queryRequestWithResult)
-              queryRequestWithResult
-            }
-            newPromise
-          case (cachedAt, oldDefer) => oldDefer
-        }
-      } else {
-        // future is not to old so reuse it.
-        defer
-      }
-    }
-
     val queryParam = queryRequest.queryParam
     val cacheTTL = queryParam.cacheTTLInMillis
     val request = buildRequest(queryRequest)
+
     val defer =
       if (cacheTTL <= 0) fetchInner(queryParam, request)
       else {
         val cacheKeyBytes = Bytes.add(queryRequest.query.cacheKeyBytes, toCacheKeyBytes(request))
         val cacheKey = queryParam.toCacheKey(cacheKeyBytes)
-
-        val cacheVal = futureCache.getIfPresent(cacheKey)
-        cacheVal match {
-          case null =>
-            // here there is no promise set up for this cacheKey so we need to set promise on future cache.
-            val promise = new Deferred[QueryRequestWithResult]()
-            val now = System.currentTimeMillis()
-            val (cachedAt, defer) = futureCache.asMap().putIfAbsent(cacheKey, (now, promise)) match {
-              case null =>
-                fetchInner(queryParam, request) withCallback { queryRequestWithResult =>
-                  promise.callback(queryRequestWithResult)
-                  queryRequestWithResult
-                }
-                (now, promise)
-              case oldVal => oldVal
-            }
-            checkAndExpire(queryParam, request, cacheKey, cacheTTL, cachedAt, defer)
-          case (cachedAt, defer) =>
-            checkAndExpire(queryParam, request, cacheKey, cacheTTL, cachedAt, defer)
-        }
+        futureCache.getOrElseUpdate(cacheKey, cacheTTL)(fetchInner(queryParam, request))
       }
-
-    defer.withCallback { queryRequestWithResult =>
-      queryRequestWithResult.copy(queryRequest = queryRequest)
-    }
+    defer withCallback { queryResult => QueryRequestWithResult(queryRequest, queryResult)}
   }
 
 
