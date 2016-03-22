@@ -1,21 +1,22 @@
 package subscriber
 
 import com.kakao.s2graph.core.GraphUtil
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{ConfigException, ConfigFactory}
 import kafka.producer.KeyedMessage
 import kafka.serializer.StringDecoder
 import org.apache.spark.Accumulable
 import org.apache.spark.streaming.Durations._
 import org.apache.spark.streaming.kafka.{HasOffsetRanges, StreamHelper}
 import play.api.libs.json.JsArray
-import s2.spark.{WithKafka, HashMapParam, SparkApp}
+import s2.spark.{HashMapParam, SparkApp, WithKafka}
 
 import scala.collection.mutable.{HashMap => MutableHashMap}
+import scala.concurrent.Await
 import scala.concurrent.duration._
-import scala.concurrent.{Await, TimeoutException}
+import scala.util.Try
 
 object ReplicateStreaming extends SparkApp with WithKafka {
-  lazy val className = getClass.getName.stripSuffix("$")
+  val className = getClass.getName.stripSuffix("$")
   val config = ConfigFactory.load()
 
   val inputTopics = Set(config.getString("kafka.topic.graph"), config.getString("kafka.topic.graph-async"))
@@ -35,11 +36,11 @@ object ReplicateStreaming extends SparkApp with WithKafka {
 
   val apiPath = config.getString("s2graph.api-path")
   val batchSize = config.getInt("s2graph.batch-size")
-  lazy val isFailRetryer = if ( config.hasPath("s2graph.fail-try") ) config.getBoolean("s2graph.fail-try") else false
-  lazy val isReplicator = !isFailRetryer
+  val isFailRetryer = Try { config.getBoolean("s2graph.fail-try") }.recover { case ex: ConfigException.Missing => false }.get
+  val isReplicator = !isFailRetryer
 
-  lazy val failedTopic = if ( config.hasPath("kafka.topic.failed") ) config.getString("kafka.topic.failed") else ""
-  lazy val failedProducer = getProducer[String, String](brokerList)
+  val failedTopic = config.getString("kafka.topic.failed")
+  val failedProducer = getProducer[String, String](brokerList)
 
   def toKeyedMessage(lines: Seq[String]) = lines.map{ line => new KeyedMessage[String, String](failedTopic, line) }
 
