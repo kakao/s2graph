@@ -7,6 +7,8 @@ import com.kakao.s2graph.core.types._
 import com.kakao.s2graph.core.utils.logger
 import org.apache.hadoop.hbase.util.Bytes
 
+import scala.collection.mutable
+
 class IndexEdgeDeserializable extends HDeserializable[IndexEdge] {
 
   import StorageDeserializable._
@@ -71,14 +73,22 @@ class IndexEdgeDeserializable extends HDeserializable[IndexEdge] {
       if (kv.qualifier.isEmpty) parseDegreeQualifier(kv, version)
       else parseQualifier(kv, version)
 
-    val (props, _) = if (op == GraphUtil.operations("incrementCount")) {
+    var tgtVertexId = tgtVertexIdRaw
+    var tsOpt: Option[Long] = None
+    val mergedProps = new mutable.HashMap[Byte, InnerValLike]()
+
+
+    if (op == GraphUtil.operations("incrementCount")) {
       val countVal = Bytes.toLong(kv.value)
-      val dummyProps = Array(LabelMeta.countSeq -> InnerVal.withLong(countVal, version))
-      (dummyProps, 8)
+      mergedProps += (LabelMeta.countSeq -> InnerVal.withLong(countVal, version))
     } else if (kv.qualifier.isEmpty) {
-      parseDegreeValue(kv, version)
+
     } else {
-      parseValue(kv, version)
+      val (props, _) = bytesToKeyValues(kv.value, 0, kv.value.length, version)
+      props.foreach { case (k, v) =>
+        if (k == LabelMeta.timeStampSeq) tsOpt = Option(v.toString().toLong)
+        mergedProps += (k -> v)
+      }
     }
 
     val index = queryParam.label.indicesMap.getOrElse(labelIdxSeq, throw new RuntimeException("invalid index seq"))
@@ -86,31 +96,36 @@ class IndexEdgeDeserializable extends HDeserializable[IndexEdge] {
 
     //    assert(kv.qualifier.nonEmpty && index.metaSeqs.size == idxPropsRaw.size)
 
-    val idxProps = for {
+    for {
       (seq, (k, v)) <- index.metaSeqs.zip(idxPropsRaw)
-    } yield {
-        if (k == LabelMeta.degreeSeq) k -> v
-        else seq -> v
+    } {
+        if (seq == LabelMeta.toSeq) tgtVertexId = TargetVertexId(HBaseType.DEFAULT_COL_ID, v)
+        if (seq == LabelMeta.timeStampSeq) tsOpt = Option(v.toString().toLong)
+
+        if (k == LabelMeta.degreeSeq) mergedProps += k -> v
+        else mergedProps += seq -> v
       }
 
-    val idxPropsMap = idxProps.toMap
-    val tgtVertexId = if (tgtVertexIdInQualifier) {
-      idxPropsMap.get(LabelMeta.toSeq) match {
-        case None => tgtVertexIdRaw
-        case Some(vId) => TargetVertexId(HBaseType.DEFAULT_COL_ID, vId)
-      }
-    } else tgtVertexIdRaw
+//    val idxPropsMap = idxProps.toMap
+//    val tgtVertexId = if (tgtVertexIdInQualifier) {
+//      idxPropsMap.get(LabelMeta.toSeq) match {
+//        case None => tgtVertexIdRaw
+//        case Some(vId) => TargetVertexId(HBaseType.DEFAULT_COL_ID, vId)
+//      }
+//    } else tgtVertexIdRaw
 
-    val _mergedProps = (idxProps ++ props).toMap
-    val mergedProps =
-      if (_mergedProps.contains(LabelMeta.timeStampSeq)) _mergedProps
-      else _mergedProps + (LabelMeta.timeStampSeq -> InnerVal.withLong(kv.timestamp, version))
-
-//    logger.error(s"$mergedProps")
-//    val ts = mergedProps(LabelMeta.timeStampSeq).toString().toLong
-
-    val ts = kv.timestamp
-    IndexEdge(Vertex(srcVertexId, ts), Vertex(tgtVertexId, ts), labelWithDir, op, ts, labelIdxSeq, mergedProps)
+//    val _mergedProps = (idxProps ++ props).toMap
+//    val mergedProps =
+//      if (_mergedProps.contains(LabelMeta.timeStampSeq)) _mergedProps
+//      else _mergedProps + (LabelMeta.timeStampSeq -> InnerVal.withLong(kv.timestamp, version))
+//
+////    logger.error(s"$mergedProps")
+////    val ts = mergedProps(LabelMeta.timeStampSeq).toString().toLong
+//
+//    val ts = kv.timestamp
+    val ts = tsOpt.getOrElse(kv.timestamp)
+    mergedProps += LabelMeta.timeStampSeq -> InnerVal.withLong(ts, version)
+    IndexEdge(Vertex(srcVertexId, ts), Vertex(tgtVertexId, ts), labelWithDir, op, ts, labelIdxSeq, mergedProps.toMap)
   }
 }
 
