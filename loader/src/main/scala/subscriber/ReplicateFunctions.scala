@@ -29,4 +29,30 @@ object ReplicateFunctions {
         Option(newSp.mkString("\t"))
     }
   }
+
+  def parseRetryLog(line: String): Option[String] = {
+    val sp = GraphUtil.split(line)
+    val prop = if (sp.length > 6) sp(6) else "{}"
+    val jsProps = Json.parse(prop)
+    (jsProps \ "_retry_").asOpt[Boolean] match {
+      case Some(b) =>
+        if (b) {
+          // drop
+          None
+        } else {
+          // error
+          throw new RuntimeException(s"Invalid retry flag: $line")
+        }
+      case None =>
+        // replicate
+        val newProps = jsProps.as[JsObject] ++ Json.obj( "_retry_" -> true )
+        val newSp = if (sp.length > 6) {
+          sp(6) = newProps.toString()
+          sp
+        } else {
+          sp ++ Array(newProps.toString())
+        }
+        Option(newSp.mkString("\t"))
+    }
+  }
 }
