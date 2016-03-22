@@ -4,9 +4,10 @@ import com.google.common.cache.Cache
 import com.kakao.s2graph.core._
 import com.kakao.s2graph.core.types.{LabelWithDirection, VertexId}
 import com.kakao.s2graph.core.utils.logger
+import scala.annotation.tailrec
 import scala.collection.{Map, Seq}
 import scala.concurrent.{Future, ExecutionContext}
-import scala.util.Try
+import scala.util.{Random, Try}
 
 abstract class QueryBuilder[R, T](storage: Storage)(implicit ec: ExecutionContext) {
 
@@ -100,5 +101,37 @@ abstract class QueryBuilder[R, T](storage: Storage)(implicit ec: ExecutionContex
         logger.error(s"getEdgesAsync: $e", e)
         fallback
     } get
+  }
+
+  @tailrec
+  final def randomInt(sampleNumber: Int, range: Int, set: Set[Int] = Set.empty[Int]): Set[Int] = {
+    if (range < sampleNumber || set.size == sampleNumber) set
+    else randomInt(sampleNumber, range, set + Random.nextInt(range))
+  }
+
+  protected def sample(queryRequest: QueryRequest, edges: Seq[EdgeWithScore], n: Int): Seq[EdgeWithScore] = {
+    if (edges.size <= n){
+      edges
+    }else{
+      val plainEdges = if (queryRequest.queryParam.offset == 0) {
+        edges.tail
+      } else edges
+
+      val randoms = randomInt(n, plainEdges.size)
+      var samples = List.empty[EdgeWithScore]
+      var idx = 0
+      plainEdges.foreach { e =>
+        if (randoms.contains(idx)) samples = e :: samples
+        idx += 1
+      }
+      samples.toSeq
+    }
+  }
+
+  protected def normalize(edgeWithScores: Seq[EdgeWithScore]): Seq[EdgeWithScore] = {
+    val sum = edgeWithScores.foldLeft(0.0) { case (acc, cur) => acc + cur.score }
+    edgeWithScores.map { edgeWithScore =>
+      edgeWithScore.copy(score = edgeWithScore.score / sum)
+    }
   }
 }
