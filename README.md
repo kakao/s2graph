@@ -1,5 +1,3 @@
-This code base is retained for historical interest only, please visit Apache Incubator Repo for latest one https://github.com/apache/incubator-s2graph
-
 **Apache S2Graph**
 ===================
 
