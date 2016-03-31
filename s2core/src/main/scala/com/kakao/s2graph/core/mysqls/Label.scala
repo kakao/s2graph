@@ -221,8 +221,7 @@ object Label extends Model[Label] {
     val cnt = sql"""update labels set hbase_table_name = $newHTableName where label = $labelName""".update().apply()
     val label = Label.findByName(labelName, useCache = false).get
 
-    val cacheKeys = List(s"id=${label.id}", s"label=${label.label}")
-    cacheKeys.foreach { key =>
+    cacheKeys(label).foreach { key =>
       expireCache(key)
       expireCaches(key)
     }
@@ -233,12 +232,23 @@ object Label extends Model[Label] {
     val label = findById(id)
     logger.info(s"delete label: $label")
     val cnt = sql"""delete from labels where id = ${label.id.get}""".update().apply()
-    val cacheKeys = List(s"id=$id", s"label=${label.label}")
-    cacheKeys.foreach { key =>
+    cacheKeys(label).foreach { key =>
       expireCache(key)
       expireCaches(key)
     }
     cnt
+  }
+
+  def cacheKeys(label: Label) = Seq(
+    s"label=${label.label}",
+    s"id=${label.id.get}"
+  )
+
+  def expire(label: Label): Unit = {
+    cacheKeys(label) foreach { key =>
+      expireCache(key)
+      expireCaches(key)
+    }
   }
 }
 

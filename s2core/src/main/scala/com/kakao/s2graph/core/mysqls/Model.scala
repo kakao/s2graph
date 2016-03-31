@@ -11,7 +11,7 @@ import scala.language.{higherKinds, implicitConversions}
 import scala.util.{Failure, Try}
 
 object Model {
-  var maxSize = 10000
+  var maxSize = 100000
   var ttl = 60
   val numOfThread = Runtime.getRuntime.availableProcessors()
   val threadPool = Executors.newFixedThreadPool(numOfThread)

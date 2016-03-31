@@ -56,15 +56,12 @@ object LabelIndex extends Model[LabelIndex] {
         val orders = findByLabelIdAll(labelId, false)
         val seq = (orders.size + 1).toByte
         assert(seq <= MaxOrderSeq)
-        val createdId = insert(labelId, indexName, seq, metaSeqs, formulars)
-        val cacheKeys = List(s"labelId=$labelId:seq=$seq",
-          s"labelId=$labelId:seqs=$metaSeqs", s"labelId=$labelId:seq=$seq", s"id=$createdId")
-        cacheKeys.foreach { key =>
-          expireCache(key)
-          expireCaches(key)
-        }
 
-        findByLabelIdAndSeq(labelId, seq).get
+        val id = insert(labelId, indexName, seq, metaSeqs, formulars)
+        val index = findById(id.toInt)
+        expire(index)
+
+        findById(id.toInt)
     }
   }
 
@@ -97,11 +94,7 @@ object LabelIndex extends Model[LabelIndex] {
     val (labelId, seq) = (labelIndex.labelId, labelIndex.seq)
     sql"""delete from label_indices where id = ${id}""".execute.apply()
 
-    val cacheKeys = List(s"id=$id", s"labelId=$labelId", s"labelId=$labelId:seq=$seq", s"labelId=$labelId:seqs=$seqs")
-    cacheKeys.foreach { key =>
-      expireCache(key)
-      expireCaches(key)
-    }
+    expire(labelIndex)
   }
 
   def findAll()(implicit session: DBSession = AutoSession) = {
@@ -122,6 +115,20 @@ object LabelIndex extends Model[LabelIndex] {
       val cacheKey = s"labelId=${labelId}"
       (cacheKey -> ls)
     }.toList)
+  }
+
+  def cacheKeys(index: LabelIndex) = Seq(
+    s"id=${index.id.get}",
+    s"labelId=${index.labelId}",
+    s"labelId=${index.labelId}:seq=${index.seq}",
+    s"labelId=${index.labelId}:seqs=${index.metaSeqs.mkString(",")}"
+  )
+
+  def expire(index: LabelIndex): Unit = {
+    cacheKeys(index).foreach { key =>
+      expireCache(key)
+      expireCaches(key)
+    }
   }
 }
 

@@ -42,6 +42,9 @@ class RestHandler(graph: Graph)(implicit ec: ExecutionContext) {
         case "/graphs/getEdgesGroupedExcluded" => HandlerResult(getEdgesExcludedAsync(jsQuery)(PostProcess.summarizeWithListExclude))
         case "/graphs/getEdgesGroupedExcludedFormatted" => HandlerResult(getEdgesExcludedAsync(jsQuery)(PostProcess.summarizeWithListExcludeFormatted))
         case "/graphs/getVertices" => HandlerResult(getVertices(jsQuery))
+        case uri if uri.startsWith("/graphs/invalidateCache") =>
+          val Array(labelName) = uri.split("/").takeRight(1)
+          HandlerResult(Future.successful(Json.obj( "message" ->graph.invalidateCache(labelName))))
         case uri if uri.startsWith("/graphs/experiment") =>
           val Array(accessToken, experimentName, uuid) = uri.split("/").takeRight(3)
           experiment(jsQuery, accessToken, experimentName, uuid, impKeyOpt)
