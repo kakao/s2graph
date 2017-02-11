@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+
 curl -XPOST localhost:9000/graphs/edges/insert -H 'Content-Type: Application/json' -d '
 [
 {"timestamp": 1447493110829, "from": 7007, "to": "700710007abc", "label": "s2graph_label_test_2", "props": {"time": 10}}
